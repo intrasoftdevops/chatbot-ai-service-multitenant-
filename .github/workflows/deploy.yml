@@ -1,0 +1,49 @@
+name: Deploy chatbot-ai-service (dev/prod)
+
+on:
+  push:
+    branches: [ dev, main ]
+
+env:
+  GCP_PROJECT_ID: political-referrals
+  GCP_REGION: us-central1
+
+jobs:
+  deploy:
+    name: Deploy chatbot (${{ matrix.env_name }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - branch: dev
+            env_name: dev
+            service_name: chatbot-ai-service-dev
+            runtime_env: ENVIRONMENT=development
+          - branch: main
+            env_name: prod
+            service_name: chatbot-ai-service-prod
+            runtime_env: ENVIRONMENT=production
+    steps:
+      - name: Checkout
+        if: github.ref_name == matrix.branch
+        uses: actions/checkout@v4
+
+      - name: Set up gcloud
+        if: github.ref_name == matrix.branch
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          export_default_credentials: true
+
+      - name: Deploy ${{ matrix.service_name }}
+        if: github.ref_name == matrix.branch
+        working-directory: .
+        run: |
+          gcloud run deploy "${{ matrix.service_name }}" \
+            --project "${{ env.GCP_PROJECT_ID }}" \
+            --region "${{ env.GCP_REGION }}" \
+            --source . \
+            --allow-unauthenticated \
+            --set-env-vars "${{ matrix.runtime_env }}"
+

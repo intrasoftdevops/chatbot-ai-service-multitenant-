@@ -1,0 +1,40 @@
+# FastAPI y dependencias web
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# Firebase
+firebase-admin==6.4.0
+google-cloud-firestore==2.13.1
+
+# Google AI (Gemini)
+# Nota: llama-index-llms-gemini 0.1.4 requiere google-generativeai < 0.4.0
+google-generativeai==0.3.2
+llama-index==0.9.15
+llama-index-llms-gemini==0.1.2
+llama-index-embeddings-gemini==0.1.2
+
+# Document processing
+pypdf==4.0.1
+python-docx==1.1.0
+
+# HTTP Client
+httpx==0.25.2
+requests==2.31.0
+
+# Cache
+redis==5.0.1
+
+# Logging y monitoreo
+python-json-logger==2.0.7
+structlog==23.2.0
+
+# Testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+
+# Utilidades
+python-dotenv==1.0.0
+typing-extensions==4.8.0
+
