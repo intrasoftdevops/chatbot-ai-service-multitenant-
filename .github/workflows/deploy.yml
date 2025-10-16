@@ -43,12 +43,6 @@ jobs:
             exit 1
           fi
           
-          # Verificar que el secret no es solo asteriscos
-          if [[ "${{ secrets.GCP_SA_KEY }}" == *"***"* ]] && [[ "${{ secrets.GCP_SA_KEY }}" != *"{"* ]]; then
-            echo "❌ Error: GCP_SA_KEY secret appears to be masked (***) - please check the secret configuration"
-            exit 1
-          fi
-          
           # Crear el archivo de credenciales
           echo "${{ secrets.GCP_SA_KEY }}" > $RUNNER_TEMP/gcp-key.json
           
