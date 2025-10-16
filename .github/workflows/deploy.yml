@@ -57,6 +57,23 @@ jobs:
           tail -c 50 "$RUNNER_TEMP/gcp-key.json"
           echo ""
           
+          # Debug: Verificar la clave privada específicamente
+          echo "📋 Private key section:"
+          jq -r '.private_key' "$RUNNER_TEMP/gcp-key.json" | head -c 100
+          echo ""
+          echo "📋 Private key length: $(jq -r '.private_key' "$RUNNER_TEMP/gcp-key.json" | wc -c) chars"
+          
+          # Verificar que la clave privada tiene el formato correcto
+          PRIVATE_KEY=$(jq -r '.private_key' "$RUNNER_TEMP/gcp-key.json")
+          if [[ ! "$PRIVATE_KEY" == *"-----BEGIN PRIVATE KEY-----"* ]]; then
+            echo "❌ Error: Private key missing BEGIN marker"
+            exit 1
+          fi
+          if [[ ! "$PRIVATE_KEY" == *"-----END PRIVATE KEY-----"* ]]; then
+            echo "❌ Error: Private key missing END marker"
+            exit 1
+          fi
+          
           # Verificar que el JSON es válido
           if ! jq empty "$RUNNER_TEMP/gcp-key.json" 2>/dev/null; then
             echo "❌ Error: Invalid JSON in gcp-key.json"
