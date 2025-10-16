@@ -37,12 +37,6 @@ jobs:
       - name: Activate service account (gcloud)
         if: github.ref_name == matrix.branch
         run: |
-          # Verificar que el secret existe
-          if [ -z "${{ secrets.GCP_SA_KEY }}" ]; then
-            echo "❌ Error: GCP_SA_KEY secret is not set or is empty"
-            exit 1
-          fi
-          
           # Crear el archivo de credenciales
           echo "${{ secrets.GCP_SA_KEY }}" > $RUNNER_TEMP/gcp-key.json
           
