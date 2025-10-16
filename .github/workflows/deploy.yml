@@ -37,8 +37,10 @@ jobs:
       - name: Activate service account (gcloud)
         if: github.ref_name == matrix.branch
         run: |
-          # Crear el archivo de credenciales
-          echo "${{ secrets.GCP_SA_KEY }}" > $RUNNER_TEMP/gcp-key.json
+          # Crear el archivo de credenciales usando cat para manejar multilinea
+          cat > $RUNNER_TEMP/gcp-key.json << 'EOF'
+          ${{ secrets.GCP_SA_KEY }}
+          EOF
           
           # Verificar que el archivo se creó correctamente
           if [ ! -f "$RUNNER_TEMP/gcp-key.json" ]; then
@@ -46,11 +48,20 @@ jobs:
             exit 1
           fi
           
+          # Debug: Mostrar información del archivo
+          echo "📋 File size: $(wc -c < $RUNNER_TEMP/gcp-key.json) bytes"
+          echo "📋 First 200 chars:"
+          head -c 200 "$RUNNER_TEMP/gcp-key.json"
+          echo ""
+          echo "📋 Last 50 chars:"
+          tail -c 50 "$RUNNER_TEMP/gcp-key.json"
+          echo ""
+          
           # Verificar que el JSON es válido
           if ! jq empty "$RUNNER_TEMP/gcp-key.json" 2>/dev/null; then
             echo "❌ Error: Invalid JSON in gcp-key.json"
-            echo "File content (first 100 chars):"
-            head -c 100 "$RUNNER_TEMP/gcp-key.json"
+            echo "📋 Full file content for debugging:"
+            cat "$RUNNER_TEMP/gcp-key.json"
             exit 1
           fi
           
