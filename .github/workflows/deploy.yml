@@ -78,7 +78,6 @@ jobs:
 
       - name: Deploy ${{ matrix.service_name }}
         if: github.ref_name == matrix.branch
-        working-directory: chatbot-ai-service-multitenant
         run: |
           # Configurar secretos según el entorno
           if [ "${{ matrix.env_name }}" = "dev" ]; then
@@ -93,7 +92,7 @@ jobs:
           gcloud run deploy "${{ matrix.service_name }}" \
             --project "${{ env.GCP_PROJECT_ID }}" \
             --region "${{ env.GCP_REGION }}" \
-            --source . \
+            --source chatbot-ai-service-multitenant \
             --allow-unauthenticated \
             --clear-base-image \
             --set-env-vars "${{ matrix.runtime_env }},FIRESTORE_PROJECT_ID=political-referrals,FIRESTORE_DATABASE_ID=(default),PORT=8000,LOG_LEVEL=INFO" \
