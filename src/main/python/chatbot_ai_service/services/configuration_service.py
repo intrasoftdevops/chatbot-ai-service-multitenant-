@@ -16,6 +16,7 @@ class ConfigurationService:
     
     def __init__(self):
         self.java_service_url = os.getenv("POLITICAL_REFERRALS_SERVICE_URL", "http://localhost:8080")
+        logger.info(f"ConfigurationService inicializado con URL: {self.java_service_url}")
         self._config_cache = {}  # Cache simple de configuraciones
     
     def get_tenant_config(self, tenant_id: str) -> Optional[Dict[str, Any]]:
