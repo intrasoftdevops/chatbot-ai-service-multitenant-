@@ -17,7 +17,7 @@ jobs:
         include:
           - branch: dev
             env_name: dev
-            service_name: chatbot-ai-service-prod
+            service_name: chatbot-ai-service-dev
             runtime_env: ENVIRONMENT=development
           - branch: main
             env_name: prod
