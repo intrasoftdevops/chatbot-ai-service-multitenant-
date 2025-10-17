@@ -10,6 +10,7 @@ import os
 from typing import Dict, Any, Optional
 
 import google.generativeai as genai
+import httpx
 from chatbot_ai_service.services.configuration_service import configuration_service
 from chatbot_ai_service.services.document_context_service import document_context_service
 from chatbot_ai_service.services.session_context_service import session_context_service
@@ -22,17 +23,18 @@ class AIService:
     def __init__(self):
         self.model = None
         self._initialized = False
+        self.api_key = None
     
     def _ensure_model_initialized(self):
         """Inicializa el modelo de forma lazy"""
         if self._initialized:
             return
             
-        api_key = os.getenv("GEMINI_API_KEY")
-        if api_key:
+        self.api_key = os.getenv("GEMINI_API_KEY")
+        if self.api_key:
             try:
                 # Configuración básica para Gemini AI
-                genai.configure(api_key=api_key)
+                genai.configure(api_key=self.api_key)
                 self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
                 logger.info("Modelo Gemini inicializado correctamente")
             except Exception as e:
@@ -43,6 +45,46 @@ class AIService:
             self.model = None
             
         self._initialized = True
+    
+    async def _call_gemini_rest_api(self, prompt: str) -> str:
+        """Llama a Gemini usando REST API en lugar de gRPC"""
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key={self.api_key}"
+            
+            payload = {
+                "contents": [{
+                    "parts": [{
+                        "text": prompt
+                    }]
+                }]
+            }
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(url, json=payload)
+                response.raise_for_status()
+                
+                result = response.json()
+                if 'candidates' in result and len(result['candidates']) > 0:
+                    return result['candidates'][0]['content']['parts'][0]['text']
+                else:
+                    return "No se pudo generar respuesta"
+                    
+        except Exception as e:
+            logger.error(f"Error llamando a Gemini REST API: {str(e)}")
+            return f"Error: {str(e)}"
+    
+    async def _generate_content(self, prompt: str) -> str:
+        """Genera contenido usando Gemini, fallback a REST API si gRPC falla"""
+        try:
+            # Intentar con gRPC primero
+            if self.model:
+                response = self.model.generate_content(prompt)
+                return response.text
+        except Exception as e:
+            logger.warning(f"gRPC falló, usando REST API: {str(e)}")
+        
+        # Fallback a REST API
+        return await self._call_gemini_rest_api(prompt)
     
     async def process_chat_message(self, tenant_id: str, query: str, user_context: Dict[str, Any], session_id: str = None) -> Dict[str, Any]:
         """
@@ -172,9 +214,9 @@ class AIService:
             prompt = self._build_session_prompt(query, user_context, branding_config, session_context)
             
             # Generar respuesta
-            response = self.model.generate_content(prompt)
+            response_text = await self._generate_content(prompt)
             
-            return response.text
+            return response_text
             
         except Exception as e:
             logger.error(f"Error generando respuesta con sesión: {str(e)}")
