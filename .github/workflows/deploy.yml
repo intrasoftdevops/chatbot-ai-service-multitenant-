@@ -1,8 +1,10 @@
-name: Deploy chatbot-ai-service (dev/prod)
+name: Deploy chatbot-ai-service-multitenant (dev/prod)
 
 on:
   push:
     branches: [ dev, main ]
+    paths:
+      - 'chatbot-ai-service-multitenant/**'
 
 env:
   GCP_PROJECT_ID: political-referrals
@@ -10,14 +12,14 @@ env:
 
 jobs:
   deploy:
-    name: Deploy chatbot (${{ matrix.env_name }})
+    name: Deploy chatbot-ai-service (${{ matrix.env_name }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
           - branch: dev
             env_name: dev
-            service_name: chatbot-ai-service-dev
+            service_name: chatbot-ai-service-prod
             runtime_env: ENVIRONMENT=development
           - branch: main
             env_name: prod
@@ -33,17 +35,76 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
-          service_account_key: ${{ secrets.GCP_SA_KEY }}
-          export_default_credentials: true
+
+      - name: Activate service account (gcloud)
+        if: github.ref_name == matrix.branch
+        run: |
+          # Crear el archivo de credenciales usando cat para manejar multilinea
+          cat > $RUNNER_TEMP/gcp-key.json << 'EOF'
+          ${{ secrets.GCP_SA_KEY }}
+          EOF
+          
+          # Verificar que el archivo se creó correctamente
+          if [ ! -f "$RUNNER_TEMP/gcp-key.json" ]; then
+            echo "❌ Error: Failed to create gcp-key.json file"
+            exit 1
+          fi
+          
+          # Verificar que la clave privada tiene el formato correcto
+          PRIVATE_KEY=$(jq -r '.private_key' "$RUNNER_TEMP/gcp-key.json")
+          if [[ ! "$PRIVATE_KEY" == *"-----BEGIN PRIVATE KEY-----"* ]]; then
+            echo "❌ Error: Private key missing BEGIN marker"
+            exit 1
+          fi
+          if [[ ! "$PRIVATE_KEY" == *"-----END PRIVATE KEY-----"* ]]; then
+            echo "❌ Error: Private key missing END marker"
+            exit 1
+          fi
+          
+          # Verificar que el JSON es válido
+          if ! jq empty "$RUNNER_TEMP/gcp-key.json" 2>/dev/null; then
+            echo "❌ Error: Invalid JSON in gcp-key.json"
+            exit 1
+          fi
+          
+          # Activar el service account
+          gcloud auth activate-service-account --key-file="$RUNNER_TEMP/gcp-key.json"
+          gcloud config set project "${{ env.GCP_PROJECT_ID }}"
+          echo "✅ Service account activated successfully"
+
+      - name: Verify gcloud auth
+        if: github.ref_name == matrix.branch
+        run: |
+          gcloud auth list
+          gcloud config set project "${{ env.GCP_PROJECT_ID }}"
 
       - name: Deploy ${{ matrix.service_name }}
         if: github.ref_name == matrix.branch
-        working-directory: .
+        working-directory: chatbot-ai-service-multitenant
         run: |
+          # Configurar secretos según el entorno
+          if [ "${{ matrix.env_name }}" = "dev" ]; then
+            PR_SERVICE_SECRET="POLITICAL_REFERRALS_SERVICE_URL_DEV:latest"
+            GAMIFICATION_SECRET="GAMIFICATION_SERVICE_URL_DEV:latest"
+          else
+            PR_SERVICE_SECRET="POLITICAL_REFERRALS_SERVICE_URL_PROD:latest"
+            GAMIFICATION_SECRET="GAMIFICATION_SERVICE_URL_PROD:latest"
+          fi
+          
+          # Deploy con variables de entorno y secretos de Secret Manager
           gcloud run deploy "${{ matrix.service_name }}" \
             --project "${{ env.GCP_PROJECT_ID }}" \
             --region "${{ env.GCP_REGION }}" \
             --source . \
             --allow-unauthenticated \
-            --set-env-vars "${{ matrix.runtime_env }}"
-
+            --clear-base-image \
+            --set-env-vars "${{ matrix.runtime_env }},FIRESTORE_PROJECT_ID=political-referrals,FIRESTORE_DATABASE_ID=(default),PORT=8000,LOG_LEVEL=INFO" \
+            --set-secrets="GEMINI_API_KEY=GEMINI_API_KEY:latest" \
+            --set-secrets="WATI_API_TOKEN=WATI_API_TOKEN:latest" \
+            --set-secrets="POLITICAL_REFERRALS_SERVICE_URL=$PR_SERVICE_SECRET" \
+            --set-secrets="GAMIFICATION_SERVICE_URL=$GAMIFICATION_SECRET" \
+            --memory=1Gi \
+            --cpu=1 \
+            --max-instances=10 \
+            --timeout=300s \
+            --concurrency=100

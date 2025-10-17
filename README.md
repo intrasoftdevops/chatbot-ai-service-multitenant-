@@ -53,30 +53,75 @@
 
 ## 🚀 Configuración y Despliegue
 
-### Variables de Entorno
+### 🔐 Configuración de Secret Manager
+
+El servicio usa **Google Cloud Secret Manager** para manejar variables sensibles de forma segura. Las variables están separadas por entorno (dev/prod).
+
+#### Secretos Configurados
 ```bash
-# Entorno
-ENVIRONMENT=production
-PORT=8000
+# Secretos compartidos entre dev y prod
+GEMINI_API_KEY=AIzaSyD0P-8WDIaNoGOTtnLmr77hQEXLNxLRpss
+WATI_API_TOKEN=your-wati-token-here
 
-# Firebase (usar bases de datos existentes)
-FIRESTORE_PROJECT_ID=your-project-id
-FIRESTORE_DATABASE_ID=(default)
-GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
-
-# Redis (opcional)
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_DB=0
-
-# Google AI (Gemini)
-GEMINI_API_KEY=your-gemini-api-key
-
-# Servicios externos
-POLITICAL_REFERRALS_SERVICE_URL=https://your-service-url.com
+# Secretos específicos por entorno
+POLITICAL_REFERRALS_SERVICE_URL_DEV=https://political-referrals-multitenant-wa-dev-xxxxx-uc.a.run.app
+POLITICAL_REFERRALS_SERVICE_URL_PROD=https://political-referrals-multitenant-wa-prod-xxxxx-uc.a.run.app
+GAMIFICATION_SERVICE_URL_DEV=https://your-gamification-service-dev.run.app
+GAMIFICATION_SERVICE_URL_PROD=https://your-gamification-service-prod.run.app
 ```
 
-### Desarrollo Local
+#### Variables de Entorno (No Sensibles)
+```bash
+# Entorno
+ENVIRONMENT=production  # o development
+PORT=8000
+LOG_LEVEL=INFO
+
+# Firebase (usar bases de datos existentes)
+FIRESTORE_PROJECT_ID=political-referrals
+FIRESTORE_DATABASE_ID=(default)
+```
+
+### 🚀 CI/CD Automático
+
+El servicio tiene **despliegue automático** configurado con GitHub Actions:
+
+#### Flujo de Despliegue
+- **Rama `dev`** → Despliega en entorno de desarrollo
+- **Rama `main`** → Despliega en entorno de producción
+
+#### Comandos para Desplegar
+```bash
+# Desplegar en desarrollo
+git push origin dev
+
+# Desplegar en producción
+git push origin main
+```
+
+#### Configuración de GitHub Secrets
+En GitHub, ve a Settings > Secrets and variables > Actions y configura:
+```
+GCP_SA_KEY = contenido_completo_del_archivo_service_account.json
+```
+
+### 🛠️ Comandos de Gestión de Secretos
+
+```bash
+# Ver todos los secretos
+gcloud secrets list --project=political-referrals
+
+# Actualizar un secreto
+echo "nuevo_valor" | gcloud secrets versions add SECRET_NAME --data-file=- --project=political-referrals
+
+# Ver valor de un secreto
+gcloud secrets versions access latest --secret="GEMINI_API_KEY" --project=political-referrals
+
+# Ver versiones de un secreto
+gcloud secrets versions list GEMINI_API_KEY --project=political-referrals
+```
+
+### 🔧 Desarrollo Local
 ```bash
 # Instalar dependencias
 pip install -r requirements.txt
@@ -89,13 +134,28 @@ cp env.example .env
 python -m uvicorn chatbot_ai_service.main:app --reload --port 8000
 ```
 
-### Docker
+### 🐳 Docker
 ```bash
 # Construir imagen
 docker build -t chatbot-ai-service-multitenant .
 
 # Ejecutar contenedor
 docker run -p 8000:8000 --env-file .env chatbot-ai-service-multitenant
+```
+
+### 🔍 Verificación de Despliegue
+```bash
+# Ver configuración del servicio desplegado
+gcloud run services describe chatbot-ai-service-prod \
+  --region=us-central1 \
+  --project=political-referrals \
+  --format="export"
+
+# Ver logs del servicio
+gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=chatbot-ai-service-prod" \
+  --project=political-referrals \
+  --limit=50 \
+  --format="table(timestamp,severity,textPayload)"
 ```
 
 ## 🔗 Integración con Political Referrals
