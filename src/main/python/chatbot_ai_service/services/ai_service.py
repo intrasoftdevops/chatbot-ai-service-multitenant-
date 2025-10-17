@@ -23,7 +23,122 @@ class AIService:
     def __init__(self):
         self.model = None
         self._initialized = False
+        # Rate limiting: máximo 8 requests por minuto para evitar exceder cuota
+        self.request_times = []
+        self.max_requests_per_minute = 8
+        # Cola de requests para manejar alta carga
+        self.request_queue = []
+        self.processing_queue = False
         self.api_key = None
+    
+    def _check_rate_limit(self):
+        """Verifica y aplica rate limiting para evitar exceder cuota de API"""
+        current_time = time.time()
+        
+        # Limpiar requests antiguos (más de 1 minuto)
+        self.request_times = [t for t in self.request_times if current_time - t < 60]
+        
+        # Si hemos excedido el límite, esperar
+        if len(self.request_times) >= self.max_requests_per_minute:
+            sleep_time = 60 - (current_time - self.request_times[0])
+            if sleep_time > 0:
+                logger.warning(f"Rate limit alcanzado. Esperando {sleep_time:.1f} segundos...")
+                time.sleep(sleep_time)
+                # Limpiar la lista después de esperar
+                self.request_times = []
+        
+        # Registrar este request
+        self.request_times.append(current_time)
+    
+    def _should_use_fallback(self) -> bool:
+        """Determina si debemos usar fallback por alta carga o cuota excedida"""
+        current_time = time.time()
+        
+        # Si tenemos muchos requests recientes, usar fallback
+        recent_requests = [t for t in self.request_times if current_time - t < 60]
+        if len(recent_requests) >= self.max_requests_per_minute * 0.8:  # 80% de la cuota
+            return True
+        
+        # Si la cola está muy llena, usar fallback
+        if len(self.request_queue) > 100:
+            return True
+            
+        return False
+    
+    def _get_fallback_response(self, prompt: str) -> str:
+        """Genera respuesta de fallback inteligente sin usar IA"""
+        # Analizar el prompt para dar respuesta contextual
+        prompt_lower = prompt.lower()
+        
+        if "nombre" in prompt_lower or "llamo" in prompt_lower:
+            return "Por favor, comparte tu nombre completo para continuar con el registro."
+        elif "ciudad" in prompt_lower or "vives" in prompt_lower:
+            return "¿En qué ciudad vives? Esto nos ayuda a conectar con promotores de tu región."
+        elif "apellido" in prompt_lower:
+            return "Perfecto, ahora necesito tu apellido para completar tu información."
+        elif "código" in prompt_lower or "referido" in prompt_lower:
+            return "Si tienes un código de referido, compártelo. Si no, escribe 'no' para continuar."
+        elif "términos" in prompt_lower or "condiciones" in prompt_lower:
+            return "¿Aceptas los términos y condiciones? Responde 'sí' o 'no'."
+        elif "confirmar" in prompt_lower or "correcto" in prompt_lower:
+            return "¿Confirmas que esta información es correcta? Responde 'sí' o 'no'."
+        else:
+            return "Gracias por tu mensaje. Te ayudo a completar tu registro paso a paso."
+    
+    def _get_general_fallback_response(self, prompt: str, tenant_config: dict = None) -> str:
+        """Genera respuesta de fallback para conversaciones generales (usuarios registrados)"""
+        prompt_lower = prompt.lower()
+        
+        # Obtener información del tenant para respuestas personalizadas
+        contact_name = "Daniel Quintero Presidente"
+        if tenant_config and tenant_config.get("branding", {}).get("contact_name"):
+            contact_name = tenant_config["branding"]["contact_name"]
+        
+        # Categorías de respuestas de fallback
+        if any(word in prompt_lower for word in ["hola", "hi", "hello", "buenos días", "buenas tardes"]):
+            return f"¡Hola! Soy el asistente de {contact_name}. ¿En qué puedo ayudarte hoy?"
+        
+        elif any(word in prompt_lower for word in ["cómo", "como", "funciona", "trabaja"]):
+            return f"Te explico cómo funciona: Somos la campaña de {contact_name}. Puedes registrarte como promotor, ganar puntos por referir personas y participar en nuestro ranking. ¿Te gustaría registrarte?"
+        
+        elif any(word in prompt_lower for word in ["puntos", "puntaje", "ranking", "posición"]):
+            return "Los puntos se ganan refiriendo personas a la campaña. Cada referido te da puntos que se suman a tu ranking. ¡Mientras más refieras, más alto estás en la lista!"
+        
+        elif any(word in prompt_lower for word in ["referir", "referido", "invitar", "compartir"]):
+            return "Para referir personas, comparte tu código único con amigos y familiares. Cuando se registren con tu código, ambos ganan puntos. ¡Es muy fácil!"
+        
+        elif any(word in prompt_lower for word in ["código", "mi código", "código personal"]):
+            return "Tu código personal es único y te identifica como promotor. Lo puedes compartir con otras personas para que se registren y ambos ganen puntos."
+        
+        elif any(word in prompt_lower for word in ["premio", "ganar", "ganancia", "recompensa"]):
+            return "Los promotores más activos pueden ganar premios y reconocimientos especiales. ¡Mientras más personas refieras, más oportunidades tienes de ganar!"
+        
+        elif any(word in prompt_lower for word in ["ayuda", "help", "soporte", "problema"]):
+            return f"Estoy aquí para ayudarte. Puedo explicarte cómo funciona la campaña, ayudarte con tu registro, o resolver dudas sobre puntos y referidos. ¿Qué necesitas saber?"
+        
+        elif any(word in prompt_lower for word in ["horario", "hora", "cuándo", "cuando", "disponible"]):
+            return "Estoy disponible 24/7 para ayudarte. Puedes escribirme en cualquier momento y te responderé lo más pronto posible."
+        
+        elif any(word in prompt_lower for word in ["contacto", "teléfono", "telefono", "email", "correo"]):
+            return f"Para contacto directo, puedes comunicarte con el equipo de {contact_name}. También puedes seguirnos en nuestras redes sociales oficiales."
+        
+        elif any(word in prompt_lower for word in ["gracias", "thank", "thanks", "agradecido"]):
+            return f"¡De nada! Es un placer ayudarte. Recuerda que puedes escribirme cuando necesites ayuda con la campaña de {contact_name}."
+        
+        elif any(word in prompt_lower for word in ["adiós", "adios", "bye", "hasta luego", "nos vemos"]):
+            return f"¡Hasta luego! Fue un gusto ayudarte. ¡Que tengas un excelente día y sigue promoviendo la campaña de {contact_name}!"
+        
+        elif any(word in prompt_lower for word in ["información", "info", "datos", "sobre"]):
+            return f"Te puedo ayudar con información sobre la campaña de {contact_name}, cómo ganar puntos, referir personas, y todo lo relacionado con ser promotor. ¿Qué te interesa saber?"
+        
+        elif any(word in prompt_lower for word in ["registro", "registrarme", "unirme", "participar"]):
+            return "¡Excelente! Para registrarte como promotor, necesito algunos datos básicos: tu nombre completo, ciudad donde vives, y si tienes un código de referido. ¿Empezamos?"
+        
+        elif any(word in prompt_lower for word in ["estado", "mi estado", "progreso", "avance"]):
+            return "Para ver tu estado actual, puntos y posición en el ranking, necesito verificar tu información. ¿Ya estás registrado como promotor?"
+        
+        else:
+            return f"Entiendo tu mensaje. Estoy aquí para ayudarte con todo lo relacionado con la campaña de {contact_name}. ¿Hay algo específico en lo que pueda asistirte?"
     
     def _ensure_model_initialized(self):
         """Inicializa el modelo de forma lazy"""
@@ -35,7 +150,7 @@ class AIService:
             try:
                 # Configuración básica para Gemini AI
                 genai.configure(api_key=self.api_key)
-                self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
+                self.model = genai.GenerativeModel('gemini-2.0-flash')
                 logger.info("Modelo Gemini inicializado correctamente")
             except Exception as e:
                 logger.error(f"Error inicializando modelo Gemini: {str(e)}")
@@ -49,7 +164,7 @@ class AIService:
     async def _call_gemini_rest_api(self, prompt: str) -> str:
         """Llama a Gemini usando REST API en lugar de gRPC"""
         try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key={self.api_key}"
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={self.api_key}"
             
             payload = {
                 "contents": [{
@@ -75,6 +190,14 @@ class AIService:
     
     async def _generate_content(self, prompt: str) -> str:
         """Genera contenido usando Gemini, fallback a REST API si gRPC falla"""
+        # Verificar si debemos usar fallback por alta carga
+        if self._should_use_fallback():
+            logger.info("Alta carga detectada, usando fallback inteligente")
+            return self._get_fallback_response(prompt)
+        
+        # Aplicar rate limiting
+        self._check_rate_limit()
+        
         try:
             # Intentar con gRPC primero
             if self.model:
@@ -151,31 +274,36 @@ class AIService:
             logger.info(f"🔍 Clasificación completa: {classification_result}")
             logger.info(f"🧠 Intención extraída: {intent} (confianza: {confidence:.2f})")
             
-            # 2. SEGUNDO: Procesar según la intención clasificada
-            if intent == "cita_campaña":
-                # Respuesta específica para agendar citas
-                response = self._handle_appointment_request(branding_config)
-            elif intent == "saludo_apoyo":
-                # Respuesta específica para saludos
-                response = await self._generate_ai_response_with_session(
-                    query, user_context, ai_config, branding_config, tenant_id, session_id
-                )
-            elif intent == "conocer_daniel":
-                # Respuesta específica sobre Daniel Quintero
-                response = await self._generate_ai_response_with_session(
-                    query, user_context, ai_config, branding_config, tenant_id, session_id
-                )
-            elif intent == "solicitud_funcional":
-                # Respuesta específica para consultas funcionales
-                response = self._handle_functional_request(query, branding_config)
-            elif intent == "colaboracion_voluntariado":
-                # Respuesta específica para voluntariado
-                response = self._handle_volunteer_request(branding_config)
+            # 2. SEGUNDO: Verificar si debemos usar fallback por alta carga
+            if self._should_use_fallback():
+                logger.info("Alta carga detectada en chat, usando fallback general")
+                response = self._get_general_fallback_response(query, tenant_config)
             else:
-                # Respuesta general con contexto de sesión
-                response = await self._generate_ai_response_with_session(
-                    query, user_context, ai_config, branding_config, tenant_id, session_id
-                )
+                # Procesar según la intención clasificada
+                if intent == "cita_campaña":
+                    # Respuesta específica para agendar citas
+                    response = self._handle_appointment_request(branding_config)
+                elif intent == "saludo_apoyo":
+                    # Respuesta específica para saludos
+                    response = await self._generate_ai_response_with_session(
+                        query, user_context, ai_config, branding_config, tenant_id, session_id
+                    )
+                elif intent == "conocer_daniel":
+                    # Respuesta específica sobre Daniel Quintero
+                    response = await self._generate_ai_response_with_session(
+                        query, user_context, ai_config, branding_config, tenant_id, session_id
+                    )
+                elif intent == "solicitud_funcional":
+                    # Respuesta específica para consultas funcionales
+                    response = self._handle_functional_request(query, branding_config)
+                elif intent == "colaboracion_voluntariado":
+                    # Respuesta específica para voluntariado
+                    response = self._handle_volunteer_request(branding_config)
+                else:
+                    # Respuesta general con contexto de sesión
+                    response = await self._generate_ai_response_with_session(
+                        query, user_context, ai_config, branding_config, tenant_id, session_id
+                    )
             
             # Agregar respuesta del asistente a la sesión
             session_context_service.add_message(session_id, "assistant", response, metadata={"intent": intent, "confidence": confidence})
@@ -433,7 +561,7 @@ Completa nuestro formulario: {forms_link}
     async def analyze_registration(self, tenant_id: str, message: str, user_context: Dict[str, Any] = None,
                                    session_id: str = None, current_state: str = None) -> Dict[str, Any]:
         """
-        Analiza un mensaje y determina si contiene un dato de registro (name/lastname/city) o es información general.
+        Analiza un mensaje usando IA para entender el contexto completo y extraer datos de registro.
 
         Retorna: { type: "name|lastname|city|info|other", value: str|None, confidence: float }
         """
@@ -450,60 +578,83 @@ Completa nuestro formulario: {forms_link}
 
             state = (current_state or "").upper()
 
-            lowered = text.lower()
-            if "?" in text or any(w in lowered for w in ["qué", "que ", "cómo", "como ", "quién", "quien ", "dónde", "donde "]):
-                return {"type": "info", "value": None, "confidence": 0.85}
+            # Usar IA para análisis inteligente basado en contexto
+            ai_analysis = await self._analyze_registration_with_ai(text, state, user_context, session_id)
+            if ai_analysis:
+                return ai_analysis
 
-            def looks_like_city(s: str) -> bool:
-                if len(s) < 2 or len(s) > 100:
-                    return False
-                import re
-                # Permitir comas y otros caracteres comunes en frases de ubicación
-                if not re.match(r"^[A-Za-zÁÉÍÓÚáéíóúÑñ .,'-]+$", s):
-                    return False
-                forbidden = ["hola", "gracias", "ok", "vale", "listo", "si", "sí", "no"]
-                return s.lower() not in forbidden
-
-            def split_full_name(s: str):
-                parts = [p for p in s.split() if p]
-                if len(parts) >= 2 and all(p.replace("ñ", "n").isalpha() for p in [x.lower() for x in parts]):
-                    return parts[0], " ".join(parts[1:])
-                return (parts[0], None) if parts else (None, None)
-
-            # Usar IA para análisis más inteligente cuando el estado es WAITING_CITY
-            if state == "WAITING_CITY":
-                # Usar IA para extraer información de ciudad de frases naturales
-                ai_analysis = await self._analyze_city_with_ai(text)
-                if ai_analysis and ai_analysis.get("is_city", False):
-                    return {
-                        "type": "city", 
-                        "value": ai_analysis.get("extracted_city", text), 
-                        "confidence": ai_analysis.get("confidence", 0.8)
-                    }
-
-            if state == "WAITING_NAME":
-                first, last = split_full_name(text)
-                if first and len(first) >= 2 and first.lower() not in ["que", "qué", "ok", "vale", "gracias", "listo", "si", "sí", "no"]:
-                    val = text if last else first
-                    return {"type": "name", "value": val, "confidence": 0.9}
-
-            if state == "WAITING_LASTNAME":
-                if len(text) >= 2 and looks_like_city(text) and not any(ch.isdigit() for ch in text):
-                    return {"type": "lastname", "value": text, "confidence": 0.9}
-
-            if state == "WAITING_CITY" or state == "":
-                if looks_like_city(text):
-                    return {"type": "city", "value": text, "confidence": 0.9}
-
-            words = text.split()
-            if 2 <= len(words) <= 4 and not any(c.isdigit() for c in text):
-                if words[0].lower() not in ["que", "qué", "ok", "vale", "gracias", "listo", "si", "sí", "no"]:
-                    return {"type": "name", "value": text, "confidence": 0.6}
-
-            return {"type": "other", "value": None, "confidence": 0.5}
+            # Fallback inteligente si IA falla (por cuota excedida u otros errores)
+            logger.info("Usando lógica de fallback inteligente para análisis de registro")
+            return self._fallback_registration_analysis(text, state)
             
         except Exception as e:
             logger.error(f"Error analizando registro: {str(e)}")
+            return {"type": "other", "value": None, "confidence": 0.0}
+    
+    def _fallback_registration_analysis(self, text: str, state: str) -> Dict[str, Any]:
+        """
+        Análisis de fallback inteligente cuando la IA no está disponible
+        """
+        try:
+            lowered = text.lower().strip()
+            
+            # Detectar preguntas
+            if "?" in text or any(w in lowered for w in ["qué", "que ", "cómo", "como ", "quién", "quien ", "dónde", "donde ", "por qué", "por que"]):
+                return {"type": "info", "value": None, "confidence": 0.85}
+            
+            # Detectar nombres (lógica mejorada)
+            words = text.split()
+            
+            # Si es un saludo simple
+            if lowered in ["hola", "hi", "hello", "buenos días", "buenas tardes", "buenas noches"]:
+                return {"type": "other", "value": None, "confidence": 0.9}
+            
+            # Si contiene palabras de confirmación + nombre
+            confirmation_words = ["perfecto", "ok", "vale", "listo", "sí", "si", "bueno", "bien"]
+            if any(word in lowered for word in confirmation_words):
+                # Buscar nombre después de la confirmación
+                for i, word in enumerate(words):
+                    if word.lower() in confirmation_words and i + 1 < len(words):
+                        # Extraer el resto como nombre
+                        name_parts = words[i+1:]
+                        if name_parts and all(part.replace("-", "").replace("'", "").isalpha() for part in name_parts):
+                            name = " ".join(name_parts)
+                            if len(name) >= 2:
+                                return {"type": "name", "value": name, "confidence": 0.8}
+            
+            # Si parece un nombre directo (2-4 palabras, solo letras)
+            if 2 <= len(words) <= 4 and not any(c.isdigit() for c in text):
+                # Verificar que no empiece con palabras interrogativas
+                if words[0].lower() not in ["que", "qué", "cómo", "como", "cuál", "cual", "quién", "quien", "dónde", "donde"]:
+                    # Verificar que todas las palabras sean letras
+                    if all(word.replace("-", "").replace("'", "").isalpha() for word in words):
+                        return {"type": "name", "value": text, "confidence": 0.7}
+            
+            # Detectar ciudades
+            city_indicators = ["vivo en", "soy de", "estoy en", "resido en", "ciudad", "municipio"]
+            if any(indicator in lowered for indicator in city_indicators):
+                # Extraer ciudad después del indicador
+                for indicator in city_indicators:
+                    if indicator in lowered:
+                        city_part = lowered.split(indicator)[-1].strip()
+                        if city_part and len(city_part) >= 2:
+                            return {"type": "city", "value": city_part.title(), "confidence": 0.8}
+            
+            # Si contiene "me llamo" o "mi nombre es"
+            if "me llamo" in lowered or "mi nombre es" in lowered:
+                name_part = text
+                if "me llamo" in lowered:
+                    name_part = text.split("me llamo")[-1].strip()
+                elif "mi nombre es" in lowered:
+                    name_part = text.split("mi nombre es")[-1].strip()
+                
+                if name_part and len(name_part) >= 2:
+                    return {"type": "name", "value": name_part, "confidence": 0.9}
+            
+            return {"type": "other", "value": None, "confidence": 0.5}
+            
+        except Exception as e:
+            logger.error(f"Error en análisis de fallback: {str(e)}")
             return {"type": "other", "value": None, "confidence": 0.0}
     
     async def extract_data(self, tenant_id: str, message: str, data_type: str) -> Dict[str, Any]:
@@ -991,6 +1142,104 @@ Responde solo el JSON estricto sin comentarios:
         
         return True  # Para otros tipos, aceptar por defecto
     
+    async def _analyze_registration_with_ai(self, text: str, state: str, user_context: Dict[str, Any], session_id: str) -> Dict[str, Any]:
+        """Usa IA para analizar el contexto completo y extraer datos de registro"""
+        self._ensure_model_initialized()
+        if not self.model:
+            return None
+        
+        try:
+            # Obtener contexto de la sesión si está disponible
+            session_context = ""
+            try:
+                session = session_context_service.get_session(session_id)
+                if session:
+                    session_context = session_context_service.build_context_for_ai(session_id)
+            except Exception as e:
+                logger.warning(f"Error obteniendo contexto de sesión: {str(e)}")
+            
+            # Construir prompt con contexto completo
+            prompt = f"""
+Eres un asistente inteligente que analiza mensajes de usuarios durante un proceso de registro.
+
+CONTEXTO DE LA CONVERSACIÓN:
+{session_context}
+
+ESTADO ACTUAL DEL USUARIO: {state}
+
+MENSAJE DEL USUARIO: "{text}"
+
+TAREA: Analiza el mensaje y determina:
+1. Si es una pregunta o solicitud de información (type: "info")
+2. Si contiene un nombre completo (type: "name")
+3. Si contiene un apellido (type: "lastname") 
+4. Si contiene una ciudad/ubicación (type: "city")
+5. Si es otra cosa (type: "other")
+
+INSTRUCCIONES ESPECÍFICAS:
+- Para nombres: Extrae el nombre completo, incluso si viene después de palabras como "listo", "ok", "mi nombre es", etc.
+- Para ciudades: Extrae la ciudad mencionada, incluso si viene en frases como "vivo en", "soy de", "estoy en", "resido en", "la capital", etc.
+- Si el usuario hace una pregunta, clasifica como "info"
+- Considera el contexto de la conversación anterior
+- Sé inteligente para entender frases naturales como "listo, mi nombre es Santiago Buitrago Rojas"
+- PRIORIDAD: Si el estado es WAITING_CITY y el mensaje contiene información de ubicación, clasifica como "city"
+
+EJEMPLOS:
+- "listo, mi nombre es Santiago Buitrago Rojas" → type: "name", value: "Santiago Buitrago Rojas"
+- "ok, es Santiago Buitrago" → type: "name", value: "Santiago Buitrago"
+- "vivo en Bogotá" → type: "city", value: "Bogotá"
+- "vivo en la capital" → type: "city", value: "Bogotá" (si es Colombia)
+- "soy de Medellín" → type: "city", value: "Medellín"
+- "estoy en Cali" → type: "city", value: "Cali"
+- "resido en Barranquilla" → type: "city", value: "Barranquilla"
+- "¿Cómo funciona esto?" → type: "info", value: null
+- "Santiago" → type: "name", value: "Santiago"
+
+Responde SOLO con un JSON válido en este formato:
+{{"type": "name|lastname|city|info|other", "value": "valor_extraido_o_null", "confidence": 0.0-1.0}}
+"""
+
+            response_text = await self._generate_content(prompt)
+            logger.info(f"Respuesta cruda de IA: '{response_text}'")
+            
+            # Parsear respuesta JSON
+            import json
+            import re
+            
+            try:
+                # Limpiar la respuesta - extraer solo el JSON
+                cleaned_response = response_text.strip()
+                
+                # Buscar JSON en la respuesta usando regex
+                json_match = re.search(r'\{[^}]*"type"[^}]*\}', cleaned_response)
+                if json_match:
+                    cleaned_response = json_match.group(0)
+                
+                # Si no hay JSON válido, intentar parsear toda la respuesta
+                if not cleaned_response.startswith('{'):
+                    logger.warning(f"Respuesta no contiene JSON válido: '{response_text}'")
+                    return None
+                
+                result = json.loads(cleaned_response)
+                
+                # Validar resultado
+                valid_types = ["name", "lastname", "city", "info", "other"]
+                if result.get("type") in valid_types:
+                    logger.info(f"IA analizó registro: {result}")
+                    return result
+                else:
+                    logger.warning(f"IA devolvió tipo inválido: {result}")
+                    return None
+                    
+            except json.JSONDecodeError as e:
+                logger.error(f"Error parseando JSON de IA: {str(e)}")
+                logger.error(f"Respuesta que causó el error: '{response_text}'")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error analizando registro con IA: {str(e)}")
+            return None
+
     async def _analyze_city_with_ai(self, text: str) -> Dict[str, Any]:
         """Usa IA para analizar si un texto contiene información de ciudad y extraerla"""
         self._ensure_model_initialized()
