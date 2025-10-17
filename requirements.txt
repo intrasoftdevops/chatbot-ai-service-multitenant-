@@ -9,11 +9,11 @@ firebase-admin==6.4.0
 google-cloud-firestore==2.13.1
 
 # Google AI (Gemini)
-# Nota: llama-index-llms-gemini 0.1.4 requiere google-generativeai < 0.4.0
-google-generativeai==0.3.2
-llama-index==0.9.15
-llama-index-llms-gemini==0.1.2
-llama-index-embeddings-gemini==0.1.2
+# Versión actualizada para mejor soporte de gRPC
+google-generativeai==0.8.3
+llama-index==0.10.25
+llama-index-llms-gemini==0.1.4
+llama-index-embeddings-gemini==0.1.3
 
 # Document processing
 pypdf==4.0.1
