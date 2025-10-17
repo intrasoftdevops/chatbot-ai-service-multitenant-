@@ -3,8 +3,6 @@ name: Deploy chatbot-ai-service-multitenant (dev/prod)
 on:
   push:
     branches: [ dev, main ]
-    paths:
-      - 'chatbot-ai-service-multitenant/**'
 
 env:
   GCP_PROJECT_ID: political-referrals
