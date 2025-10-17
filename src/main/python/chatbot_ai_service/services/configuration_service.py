@@ -38,8 +38,17 @@ class ConfigurationService:
             logger.info(f"Obteniendo configuración desde servicio Java para tenant: {tenant_id}")
             
             # Llamar al servicio Java para obtener configuración
-            with httpx.Client(timeout=10.0) as client:
-                response = client.get(f"{self.java_service_url}/api/v1/tenants/{tenant_id}")
+            headers = {
+                "User-Agent": "Chatbot-AI-Service/1.0",
+                "Accept": "application/json",
+                "Content-Type": "application/json"
+            }
+            url = f"{self.java_service_url}/api/v1/tenants/{tenant_id}"
+            logger.info(f"Llamando a URL: {url}")
+            
+            with httpx.Client(timeout=10.0, headers=headers) as client:
+                response = client.get(url)
+                logger.info(f"Respuesta recibida: status={response.status_code}, headers={dict(response.headers)}")
                 
                 if response.status_code == 200:
                     config = response.json()
