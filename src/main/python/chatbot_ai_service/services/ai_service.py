@@ -637,7 +637,7 @@ Entrada: "New York" → {"city": "New York", "state": "New York", "country": "Un
 Entrada real: "{city_input}".
 Responde solo el JSON estricto sin comentarios:
 """
-            response = self.model.generate_content(prompt)
+            response_text = await self._generate_content(prompt)
             text = (response.text or "").strip()
             import json
             result = json.loads(text)
@@ -818,9 +818,9 @@ Responde solo el JSON estricto sin comentarios:
             prompt = self._build_chat_prompt(query, user_context, branding_config, relevant_context)
             
             # Generar respuesta
-            response = self.model.generate_content(prompt)
+            response_text = await self._generate_content(prompt)
             
-            return response.text
+            return response_text
             
         except Exception as e:
             logger.error(f"Error generando respuesta con IA: {str(e)}")
@@ -860,7 +860,7 @@ Responde solo el JSON estricto sin comentarios:
             Responde solo con la categoría más apropiada.
             """
             
-            response = self.model.generate_content(prompt)
+            response_text = await self._generate_content(prompt)
             category = response.text.strip().lower()
             
             # Validar categoría
@@ -903,7 +903,7 @@ Responde solo el JSON estricto sin comentarios:
             Si no se encuentra, responde con "no_encontrado".
             """
             
-            response = self.model.generate_content(prompt)
+            response_text = await self._generate_content(prompt)
             extracted_value = response.text.strip()
             
             if extracted_value.lower() == "no_encontrado":
@@ -1024,7 +1024,7 @@ Responde solo el JSON estricto sin comentarios:
             Responde en formato: SI|ciudad o NO
             """
             
-            response = self.model.generate_content(prompt)
+            response_text = await self._generate_content(prompt)
             result = response.text.strip()
             
             if result.startswith("SI|"):
@@ -1085,7 +1085,7 @@ Responde solo el JSON estricto sin comentarios:
             else:
                 return True
             
-            response = self.model.generate_content(prompt)
+            response_text = await self._generate_content(prompt)
             result = response.text.strip().upper()
             
             logger.info(f"Validación IA para {data_type} '{data}': {result}")
@@ -1192,8 +1192,8 @@ Responde solo el JSON estricto sin comentarios:
             return "Lo siento, el servicio de IA no está disponible."
         
         try:
-            response = self.model.generate_content(prompt)
-            return response.text if response.text else ""
+            response_text = await self._generate_content(prompt)
+            return response_text if response.text else ""
             
         except Exception as e:
             logger.error(f"Error generando respuesta con IA: {str(e)}")
@@ -1242,7 +1242,7 @@ Ejemplos:
 - "hola REFERIDO" → NO
 """
 
-            response = self.model.generate_content(prompt)
+            response_text = await self._generate_content(prompt)
             detected_code = response.text.strip().upper()
             
             # Validar que el código tiene exactamente 8 caracteres alfanuméricos
