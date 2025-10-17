@@ -31,7 +31,13 @@ class AIService:
         api_key = os.getenv("GEMINI_API_KEY")
         if api_key:
             try:
-                genai.configure(api_key=api_key)
+                # Configurar explícitamente para evitar metadata automático de Cloud Run
+                genai.configure(
+                    api_key=api_key,
+                    client_options={
+                        'api_endpoint': 'https://generativelanguage.googleapis.com'
+                    }
+                )
                 self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
                 logger.info("Modelo Gemini inicializado correctamente")
             except Exception as e:
