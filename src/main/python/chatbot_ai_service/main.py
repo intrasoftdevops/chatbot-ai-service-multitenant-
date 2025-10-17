@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 import logging
 
 from chatbot_ai_service.controllers.chat_controller import router as chat_router
+from chatbot_ai_service.controllers.city_normalization_controller import router as city_router
 
 # Cargar variables de entorno
 # Buscar .env en el directorio raíz del proyecto (3 niveles arriba)
@@ -59,6 +60,7 @@ app.add_middleware(
 
 # Incluir routers
 app.include_router(chat_router, prefix="/api/v1")
+app.include_router(city_router)
 
 @app.get("/")
 async def root():

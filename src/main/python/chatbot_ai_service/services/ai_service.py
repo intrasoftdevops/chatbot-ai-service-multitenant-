@@ -415,7 +415,8 @@ Completa nuestro formulario: {forms_link}
                 if len(s) < 2 or len(s) > 100:
                     return False
                 import re
-                if not re.match(r"^[A-Za-zÁÉÍÓÚáéíóúÑñ .'-]+$", s):
+                # Permitir comas y otros caracteres comunes en frases de ubicación
+                if not re.match(r"^[A-Za-zÁÉÍÓÚáéíóúÑñ .,'-]+$", s):
                     return False
                 forbidden = ["hola", "gracias", "ok", "vale", "listo", "si", "sí", "no"]
                 return s.lower() not in forbidden
@@ -425,6 +426,17 @@ Completa nuestro formulario: {forms_link}
                 if len(parts) >= 2 and all(p.replace("ñ", "n").isalpha() for p in [x.lower() for x in parts]):
                     return parts[0], " ".join(parts[1:])
                 return (parts[0], None) if parts else (None, None)
+
+            # Usar IA para análisis más inteligente cuando el estado es WAITING_CITY
+            if state == "WAITING_CITY":
+                # Usar IA para extraer información de ciudad de frases naturales
+                ai_analysis = await self._analyze_city_with_ai(text)
+                if ai_analysis and ai_analysis.get("is_city", False):
+                    return {
+                        "type": "city", 
+                        "value": ai_analysis.get("extracted_city", text), 
+                        "confidence": ai_analysis.get("confidence", 0.8)
+                    }
 
             if state == "WAITING_NAME":
                 first, last = split_full_name(text)
@@ -936,6 +948,62 @@ Responde solo el JSON estricto sin comentarios:
         
         return True  # Para otros tipos, aceptar por defecto
     
+    async def _analyze_city_with_ai(self, text: str) -> Dict[str, Any]:
+        """Usa IA para analizar si un texto contiene información de ciudad y extraerla"""
+        self._ensure_model_initialized()
+        if not self.model:
+            return {"is_city": False, "extracted_city": None, "confidence": 0.0}
+        
+        try:
+            prompt = f"""
+            Analiza el siguiente texto y determina si contiene información sobre una ciudad o ubicación.
+            
+            Texto: "{text}"
+            
+            Instrucciones:
+            1. Si el texto menciona una ciudad, país, o ubicación geográfica, responde "SI"
+            2. Si el texto NO menciona ubicación geográfica, responde "NO"
+            3. Si es "SI", extrae la información completa de ubicación
+            4. Si menciona país Y ciudad, extrae la frase completa
+            5. Si solo menciona ciudad, extrae solo la ciudad
+            6. IMPORTANTE: Para frases como "en españa, en madrid", extrae la ciudad específica (madrid)
+            7. Para frases como "vivo en españa, en madrid", extrae "madrid" como ciudad
+            
+            Ejemplos:
+            - "vivo en españa, en madrid" → SI, ciudad: "madrid"
+            - "soy de bogotá" → SI, ciudad: "bogotá"
+            - "estoy en medellín" → SI, ciudad: "medellín"
+            - "en españa, madrid" → SI, ciudad: "madrid"
+            - "en madrid, españa" → SI, ciudad: "madrid"
+            - "hola" → NO
+            - "mi nombre es juan" → NO
+            
+            Responde en formato: SI|ciudad o NO
+            """
+            
+            response = self.model.generate_content(prompt)
+            result = response.text.strip()
+            
+            if result.startswith("SI|"):
+                city = result.split("|", 1)[1].strip()
+                logger.info(f"IA detectó ciudad: '{city}' en texto: '{text}'")
+                return {
+                    "is_city": True,
+                    "extracted_city": city,
+                    "confidence": 0.8
+                }
+            else:
+                logger.info(f"IA no detectó ciudad en texto: '{text}'")
+                return {
+                    "is_city": False,
+                    "extracted_city": None,
+                    "confidence": 0.0
+                }
+                
+        except Exception as e:
+            logger.error(f"Error analizando ciudad con IA: {str(e)}")
+            return {"is_city": False, "extracted_city": None, "confidence": 0.0}
+
     async def _validate_with_ai(self, data: str, data_type: str) -> bool:
         """Validación adicional con IA para detectar contenido inapropiado"""
         self._ensure_model_initialized()
@@ -959,12 +1027,12 @@ Responde solo el JSON estricto sin comentarios:
                 """
             elif data_type.lower() == "city":
                 prompt = f"""
-                Evalúa si el siguiente texto es una ciudad válida en Colombia:
+                Evalúa si el siguiente texto es una ciudad válida (puede ser de cualquier país):
                 
                 Texto: "{data}"
                 
                 Considera:
-                - Debe ser una ciudad real de Colombia
+                - Debe ser una ciudad real de cualquier país
                 - No puede ser una palabra ofensiva, grosera o inapropiada
                 - No puede ser números, símbolos raros, o texto sin sentido
                 - Debe ser apropiado para uso en un sistema de registro
@@ -1064,6 +1132,30 @@ Responde solo el JSON estricto sin comentarios:
         
         return prompt
     
+    async def generate_response(self, prompt: str, role: str = "user") -> str:
+        """
+        Genera una respuesta usando IA con un prompt personalizado
+        
+        Args:
+            prompt: Prompt para la IA
+            role: Rol del usuario (user, system, assistant)
+            
+        Returns:
+            Respuesta generada por la IA
+        """
+        self._ensure_model_initialized()
+        
+        if not self.model:
+            return "Lo siento, el servicio de IA no está disponible."
+        
+        try:
+            response = self.model.generate_content(prompt)
+            return response.text if response.text else ""
+            
+        except Exception as e:
+            logger.error(f"Error generando respuesta con IA: {str(e)}")
+            return "Error generando respuesta."
+
     async def detect_referral_code(self, tenant_id: str, message: str) -> Dict[str, Any]:
         """
         Detecta si un mensaje contiene un código de referido usando IA

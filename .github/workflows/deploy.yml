@@ -1,8 +1,10 @@
-name: Deploy chatbot-ai-service (dev/prod)
+name: Deploy chatbot-ai-service-multitenant (dev/prod)
 
 on:
   push:
     branches: [ dev, main ]
+    paths:
+      - 'chatbot-ai-service-multitenant/**'
 
 env:
   GCP_PROJECT_ID: political-referrals
@@ -10,14 +12,14 @@ env:
 
 jobs:
   deploy:
-    name: Deploy chatbot (${{ matrix.env_name }})
+    name: Deploy chatbot-ai-service (${{ matrix.env_name }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
           - branch: dev
             env_name: dev
-            service_name: chatbot-ai-service-dev
+            service_name: chatbot-ai-service-prod
             runtime_env: ENVIRONMENT=development
           - branch: main
             env_name: prod
@@ -48,21 +50,6 @@ jobs:
             exit 1
           fi
           
-          # Debug: Mostrar información del archivo
-          echo "📋 File size: $(wc -c < $RUNNER_TEMP/gcp-key.json) bytes"
-          echo "📋 First 200 chars:"
-          head -c 200 "$RUNNER_TEMP/gcp-key.json"
-          echo ""
-          echo "📋 Last 50 chars:"
-          tail -c 50 "$RUNNER_TEMP/gcp-key.json"
-          echo ""
-          
-          # Debug: Verificar la clave privada específicamente
-          echo "📋 Private key section:"
-          jq -r '.private_key' "$RUNNER_TEMP/gcp-key.json" | head -c 100
-          echo ""
-          echo "📋 Private key length: $(jq -r '.private_key' "$RUNNER_TEMP/gcp-key.json" | wc -c) chars"
-          
           # Verificar que la clave privada tiene el formato correcto
           PRIVATE_KEY=$(jq -r '.private_key' "$RUNNER_TEMP/gcp-key.json")
           if [[ ! "$PRIVATE_KEY" == *"-----BEGIN PRIVATE KEY-----"* ]]; then
@@ -77,8 +64,6 @@ jobs:
           # Verificar que el JSON es válido
           if ! jq empty "$RUNNER_TEMP/gcp-key.json" 2>/dev/null; then
             echo "❌ Error: Invalid JSON in gcp-key.json"
-            echo "📋 Full file content for debugging:"
-            cat "$RUNNER_TEMP/gcp-key.json"
             exit 1
           fi
           
@@ -95,12 +80,31 @@ jobs:
 
       - name: Deploy ${{ matrix.service_name }}
         if: github.ref_name == matrix.branch
-        working-directory: .
+        working-directory: chatbot-ai-service-multitenant
         run: |
+          # Configurar secretos según el entorno
+          if [ "${{ matrix.env_name }}" = "dev" ]; then
+            PR_SERVICE_SECRET="POLITICAL_REFERRALS_SERVICE_URL_DEV:latest"
+            GAMIFICATION_SECRET="GAMIFICATION_SERVICE_URL_DEV:latest"
+          else
+            PR_SERVICE_SECRET="POLITICAL_REFERRALS_SERVICE_URL_PROD:latest"
+            GAMIFICATION_SECRET="GAMIFICATION_SERVICE_URL_PROD:latest"
+          fi
+          
+          # Deploy con variables de entorno y secretos de Secret Manager
           gcloud run deploy "${{ matrix.service_name }}" \
             --project "${{ env.GCP_PROJECT_ID }}" \
             --region "${{ env.GCP_REGION }}" \
             --source . \
             --allow-unauthenticated \
-            --set-env-vars "${{ matrix.runtime_env }}"
-
+            --clear-base-image \
+            --set-env-vars "${{ matrix.runtime_env }},FIRESTORE_PROJECT_ID=political-referrals,FIRESTORE_DATABASE_ID=(default),PORT=8000,LOG_LEVEL=INFO" \
+            --set-secrets="GEMINI_API_KEY=GEMINI_API_KEY:latest" \
+            --set-secrets="WATI_API_TOKEN=WATI_API_TOKEN:latest" \
+            --set-secrets="POLITICAL_REFERRALS_SERVICE_URL=$PR_SERVICE_SECRET" \
+            --set-secrets="GAMIFICATION_SERVICE_URL=$GAMIFICATION_SECRET" \
+            --memory=1Gi \
+            --cpu=1 \
+            --max-instances=10 \
+            --timeout=300s \
+            --concurrency=100
