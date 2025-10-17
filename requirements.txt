@@ -9,8 +9,8 @@ firebase-admin==6.4.0
 google-cloud-firestore==2.13.1
 
 # Google AI (Gemini)
-# Versiones compatibles sin conflictos
-google-generativeai==0.8.3
+# Versión estable sin problemas de gRPC
+google-generativeai==0.3.2
 
 # Document processing
 pypdf==4.0.1
