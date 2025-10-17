@@ -95,7 +95,7 @@ jobs:
             --source . \
             --allow-unauthenticated \
             --clear-base-image \
-            --set-env-vars "${{ matrix.runtime_env }},FIRESTORE_PROJECT_ID=political-referrals,FIRESTORE_DATABASE_ID=(default),PORT=8000,LOG_LEVEL=INFO" \
+            --set-env-vars "${{ matrix.runtime_env }},FIRESTORE_PROJECT_ID=political-referrals,FIRESTORE_DATABASE_ID=(default),LOG_LEVEL=INFO" \
             --set-secrets="GEMINI_API_KEY=GEMINI_API_KEY:latest" \
             --set-secrets="WATI_API_TOKEN=WATI_API_TOKEN:latest" \
             --set-secrets="POLITICAL_REFERRALS_SERVICE_URL=$PR_SERVICE_SECRET" \
