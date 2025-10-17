@@ -638,7 +638,7 @@ Entrada real: "{city_input}".
 Responde solo el JSON estricto sin comentarios:
 """
             response_text = await self._generate_content(prompt)
-            text = (response.text or "").strip()
+            text = (response_text or "").strip()
             import json
             result = json.loads(text)
             # Sanitizar salida mínima
@@ -861,7 +861,7 @@ Responde solo el JSON estricto sin comentarios:
             """
             
             response_text = await self._generate_content(prompt)
-            category = response.text.strip().lower()
+            category = response_text.strip().lower()
             
             # Validar categoría
             valid_categories = [
@@ -904,7 +904,7 @@ Responde solo el JSON estricto sin comentarios:
             """
             
             response_text = await self._generate_content(prompt)
-            extracted_value = response.text.strip()
+            extracted_value = response_text.strip()
             
             if extracted_value.lower() == "no_encontrado":
                 return {}
@@ -1025,7 +1025,7 @@ Responde solo el JSON estricto sin comentarios:
             """
             
             response_text = await self._generate_content(prompt)
-            result = response.text.strip()
+            result = response_text.strip()
             
             if result.startswith("SI|"):
                 city = result.split("|", 1)[1].strip()
@@ -1086,7 +1086,7 @@ Responde solo el JSON estricto sin comentarios:
                 return True
             
             response_text = await self._generate_content(prompt)
-            result = response.text.strip().upper()
+            result = response_text.strip().upper()
             
             logger.info(f"Validación IA para {data_type} '{data}': {result}")
             return result == "SI"
@@ -1193,7 +1193,7 @@ Responde solo el JSON estricto sin comentarios:
         
         try:
             response_text = await self._generate_content(prompt)
-            return response_text if response.text else ""
+            return response_text if response_text else ""
             
         except Exception as e:
             logger.error(f"Error generando respuesta con IA: {str(e)}")
@@ -1243,7 +1243,7 @@ Ejemplos:
 """
 
             response_text = await self._generate_content(prompt)
-            detected_code = response.text.strip().upper()
+            detected_code = response_text.strip().upper()
             
             # Validar que el código tiene exactamente 8 caracteres alfanuméricos
             if detected_code != "NO" and len(detected_code) == 8 and detected_code.isalnum():
