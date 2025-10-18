@@ -433,6 +433,8 @@ class AIService:
             else:
                 # Procesar según la intención clasificada
                 if intent == "cita_campaña":
+                    # 🔧 DEBUG: Log de entrada a manejo de cita
+                    logger.info(f"🎯 INTENCIÓN DETECTADA: cita_campaña - Llamando _handle_appointment_request")
                     # Respuesta específica para agendar citas
                     response = self._handle_appointment_request(branding_config, tenant_config)
                 elif intent == "saludo_apoyo":
@@ -574,14 +576,23 @@ Respuesta:
     
     def _handle_appointment_request(self, branding_config: Dict[str, Any], tenant_config: Dict[str, Any] = None) -> str:
         """Maneja solicitudes de agendar citas"""
+        # 🔧 DEBUG: Log de entrada al método
+        logger.info(f"📅 MANEJANDO SOLICITUD DE CITA")
+        logger.info(f"📊 tenant_config disponible: {tenant_config is not None}")
+        if tenant_config:
+            logger.info(f"📊 link_calendly en tenant_config: {'link_calendly' in tenant_config}")
+        
         contact_name = branding_config.get("contactName", "el candidato")
         
         # Obtener link de Calendly con prioridad de fuentes
         if tenant_config and tenant_config.get("link_calendly"):
             calendly_link = tenant_config.get("link_calendly")
             logger.info(f"✅ Usando link de Calendly desde BD: {calendly_link}")
+        else:
+            calendly_link = "https://calendly.com/dq-campana/reunion"
+            logger.warning(f"⚠️ Link de Calendly NO encontrado en tenant_config, usando fallback: {calendly_link}")
         
-        return f"""¡Perfecto! Te ayudo a agendar una cita con alguien de la campaña de {contact_name}. 
+        response = f"""¡Perfecto! Te ayudo a agendar una cita con alguien de la campaña de {contact_name}. 
 
 📅 **Para agendar tu reunión:**
 Puedes usar nuestro sistema de citas en línea: {calendly_link}
@@ -596,6 +607,11 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
 ¿Sabías que puedes sumar puntos invitando a tus amigos y familiares a unirse a este movimiento? Cada persona que se registre con tu código te suma 50 puntos al ranking.
 
 ¿Te gustaría que te envíe tu link de referido para empezar a ganar puntos?"""
+        
+        # 🔧 DEBUG: Log de la respuesta generada
+        logger.info(f"✅ Respuesta de cita generada: {len(response)} caracteres")
+        
+        return response
     
     def _handle_functional_request(self, query: str, branding_config: Dict[str, Any]) -> str:
         """Maneja solicitudes funcionales como '¿Cómo voy?' o pedir link"""
@@ -1250,11 +1266,16 @@ Responde solo el JSON estricto sin comentarios:
 
     async def _classify_with_ai(self, message: str, user_context: Dict[str, Any]) -> Dict[str, Any]:
         """Clasifica intención usando IA"""
+        # 🔧 DEBUG: Log del mensaje a clasificar
+        logger.info(f"🎯 CLASIFICANDO INTENCIÓN | mensaje: '{message}'")
+        logger.info(f"📊 Longitud del mensaje: {len(message)} caracteres")
+        
         self._ensure_model_initialized()
         
         # Primero verificar intención maliciosa de manera inteligente
         malicious_detection = self._detect_malicious_intent(message)
         if malicious_detection["is_malicious"]:
+            logger.info(f"🚨 INTENCIÓN MALICIOSA DETECTADA: {malicious_detection['reason']}")
             return {
                 "category": "malicioso",
                 "confidence": malicious_detection["confidence"],
@@ -1264,6 +1285,7 @@ Responde solo el JSON estricto sin comentarios:
             }
         
         if not self.model:
+            logger.warning(f"⚠️ Modelo no disponible, usando fallback")
             return {
                 "category": "saludo_apoyo", 
                 "confidence": 0.0,
@@ -1313,9 +1335,20 @@ Responde solo el JSON estricto sin comentarios:
             Responde solo con la categoría más apropiada basándote en la INTENCIÓN del mensaje.
             """
             
+            # 🔧 DEBUG: Log del prompt completo
+            logger.info(f"🤖 Prompt de clasificación enviado a Gemini")
+            logger.debug(f"📋 Prompt completo: {prompt[:200]}...")
+            
             # 🚀 FASE 2: Usar configuración optimizada para clasificación de intenciones
             response_text = await self._generate_content(prompt, task_type="intent_classification")
+            
+            # 🔧 DEBUG: Log de la respuesta de Gemini
+            logger.info(f"🎯 Respuesta de Gemini para clasificación: '{response_text}'")
+            
             category = response_text.strip().lower()
+            
+            # 🔧 DEBUG: Log de la intención final
+            logger.info(f"✅ INTENCIÓN CLASIFICADA: '{category}'")
             
             # Validar categoría
             valid_categories = [
@@ -1326,7 +1359,11 @@ Responde solo el JSON estricto sin comentarios:
             ]
             
             if category not in valid_categories:
+                logger.warning(f"⚠️ Intención no válida: '{category}', usando 'saludo_apoyo' como fallback")
                 category = "saludo_apoyo"  # Default a saludo_apoyo en lugar de general_query
+            
+            # 🔧 DEBUG: Log final de clasificación
+            logger.info(f"🎯 CLASIFICACIÓN FINAL: '{category}' para mensaje: '{message[:50]}...'")
             
             return {
                 "category": category,
@@ -1335,7 +1372,7 @@ Responde solo el JSON estricto sin comentarios:
             }
             
         except Exception as e:
-            logger.error(f"Error clasificando con IA: {str(e)}")
+            logger.error(f"❌ Error clasificando con IA: {str(e)}", exc_info=True)
             return {
                 "category": "general_query", 
                 "confidence": 0.0,
