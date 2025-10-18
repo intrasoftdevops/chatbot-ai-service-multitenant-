@@ -95,13 +95,16 @@ jobs:
             --source . \
             --allow-unauthenticated \
             --clear-base-image \
-            --set-env-vars "${{ matrix.runtime_env }},FIRESTORE_PROJECT_ID=political-referrals,FIRESTORE_DATABASE_ID=(default),LOG_LEVEL=INFO" \
-            --set-secrets="GEMINI_API_KEY=GEMINI_API_KEY:latest" \
+            --set-env-vars "${{ matrix.runtime_env }},PORT=8000,FIRESTORE_PROJECT_ID=political-referrals,FIRESTORE_DATABASE_ID=(default),REDIS_ENABLED=true,REDIS_PORT=6379,REDIS_DB=0,REDIS_SOCKET_TIMEOUT=5,CONFIGURATION_SERVICE_URL=https://political-referrals-multitenant-wa-dev-574484297461.us-central1.run.app,USE_GEMINI_CLIENT=true,USE_ADVANCED_MODEL_CONFIGS=true,USE_RAG_ORCHESTRATOR=false,LOG_LEVEL=INFO" \
+            --set-secrets="GEMINI_API_KEY=gemini-api-key:latest" \
+            --set-secrets="REDIS_HOST=redis-host:latest" \
+            --set-secrets="REDIS_PASSWORD=redis-password:latest" \
             --set-secrets="WATI_API_TOKEN=WATI_API_TOKEN:latest" \
             --set-secrets="POLITICAL_REFERRALS_SERVICE_URL=$PR_SERVICE_SECRET" \
             --set-secrets="GAMIFICATION_SERVICE_URL=$GAMIFICATION_SECRET" \
-            --memory=1Gi \
-            --cpu=1 \
+            --memory=2Gi \
+            --cpu=2 \
             --max-instances=10 \
+            --min-instances=0 \
             --timeout=300s \
             --concurrency=100
