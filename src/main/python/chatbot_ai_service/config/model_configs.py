@@ -26,7 +26,7 @@ MODEL_CONFIGS: Dict[str, Dict[str, Any]] = {
     # CHAT CONVERSACIONAL
     # ──────────────────────────────────────────────────────────────────────────
     "chat_conversational": {
-        "model_name": "gemini-2.5-flash",
+        "model_name": "gemini-2.5-flash",  # ✅ Modelo oficial disponible según Google
         "temperature": 0.7,  # Respuestas naturales y variadas
         "top_p": 0.8,
         "top_k": 40,
@@ -38,7 +38,7 @@ MODEL_CONFIGS: Dict[str, Dict[str, Any]] = {
     # CLASIFICACIÓN DE INTENCIONES
     # ──────────────────────────────────────────────────────────────────────────
     "intent_classification": {
-        "model_name": "gemini-2.5-flash",
+        "model_name": "gemini-2.5-flash",  # ✅ Modelo oficial disponible según Google
         "temperature": 0.0,  # Completamente determinístico
         "top_p": 0.1,  # Muy restrictivo
         "top_k": 1,  # Solo la mejor opción
@@ -51,7 +51,7 @@ MODEL_CONFIGS: Dict[str, Dict[str, Any]] = {
     # EXTRACCIÓN DE DATOS
     # ──────────────────────────────────────────────────────────────────────────
     "data_extraction": {
-        "model_name": "gemini-2.5-flash",
+        "model_name": "gemini-2.0-flash",  # 🔧 FIX: Cambiar a modelo disponible
         "temperature": 0.0,  # Determinístico
         "top_p": 0.1,
         "top_k": 1,
@@ -64,7 +64,7 @@ MODEL_CONFIGS: Dict[str, Dict[str, Any]] = {
     # VALIDACIÓN DE DATOS
     # ──────────────────────────────────────────────────────────────────────────
     "data_validation": {
-        "model_name": "gemini-2.5-flash",
+        "model_name": "gemini-2.0-flash",  # 🔧 FIX: Cambiar a modelo disponible
         "temperature": 0.0,  # Determinístico
         "top_p": 0.1,
         "top_k": 1,
@@ -77,7 +77,7 @@ MODEL_CONFIGS: Dict[str, Dict[str, Any]] = {
     # ANÁLISIS DE DOCUMENTOS
     # ──────────────────────────────────────────────────────────────────────────
     "document_analysis": {
-        "model_name": "gemini-2.5-pro",  # Modelo más potente
+        "model_name": "gemini-2.0-flash",  # 🔧 FIX: Cambiar a modelo disponible
         "temperature": 0.1,  # Casi determinístico, pero con algo de creatividad
         "top_p": 0.9,
         "top_k": 40,
@@ -89,7 +89,7 @@ MODEL_CONFIGS: Dict[str, Dict[str, Any]] = {
     # DETECCIÓN DE COMPORTAMIENTO MALICIOSO
     # ──────────────────────────────────────────────────────────────────────────
     "malicious_detection": {
-        "model_name": "gemini-2.5-flash",
+        "model_name": "gemini-2.0-flash",  # 🔧 FIX: Cambiar a modelo disponible
         "temperature": 0.0,  # Muy estricto
         "top_p": 0.1,
         "top_k": 1,
@@ -102,7 +102,7 @@ MODEL_CONFIGS: Dict[str, Dict[str, Any]] = {
     # ANÁLISIS DE REGISTRO
     # ──────────────────────────────────────────────────────────────────────────
     "registration_analysis": {
-        "model_name": "gemini-2.5-flash",
+        "model_name": "gemini-2.0-flash",  # 🔧 FIX: Cambiar a modelo disponible
         "temperature": 0.1,  # Casi determinístico
         "top_p": 0.2,
         "top_k": 5,
