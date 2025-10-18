@@ -69,8 +69,32 @@ class GeminiClient:
             try:
                 # Configuración básica para Gemini AI
                 genai.configure(api_key=self.api_key)
-                self.model = genai.GenerativeModel('gemini-2.0-flash')
-                logger.info("✅ Modelo Gemini inicializado correctamente en GeminiClient")
+                
+                # 🔧 FIX: Configurar safety settings para evitar bloqueos
+                safety_settings = [
+                    {
+                        "category": "HARM_CATEGORY_HARASSMENT",
+                        "threshold": "BLOCK_NONE"
+                    },
+                    {
+                        "category": "HARM_CATEGORY_HATE_SPEECH", 
+                        "threshold": "BLOCK_NONE"
+                    },
+                    {
+                        "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                        "threshold": "BLOCK_NONE"
+                    },
+                    {
+                        "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                        "threshold": "BLOCK_NONE"
+                    }
+                ]
+                
+                self.model = genai.GenerativeModel(
+                    'gemini-2.0-flash',
+                    safety_settings=safety_settings
+                )
+                logger.info("✅ Modelo Gemini inicializado correctamente en GeminiClient con safety settings")
             except Exception as e:
                 logger.error(f"❌ Error inicializando modelo Gemini: {str(e)}")
                 self.model = None
@@ -266,8 +290,31 @@ class GeminiClient:
             # Los configs se pasarán directamente en generate_content()
             model_name = config.get("model_name", "gemini-2.0-flash")
             
-            # Crear modelo base sin configuración
-            model = genai.GenerativeModel(model_name=model_name)
+            # 🔧 FIX: Configurar safety settings para evitar bloqueos
+            safety_settings = [
+                {
+                    "category": "HARM_CATEGORY_HARASSMENT",
+                    "threshold": "BLOCK_NONE"
+                },
+                {
+                    "category": "HARM_CATEGORY_HATE_SPEECH", 
+                    "threshold": "BLOCK_NONE"
+                },
+                {
+                    "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                    "threshold": "BLOCK_NONE"
+                },
+                {
+                    "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                    "threshold": "BLOCK_NONE"
+                }
+            ]
+            
+            # Crear modelo con safety settings
+            model = genai.GenerativeModel(
+                model_name=model_name,
+                safety_settings=safety_settings
+            )
             
             # Guardar modelo Y configuración en cache (juntos)
             self.models_cache[config_hash] = {
