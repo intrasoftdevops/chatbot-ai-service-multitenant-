@@ -537,8 +537,11 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
             # Obtener contexto completo de la sesión
             session_context = session_context_service.build_context_for_ai(session_id)
             
+            # Obtener configuración del tenant para incluir en el prompt
+            tenant_config = configuration_service.get_tenant_config(tenant_id)
+            
             # Construir prompt con contexto de sesión
-            prompt = self._build_session_prompt(query, user_context, branding_config, session_context)
+            prompt = self._build_session_prompt(query, user_context, branding_config, session_context, tenant_config)
             
             # 🚀 FASE 2: Usar configuración optimizada para chat con sesión
             response_text = await self._generate_content(prompt, task_type="chat_with_session")
@@ -550,7 +553,7 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
             return "Lo siento, no pude procesar tu mensaje."
     
     def _build_session_prompt(self, query: str, user_context: Dict[str, Any], 
-                            branding_config: Dict[str, Any], session_context: str) -> str:
+                            branding_config: Dict[str, Any], session_context: str, tenant_config: Dict[str, Any] = None) -> str:
         """Construye el prompt para chat con contexto de sesión"""
         contact_name = branding_config.get("contactName", "el candidato")
         
@@ -560,6 +563,14 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
             current_context += f"El usuario se llama {user_context['user_name']}. "
         if user_context.get("user_state"):
             current_context += f"Estado actual: {user_context['user_state']}. "
+        
+        # Información específica del tenant
+        tenant_info = ""
+        if tenant_config:
+            if tenant_config.get("link_calendly"):
+                tenant_info += f"ENLACE DE CITAS: {tenant_config['link_calendly']}\n"
+            if tenant_config.get("link_forms"):
+                tenant_info += f"FORMULARIOS: {tenant_config['link_forms']}\n"
         
         # Detectar si es un saludo
         is_greeting = query.lower().strip() in ["hola", "hi", "hello", "hey", "buenos días", "buenas tardes", "buenas noches", "qué tal", "que tal"]
@@ -575,6 +586,9 @@ CONTEXTO ACTUAL DE LA SESIÓN:
 CONTEXTO INMEDIATO:
 {current_context}
 
+INFORMACIÓN ESPECÍFICA DEL TENANT:
+{tenant_info}
+
 Mensaje actual del usuario: "{query}"
 
 INSTRUCCIONES:
@@ -584,6 +598,7 @@ INSTRUCCIONES:
 4. Mantén un tono amigable y profesional
 5. Si no tienes información específica, sé honesto al respecto
 6. Integra sutilmente elementos motivacionales sin ser explícito sobre "EPIC MEANING" o "DEVELOPMENT"
+7. **IMPORTANTE**: Si el usuario pide agendar una cita, usar el enlace específico de ENLACE DE CITAS
 
 SISTEMA DE PUNTOS Y RANKING:
 - Cada referido registrado suma 50 puntos
