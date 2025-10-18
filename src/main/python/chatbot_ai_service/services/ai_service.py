@@ -425,17 +425,23 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
             if document_context:
                 session_context_service.update_document_context(session_id, document_context)
             
-            # 🚀 OPTIMIZACIÓN 2: Intentar obtener intención desde cache primero
-            cached_intent = self._get_cached_intent(query)
-            if cached_intent:
-                intent = cached_intent
-                confidence = 0.95  # Alta confianza para patrones conocidos
-                logger.info(f"🎯 Usando intención desde cache: {intent}")
+            # 🚀 OPTIMIZACIÓN 2: Verificar si requiere contexto de documentos primero
+            if self._requires_document_context(query, document_context):
+                logger.info(f"📚 Consulta requiere contexto de documentos: {query}")
+                intent = "document_query"
+                confidence = 0.9
             else:
-                # Clasificar la intención del mensaje usando IA
-                classification_result = await self.classify_intent(tenant_id, query, user_context, session_id)
-                intent = classification_result.get("category", "default")
-                confidence = classification_result.get("confidence", 0.0)
+                # Intentar obtener intención desde cache
+                cached_intent = self._get_cached_intent(query)
+                if cached_intent:
+                    intent = cached_intent
+                    confidence = 0.95  # Alta confianza para patrones conocidos
+                    logger.info(f"🎯 Usando intención desde cache: {intent}")
+                else:
+                    # Clasificar la intención del mensaje usando IA
+                    classification_result = await self.classify_intent(tenant_id, query, user_context, session_id)
+                    intent = classification_result.get("category", "default")
+                    confidence = classification_result.get("confidence", 0.0)
             
             logger.info(f"🧠 Intención extraída: {intent} (confianza: {confidence:.2f})")
             
@@ -462,7 +468,12 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
                 }
             
             # 🚀 OPTIMIZACIÓN 3: Respuestas rápidas para casos comunes
-            if intent == "cita_campaña":
+            if intent == "document_query":
+                logger.info(f"📚 RESPUESTA CON DOCUMENTOS: document_query")
+                response = await self._generate_ai_response_with_session(
+                    query, user_context, ai_config, branding_config, tenant_id, session_id
+                )
+            elif intent == "cita_campaña":
                 logger.info(f"🎯 RESPUESTA RÁPIDA: cita_campaña")
                 response = self._handle_appointment_request(branding_config, tenant_config)
             elif intent == "saludo_apoyo":
@@ -633,6 +644,27 @@ Respuesta:
         except Exception as e:
             logger.warning(f"Error verificando documentos cargados para tenant {tenant_id}: {e}")
             return False
+    
+    def _requires_document_context(self, query: str, document_context: str = None) -> bool:
+        """
+        Determina si la consulta requiere contexto de documentos basado en si hay contexto disponible
+        """
+        # Si hay contexto de documentos disponible, probablemente la consulta lo necesita
+        if document_context and len(document_context.strip()) > 50:
+            logger.info(f"📚 Contexto de documentos disponible ({len(document_context)} chars), usando para consulta")
+            return True
+        
+        # Fallback: detectar si la consulta parece ser sobre temas específicos
+        query_lower = query.lower().strip()
+        
+        # Patrones que sugieren consulta específica (no saludo genérico)
+        specific_patterns = [
+            "qué es", "que es", "qué significa", "que significa",
+            "cuéntame", "cuentame", "información sobre", "informacion sobre",
+            "dame información", "dame informacion", "habla sobre", "habla de"
+        ]
+        
+        return any(pattern in query_lower for pattern in specific_patterns)
     
     def _get_cached_intent(self, query: str) -> Optional[str]:
         """
