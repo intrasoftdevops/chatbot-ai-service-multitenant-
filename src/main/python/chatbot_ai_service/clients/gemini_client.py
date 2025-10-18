@@ -106,44 +106,42 @@ class GeminiClient:
                     logger.debug(f"🔍 Candidate type: {type(candidate)}")
                     logger.debug(f"🔍 Has content: {hasattr(candidate, 'content')}")
                     
+                    # Chequear si fue bloqueado por safety
+                    if hasattr(candidate, 'finish_reason'):
+                        logger.debug(f"🔍 Finish reason: {candidate.finish_reason}")
+                        if str(candidate.finish_reason) in ['SAFETY', '3']:  # 3 = SAFETY enum value
+                            logger.error(f"❌ Respuesta bloqueada por safety filters. Finish reason: {candidate.finish_reason}")
+                            if hasattr(candidate, 'safety_ratings'):
+                                logger.error(f"   Safety ratings: {candidate.safety_ratings}")
+                            return "Lo siento, no puedo proporcionar esa respuesta debido a las políticas de seguridad."
+                    
                     if hasattr(candidate, 'content') and candidate.content:
-                        logger.debug(f"🔍 Content has parts: {hasattr(candidate.content, 'parts')}")
-                        logger.debug(f"🔍 Content structure: {dir(candidate.content)}")
-                        if hasattr(candidate.content, 'parts'):
-                            logger.debug(f"🔍 Parts length: {len(candidate.content.parts) if candidate.content.parts else 'None'}")
-                            logger.debug(f"🔍 Parts content: {candidate.content.parts}")
+                        content = candidate.content
+                        logger.debug(f"🔍 Content has parts: {hasattr(content, 'parts')}")
                         
-                        if hasattr(candidate.content, 'parts') and candidate.content.parts and len(candidate.content.parts) > 0:
-                            # Concatenar todas las partes de texto
-                            text_parts = []
-                            for i, part in enumerate(candidate.content.parts):
-                                logger.debug(f"🔍 Part {i} type: {type(part)}, has text: {hasattr(part, 'text')}")
-                                logger.debug(f"🔍 Part {i} structure: {dir(part)}")
-                                if hasattr(part, 'text') and part.text:
-                                    text_parts.append(part.text)
+                        if hasattr(content, 'parts'):
+                            if content.parts:
+                                # Concatenar todas las partes de texto
+                                text_parts = []
+                                for i, part in enumerate(content.parts):
+                                    logger.debug(f"🔍 Part {i} type: {type(part)}, has text: {hasattr(part, 'text')}")
+                                    if hasattr(part, 'text'):
+                                        text_parts.append(part.text)
+                                
+                                if text_parts:
+                                    result = ''.join(text_parts)
+                                    logger.info(f"✅ Texto extraído de respuesta multi-part: {len(result)} chars")
+                                    return result
                                 else:
-                                    # Si el part no tiene text, convertir a string
-                                    text_parts.append(str(part))
-                            
-                            if text_parts:
-                                result = ''.join(text_parts)
-                                logger.info(f"✅ Texto extraído de respuesta multi-part: {len(result)} chars")
-                                return result
-                        else:
-                            logger.error(f"❌ Content no tiene parts o parts está vacío. Content: {candidate.content}")
-                            # Intentar extraer texto directamente del content si no tiene parts
-                            if hasattr(candidate.content, 'text'):
-                                logger.info(f"✅ Texto encontrado directamente en content: {len(candidate.content.text)} chars")
-                                return candidate.content.text
+                                    logger.error(f"❌ Parts existen pero ninguna tiene texto. Parts: {[str(p) for p in content.parts[:3]]}")
                             else:
-                                logger.error(f"❌ Content tampoco tiene text. Content structure: {dir(candidate.content)}")
+                                logger.error(f"❌ Content no tiene parts o parts está vacío. Content: {content}")
+                        else:
+                            logger.error(f"❌ Content no tiene atributo 'parts'. Content: {content}")
                 
                 # Si nada funciona, retornar mensaje de error
-                logger.error(f"❌ No se pudo extraer texto de la respuesta de Gemini. Response tiene: candidates={hasattr(response, 'candidates')}")
-                logger.error(f"❌ Response structure: {dir(response)}")
-                if hasattr(response, 'candidates') and response.candidates:
-                    logger.error(f"❌ First candidate structure: {dir(response.candidates[0])}")
-                return "Lo siento, no pude procesar la respuesta correctamente. [DEBUG]"
+                logger.error(f"❌ No se pudo extraer texto de la respuesta de Gemini")
+                return "Lo siento, no pude procesar la respuesta correctamente."
                 
             except Exception as ex:
                 logger.error(f"❌ Error extrayendo texto de respuesta multi-part: {str(ex)}", exc_info=True)
