@@ -279,7 +279,20 @@ class GeminiClient:
                 if model:
                     logger.debug(f"🚀 Usando modelo configurado para task_type='{task_type}'")
                     response = model.generate_content(prompt)
-                    return response.text
+                    # Manejar respuestas complejas de Gemini
+                    if hasattr(response, 'text') and response.text:
+                        return response.text
+                    elif hasattr(response, 'parts') and response.parts:
+                        # Concatenar todos los parts para obtener la respuesta completa
+                        full_text = ""
+                        for part in response.parts:
+                            if hasattr(part, 'text') and part.text:
+                                full_text += part.text
+                            else:
+                                full_text += str(part)
+                        return full_text
+                    else:
+                        return str(response)
                 else:
                     logger.debug("⚠️ No se pudo crear modelo con config personalizada, usando modelo por defecto")
             except Exception as e:
@@ -293,7 +306,20 @@ class GeminiClient:
             if self.model:
                 logger.debug("🚀 Usando modelo por defecto (gRPC)")
                 response = self.model.generate_content(prompt)
-                return response.text
+                # Manejar respuestas complejas de Gemini
+                if hasattr(response, 'text') and response.text:
+                    return response.text
+                elif hasattr(response, 'parts') and response.parts:
+                    # Concatenar todos los parts para obtener la respuesta completa
+                    full_text = ""
+                    for part in response.parts:
+                        if hasattr(part, 'text') and part.text:
+                            full_text += part.text
+                        else:
+                            full_text += str(part)
+                    return full_text
+                else:
+                    return str(response)
         except Exception as e:
             logger.warning(f"⚠️ gRPC falló, usando REST API: {str(e)}")
         
