@@ -125,6 +125,12 @@ class GeminiClient:
                                 return result
                         else:
                             logger.error(f"❌ Content no tiene parts o parts está vacío. Content: {candidate.content}")
+                            # Intentar extraer texto directamente del content si no tiene parts
+                            if hasattr(candidate.content, 'text'):
+                                logger.info(f"✅ Texto encontrado directamente en content: {len(candidate.content.text)} chars")
+                                return candidate.content.text
+                            else:
+                                logger.error(f"❌ Content tampoco tiene text. Content structure: {dir(candidate.content)}")
                 
                 # Si nada funciona, retornar mensaje de error
                 logger.error(f"❌ No se pudo extraer texto de la respuesta de Gemini. Response tiene: candidates={hasattr(response, 'candidates')}")
