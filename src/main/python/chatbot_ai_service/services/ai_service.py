@@ -25,13 +25,6 @@ class AIService:
     def __init__(self):
         self.model = None
         self._initialized = False
-        # Rate limiting: máximo 15 requests por minuto para evitar exceder cuota
-        self.request_times = []
-        self.max_requests_per_minute = 15
-        # Cola de requests para manejar alta carga
-        self.request_queue = []
-        self.processing_queue = False
-        self.api_key = None
         # Servicio para notificar bloqueos
         self.blocking_notification_service = BlockingNotificationService()
         # Configurar URL del servicio Java desde variable de entorno
@@ -126,42 +119,6 @@ class AIService:
         except Exception as e:
             logger.warning(f"⚠️ No se pudo pre-calentar el modelo: {e}")
             # No es crítico, el modelo se inicializará en la primera llamada real
-    
-    def _check_rate_limit(self):
-        """Verifica y aplica rate limiting para evitar exceder cuota de API"""
-        current_time = time.time()
-        
-        # Limpiar requests antiguos (más de 1 minuto)
-        self.request_times = [t for t in self.request_times if current_time - t < 60]
-        
-        # Si hemos excedido el límite, esperar
-        if len(self.request_times) >= self.max_requests_per_minute:
-            sleep_time = 60 - (current_time - self.request_times[0])
-            if sleep_time > 0:
-                logger.warning(f"Rate limit alcanzado. Esperando {sleep_time:.1f} segundos...")
-                time.sleep(sleep_time)
-                # Limpiar la lista después de esperar
-                self.request_times = []
-        
-        # Registrar este request
-        self.request_times.append(current_time)
-    
-    def _should_use_fallback(self) -> bool:
-        """Determina si debemos usar fallback por alta carga o cuota excedida"""
-        current_time = time.time()
-        
-        # Si tenemos muchos requests recientes, usar fallback
-        recent_requests = [t for t in self.request_times if current_time - t < 60]
-        if len(recent_requests) >= self.max_requests_per_minute * 0.9:  # 90% de la cuota (13.5 requests)
-            logger.warning(f"Alta carga detectada: {len(recent_requests)} requests en el último minuto")
-            return True
-        
-        # Si la cola está muy llena, usar fallback
-        if len(self.request_queue) > 200:  # Aumentar umbral de cola
-            logger.warning(f"Cola llena detectada: {len(self.request_queue)} requests en cola")
-            return True
-            
-        return False
     
     def _get_fallback_response(self, prompt: str) -> str:
         """Genera respuesta de fallback inteligente sin usar IA"""
@@ -344,19 +301,6 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
                 # Continuar con lógica original como fallback
         
         # MANTENER: Lógica original completa como fallback
-        # Verificar si debemos usar fallback por alta carga
-        if self._should_use_fallback():
-            logger.info("Alta carga detectada, usando fallback inteligente")
-            return self._get_fallback_response(prompt)
-        
-        # Aplicar rate limiting
-        self._check_rate_limit()
-        
-        # Log del estado actual para debugging
-        current_time = time.time()
-        recent_requests = [t for t in self.request_times if current_time - t < 60]
-        logger.debug(f"Estado de requests: {len(recent_requests)}/{self.max_requests_per_minute} en el último minuto")
-        
         try:
             # Intentar con gRPC primero
             if self.model:
@@ -442,23 +386,21 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
             if document_context:
                 session_context_service.update_document_context(session_id, document_context)
             
-            # 🚀 OPTIMIZACIÓN 2: Verificar si requiere contexto de documentos primero
-            if self._requires_document_context(query, document_context):
+            # 🚀 OPTIMIZACIÓN 2: Verificar intenciones prioritarias primero (citas, etc.)
+            cached_intent = self._get_cached_intent(query)
+            if cached_intent:
+                intent = cached_intent
+                confidence = 0.95  # Alta confianza para patrones conocidos
+                logger.info(f"🎯 Usando intención desde cache: {intent}")
+            elif self._requires_document_context(query, document_context):
                 logger.info(f"📚 Consulta requiere contexto de documentos: {query}")
                 intent = "document_query"
                 confidence = 0.9
             else:
-                # Intentar obtener intención desde cache
-                cached_intent = self._get_cached_intent(query)
-                if cached_intent:
-                    intent = cached_intent
-                    confidence = 0.95  # Alta confianza para patrones conocidos
-                    logger.info(f"🎯 Usando intención desde cache: {intent}")
-                else:
-                    # Clasificar la intención del mensaje usando IA
-                    classification_result = await self.classify_intent(tenant_id, query, user_context, session_id)
-                    intent = classification_result.get("category", "default")
-                    confidence = classification_result.get("confidence", 0.0)
+                # Clasificar la intención del mensaje usando IA
+                classification_result = await self.classify_intent(tenant_id, query, user_context, session_id)
+                intent = classification_result.get("category", "default")
+                confidence = classification_result.get("confidence", 0.0)
             
             logger.info(f"🧠 Intención extraída: {intent} (confianza: {confidence:.2f})")
             
@@ -499,9 +441,6 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
             elif intent == "colaboracion_voluntariado":
                 logger.info(f"🎯 RESPUESTA RÁPIDA: colaboracion_voluntariado")
                 response = self._get_volunteer_response(branding_config)
-            elif self._should_use_fallback():
-                logger.info("Alta carga detectada en chat, usando fallback general")
-                response = self._get_general_fallback_response(query, tenant_config)
             else:
                 # Procesar según la intención clasificada con IA
                 if intent == "conocer_daniel":
