@@ -104,6 +104,18 @@ class DocumentContextService:
             try:
                 genai.configure(api_key=api_key)
                 
+                # Configurar modelo por defecto de LlamaIndex primero
+                if Settings is not None:
+                    # Crear modelo por defecto para evitar errores
+                    default_llm = Gemini(model="gemini-2.0-flash-exp", api_key=api_key)
+                    default_embedding = GeminiEmbedding(
+                        model_name="models/embedding-001",
+                        api_key=api_key
+                    )
+                    Settings.llm = default_llm
+                    Settings.embed_model = default_embedding
+                    logger.info("✅ Modelo por defecto de LlamaIndex configurado")
+                
                 # Configurar LlamaIndex con Gemini
                 if Gemini is not None and GeminiEmbedding is not None:
                     self._llm = Gemini(model="gemini-2.0-flash-exp", api_key=api_key)
