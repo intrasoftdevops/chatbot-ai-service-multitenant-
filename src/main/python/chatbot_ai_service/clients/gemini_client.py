@@ -124,6 +124,9 @@ class GeminiClient:
                 
                 # Si nada funciona, retornar mensaje de error
                 logger.error(f"❌ No se pudo extraer texto de la respuesta de Gemini. Response tiene: candidates={hasattr(response, 'candidates')}")
+                logger.error(f"❌ Response structure: {dir(response)}")
+                if hasattr(response, 'candidates') and response.candidates:
+                    logger.error(f"❌ First candidate structure: {dir(response.candidates[0])}")
                 return "Lo siento, no pude procesar la respuesta correctamente."
                 
             except Exception as ex:
