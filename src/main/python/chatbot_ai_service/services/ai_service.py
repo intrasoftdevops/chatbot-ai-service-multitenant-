@@ -374,33 +374,35 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
             # Agregar mensaje del usuario a la sesión
             session_context_service.add_message(session_id, "user", query)
             
-            # 🚀 OPTIMIZACIÓN 1: Verificar cache de documentos antes de cargar
-            if not self._is_tenant_documents_loaded(tenant_id):
-                logger.info(f"📚 Cargando documentos para tenant {tenant_id} (primera vez)")
-                await self._ensure_tenant_documents_loaded(tenant_id, ai_config)
-            else:
-                logger.info(f"✅ Documentos ya cargados para tenant {tenant_id}")
-            
-            # Actualizar contexto de documentos en la sesión
-            document_context = await document_context_service.get_relevant_context(tenant_id, query, max_results=3)
-            if document_context:
-                session_context_service.update_document_context(session_id, document_context)
-            
-            # 🚀 OPTIMIZACIÓN 2: Verificar intenciones prioritarias primero (citas, etc.)
+            # 🚀 OPTIMIZACIÓN 1: Verificar intenciones prioritarias primero (citas, etc.)
             cached_intent = self._get_cached_intent(query)
             if cached_intent:
                 intent = cached_intent
                 confidence = 0.95  # Alta confianza para patrones conocidos
                 logger.info(f"🎯 Usando intención desde cache: {intent}")
-            elif self._requires_document_context(query, document_context):
-                logger.info(f"📚 Consulta requiere contexto de documentos: {query}")
-                intent = "document_query"
-                confidence = 0.9
             else:
                 # Clasificar la intención del mensaje usando IA
                 classification_result = await self.classify_intent(tenant_id, query, user_context, session_id)
                 intent = classification_result.get("category", "default")
                 confidence = classification_result.get("confidence", 0.0)
+            
+            # 🚀 OPTIMIZACIÓN 2: Solo cargar documentos si la intención es conocer_candidato
+            document_context = None
+            if intent == "conocer_candidato":
+                logger.info(f"📚 Cargando documentos para consulta sobre candidato: {query}")
+                # Verificar cache de documentos antes de cargar
+                if not self._is_tenant_documents_loaded(tenant_id):
+                    logger.info(f"📚 Cargando documentos para tenant {tenant_id} (primera vez)")
+                    await self._ensure_tenant_documents_loaded(tenant_id, ai_config)
+                else:
+                    logger.info(f"✅ Documentos ya cargados para tenant {tenant_id}")
+                
+                # Obtener contexto de documentos
+                document_context = await document_context_service.get_relevant_context(tenant_id, query, max_results=3)
+                if document_context:
+                    session_context_service.update_document_context(session_id, document_context)
+            else:
+                logger.info(f"🎯 Intención '{intent}' no requiere documentos, saltando carga")
             
             logger.info(f"🧠 Intención extraída: {intent} (confianza: {confidence:.2f})")
             
@@ -427,11 +429,16 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
                 }
             
             # 🚀 OPTIMIZACIÓN 3: Respuestas rápidas para casos comunes
-            if intent == "document_query":
-                logger.info(f"📚 RESPUESTA CON DOCUMENTOS: document_query")
-                response = await self._generate_ai_response_with_session(
-                    query, user_context, ai_config, branding_config, tenant_id, session_id
-                )
+            if intent == "conocer_candidato":
+                logger.info(f"📚 RESPUESTA CON DOCUMENTOS: conocer_candidato")
+                # Solo usar documentos si están disponibles
+                if document_context:
+                    response = await self._generate_ai_response_with_session(
+                        query, user_context, ai_config, branding_config, tenant_id, session_id
+                    )
+                else:
+                    # Fallback si no hay documentos disponibles
+                    response = f"Hola {user_context.get('user_name', '')}! Te puedo ayudar con información sobre {branding_config.get('contactName', 'el candidato')}. ¿Hay algo específico que te gustaría saber?"
             elif intent == "cita_campaña":
                 logger.info(f"🎯 RESPUESTA RÁPIDA: cita_campaña")
                 response = self._handle_appointment_request(branding_config, tenant_config)
