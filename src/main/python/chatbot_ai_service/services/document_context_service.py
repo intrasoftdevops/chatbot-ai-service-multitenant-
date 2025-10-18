@@ -118,13 +118,13 @@ class DocumentContextService:
                 
                 # Configurar LlamaIndex con Gemini
                 if Gemini is not None and GeminiEmbedding is not None:
-                    # Usar gemini-1.5-pro (más estable que experimental)
-                    self._llm = Gemini(model="gemini-1.5-pro", api_key=api_key)
+                    # Usar gemini-2.5-flash (rápido y moderno)
+                    self._llm = Gemini(model="gemini-2.5-flash", api_key=api_key)
                     self._embedding_model = GeminiEmbedding(
                         model_name="models/embedding-001",
                         api_key=api_key
                     )
-                    logger.info("✅ Modelos LlamaIndex configurados: gemini-2.0-flash-exp + embedding-001")
+                    logger.info("✅ Modelos LlamaIndex configurados: gemini-2.5-flash + embedding-001")
                 
                 if Settings is not None and SimpleNodeParser is not None:
                     try:
