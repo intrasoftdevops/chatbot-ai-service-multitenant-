@@ -1,0 +1,431 @@
+"""
+RAG Orchestrator - Cerebro del sistema RAG
+
+Orquesta el flujo completo de Retrieval-Augmented Generation:
+1. Query Rewriting (reformular preguntas)
+2. Document Retrieval (buscar documentos relevantes)
+3. Context Building (construir contexto)
+4. Response Generation (generar respuesta)
+5. Verification (verificar respuesta)
+6. Citation (agregar citas)
+
+Este es el componente central del sistema RAG, coordinando todos
+los demás componentes para producir respuestas verificadas y fundamentadas.
+"""
+
+import logging
+from typing import Dict, Any, List, Optional
+from dataclasses import dataclass
+
+from chatbot_ai_service.retrievers.hybrid_retriever import HybridRetriever, RetrievedDocument
+from chatbot_ai_service.verifiers.source_verifier import SourceVerifier, VerificationResult
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class RAGResponse:
+    """Respuesta completa del RAGOrchestrator"""
+    response: str
+    response_with_citations: str
+    verification: VerificationResult
+    retrieved_documents: List[RetrievedDocument]
+    metadata: Dict[str, Any]
+
+
+class RAGOrchestrator:
+    """
+    Orquestador principal del sistema RAG
+    
+    Coordina todo el flujo desde la pregunta del usuario hasta
+    la respuesta verificada con citas de fuentes.
+    
+    Características:
+    - Query rewriting para mejor búsqueda
+    - Hybrid retrieval (semántica + keywords)
+    - Context building inteligente
+    - Response generation con documentos
+    - Source verification
+    - Automatic citations
+    """
+    
+    def __init__(
+        self, 
+        gemini_client=None,
+        document_service=None,
+        enable_verification: bool = True,
+        enable_citations: bool = True
+    ):
+        """
+        Inicializa el RAGOrchestrator
+        
+        Args:
+            gemini_client: Cliente de Gemini para generación
+            document_service: Servicio de documentos
+            enable_verification: Si True, verifica respuestas
+            enable_citations: Si True, agrega citas
+        """
+        self.gemini_client = gemini_client
+        self.document_service = document_service
+        self.enable_verification = enable_verification
+        self.enable_citations = enable_citations
+        
+        # Inicializar componentes
+        self.retriever = HybridRetriever(document_service)
+        self.verifier = SourceVerifier()
+        
+        logger.info(
+            f"🚀 RAGOrchestrator inicializado "
+            f"(verification={enable_verification}, citations={enable_citations})"
+        )
+    
+    async def _rewrite_query(self, query: str) -> List[str]:
+        """
+        Reescribe el query para mejorar la búsqueda
+        
+        Genera variaciones del query original para capturar
+        más documentos relevantes.
+        
+        Args:
+            query: Query original del usuario
+            
+        Returns:
+            Lista de queries (incluyendo el original)
+        """
+        # Por ahora, solo retornamos el query original
+        # En futuras versiones, usaremos Gemini para generar variaciones
+        
+        queries = [query]
+        
+        # Agregar variación con palabras clave adicionales
+        if "propuesta" in query.lower() or "propone" in query.lower():
+            queries.append(f"{query} plan gobierno programa")
+        
+        if "candidato" in query.lower():
+            queries.append(f"{query} trayectoria biografia perfil")
+        
+        logger.debug(f"Query rewriting: {len(queries)} variaciones generadas")
+        return queries
+    
+    async def _retrieve_documents(
+        self, 
+        queries: List[str], 
+        tenant_id: str,
+        max_results: int = 5
+    ) -> List[RetrievedDocument]:
+        """
+        Recupera documentos relevantes para los queries
+        
+        Args:
+            queries: Lista de queries
+            tenant_id: ID del tenant
+            max_results: Máximo de documentos a recuperar
+            
+        Returns:
+            Lista de documentos recuperados
+        """
+        all_docs = []
+        
+        for query in queries:
+            docs = await self.retriever.retrieve(
+                query=query,
+                tenant_id=tenant_id,
+                max_results=max_results
+            )
+            all_docs.extend(docs)
+        
+        # Deduplicar por doc_id
+        unique_docs = {}
+        for doc in all_docs:
+            if doc.doc_id not in unique_docs:
+                unique_docs[doc.doc_id] = doc
+            else:
+                # Si ya existe, mantener el de mayor score
+                if doc.combined_score > unique_docs[doc.doc_id].combined_score:
+                    unique_docs[doc.doc_id] = doc
+        
+        # Ordenar por score y retornar top N
+        final_docs = sorted(
+            unique_docs.values(), 
+            key=lambda x: x.combined_score, 
+            reverse=True
+        )[:max_results]
+        
+        logger.info(f"📚 Recuperados {len(final_docs)} documentos únicos")
+        return final_docs
+    
+    def _build_rag_context(
+        self, 
+        documents: List[RetrievedDocument],
+        max_context_length: int = 3000
+    ) -> str:
+        """
+        Construye el contexto para Gemini a partir de los documentos
+        
+        Args:
+            documents: Documentos recuperados
+            max_context_length: Longitud máxima del contexto
+            
+        Returns:
+            Contexto formateado para el prompt
+        """
+        if not documents:
+            return "No se encontraron documentos relevantes."
+        
+        context_parts = []
+        current_length = 0
+        
+        for i, doc in enumerate(documents, 1):
+            doc_text = f"[Documento {i}] {doc.title}\n{doc.content}\n"
+            
+            # Verificar si agregar este documento excede el límite
+            if current_length + len(doc_text) > max_context_length:
+                # Truncar el documento si es necesario
+                remaining_space = max_context_length - current_length
+                if remaining_space > 200:  # Solo agregar si queda espacio razonable
+                    doc_text = doc_text[:remaining_space] + "...\n"
+                    context_parts.append(doc_text)
+                break
+            
+            context_parts.append(doc_text)
+            current_length += len(doc_text)
+        
+        context = "\n".join(context_parts)
+        
+        logger.debug(f"Contexto construido: {len(context)} caracteres de {len(documents)} documentos")
+        return context
+    
+    def _build_rag_prompt(
+        self, 
+        query: str, 
+        context: str,
+        user_context: Dict[str, Any] = None
+    ) -> str:
+        """
+        Construye el prompt completo para RAG
+        
+        Args:
+            query: Pregunta del usuario
+            context: Contexto de documentos
+            user_context: Contexto adicional del usuario
+            
+        Returns:
+            Prompt formateado
+        """
+        user_info = ""
+        if user_context and user_context.get("user_name"):
+            user_info = f"El usuario se llama {user_context['user_name']}. "
+        
+        prompt = f"""
+Eres un asistente virtual para una campaña política. Tu objetivo es proporcionar información PRECISA y VERIFICABLE.
+
+**REGLAS FUNDAMENTALES:**
+1. 🎯 SOLO responde con información de los DOCUMENTOS proporcionados
+2. 📚 Si la información está en los documentos, úsala y cita la fuente
+3. 🚫 Si NO está en los documentos, di explícitamente "No tengo esa información en los documentos disponibles"
+4. ❌ NUNCA inventes datos, números, fechas o detalles que no estén en los documentos
+5. 💡 Si la pregunta requiere información no disponible, sugiere contactar al equipo de campaña
+
+**CONTEXTO DEL USUARIO:**
+{user_info}
+
+**DOCUMENTOS DISPONIBLES:**
+{context}
+
+**PREGUNTA DEL USUARIO:**
+{query}
+
+**INSTRUCCIONES PARA LA RESPUESTA:**
+- Sé claro, conciso y directo
+- Usa la información de los documentos
+- Cita el número del documento [Documento N] cuando uses información específica
+- Si no hay información, sé honesto al respecto
+- Mantén un tono profesional y amigable
+
+**TU RESPUESTA:**
+"""
+        return prompt
+    
+    async def _generate_response(
+        self, 
+        prompt: str,
+        task_type: str = "rag_generation"
+    ) -> str:
+        """
+        Genera la respuesta usando Gemini
+        
+        Args:
+            prompt: Prompt completo
+            task_type: Tipo de tarea para configuración
+            
+        Returns:
+            Respuesta generada
+        """
+        if not self.gemini_client:
+            logger.error("GeminiClient no disponible")
+            return "Lo siento, el servicio de IA no está disponible en este momento."
+        
+        try:
+            response = await self.gemini_client.generate_content(
+                prompt=prompt,
+                task_type=task_type,
+                use_custom_config=True
+            )
+            
+            logger.info(f"✅ Respuesta generada ({len(response)} caracteres)")
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error generando respuesta: {str(e)}")
+            return f"Lo siento, hubo un error al procesar tu consulta: {str(e)}"
+    
+    async def process_query(
+        self, 
+        query: str, 
+        tenant_id: str,
+        user_context: Dict[str, Any] = None,
+        max_docs: int = 3
+    ) -> RAGResponse:
+        """
+        Procesa un query completo usando RAG
+        
+        Este es el método principal que orquesta todo el flujo:
+        1. Rewrite query
+        2. Retrieve documents
+        3. Build context
+        4. Generate response
+        5. Verify response
+        6. Add citations
+        
+        Args:
+            query: Pregunta del usuario
+            tenant_id: ID del tenant
+            user_context: Contexto adicional del usuario
+            max_docs: Máximo número de documentos a usar
+            
+        Returns:
+            RAGResponse con respuesta completa y metadata
+        """
+        logger.info(f"🎯 Procesando query RAG: '{query}' para tenant {tenant_id}")
+        
+        start_time = None
+        try:
+            import time
+            start_time = time.time()
+        except:
+            pass
+        
+        # 1. Query Rewriting
+        logger.info("1️⃣ Reescribiendo query...")
+        queries = await self._rewrite_query(query)
+        
+        # 2. Document Retrieval
+        logger.info("2️⃣ Recuperando documentos...")
+        documents = await self._retrieve_documents(queries, tenant_id, max_docs)
+        
+        if not documents:
+            logger.warning("⚠️ No se encontraron documentos relevantes")
+            return RAGResponse(
+                response="Lo siento, no encontré información relevante en los documentos disponibles para responder tu pregunta. ¿Podrías reformularla o hacer una pregunta más específica?",
+                response_with_citations="",
+                verification=VerificationResult(
+                    is_verified=False,
+                    confidence=0.0,
+                    unsupported_claims=[],
+                    sources_used=[],
+                    hallucination_risk=0.0,
+                    recommendation="No hay documentos disponibles"
+                ),
+                retrieved_documents=[],
+                metadata={"query": query, "tenant_id": tenant_id}
+            )
+        
+        # 3. Build Context
+        logger.info("3️⃣ Construyendo contexto...")
+        context = self._build_rag_context(documents)
+        
+        # 4. Build Prompt
+        logger.info("4️⃣ Construyendo prompt...")
+        prompt = self._build_rag_prompt(query, context, user_context)
+        
+        # 5. Generate Response
+        logger.info("5️⃣ Generando respuesta...")
+        response = await self._generate_response(prompt)
+        
+        # 6. Verify Response
+        verification = None
+        if self.enable_verification:
+            logger.info("6️⃣ Verificando respuesta...")
+            verification = self.verifier.verify_response(response, documents)
+        else:
+            verification = VerificationResult(
+                is_verified=True,
+                confidence=1.0,
+                unsupported_claims=[],
+                sources_used=[],
+                hallucination_risk=0.0,
+                recommendation="Verificación deshabilitada"
+            )
+        
+        # 7. Add Citations
+        response_with_citations = response
+        if self.enable_citations:
+            logger.info("7️⃣ Agregando citas...")
+            response_with_citations = self.verifier.add_citations(response, documents)
+        
+        # Calculate processing time
+        processing_time = None
+        if start_time:
+            try:
+                processing_time = time.time() - start_time
+            except:
+                pass
+        
+        # Build metadata
+        metadata = {
+            "query": query,
+            "tenant_id": tenant_id,
+            "num_documents_retrieved": len(documents),
+            "num_queries_generated": len(queries),
+            "verification_enabled": self.enable_verification,
+            "citations_enabled": self.enable_citations,
+            "processing_time_seconds": processing_time
+        }
+        
+        logger.info(
+            f"✅ Query RAG procesado exitosamente "
+            f"({len(documents)} docs, {processing_time:.2f}s)" if processing_time else ""
+        )
+        
+        return RAGResponse(
+            response=response,
+            response_with_citations=response_with_citations,
+            verification=verification,
+            retrieved_documents=documents,
+            metadata=metadata
+        )
+    
+    async def process_query_simple(
+        self, 
+        query: str, 
+        tenant_id: str,
+        user_context: Dict[str, Any] = None
+    ) -> str:
+        """
+        Versión simplificada que solo retorna la respuesta con citas
+        
+        Args:
+            query: Pregunta del usuario
+            tenant_id: ID del tenant
+            user_context: Contexto del usuario
+            
+        Returns:
+            Respuesta con citas (string)
+        """
+        rag_response = await self.process_query(query, tenant_id, user_context)
+        
+        if self.enable_citations:
+            return rag_response.response_with_citations
+        else:
+            return rag_response.response
+

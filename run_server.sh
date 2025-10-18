@@ -31,6 +31,12 @@ USE_ADVANCED_MODEL_CONFIGS=true
 export USE_ADVANCED_MODEL_CONFIGS
 
 # ──────────────────────────────────────────────────────────────────────────────
+# 🧠 FASE 6: Activar RAGOrchestrator (SMART MODE)
+# ──────────────────────────────────────────────────────────────────────────────
+USE_RAG_ORCHESTRATOR=false  # Cambiar a true para activar RAG
+export USE_RAG_ORCHESTRATOR
+
+# ──────────────────────────────────────────────────────────────────────────────
 # 💾 Redis Cache (Ya configurado en .env, pero puede sobrescribirse aquí)
 # ──────────────────────────────────────────────────────────────────────────────
 # REDIS_ENABLED ya está en .env como true
@@ -48,6 +54,7 @@ echo ""
 echo "🎯 FEATURE FLAGS:"
 echo "   ✅ FASE 1 - USE_GEMINI_CLIENT: $USE_GEMINI_CLIENT"
 echo "   ✅ FASE 2 - USE_ADVANCED_MODEL_CONFIGS: $USE_ADVANCED_MODEL_CONFIGS"
+echo "   🧠 FASE 6 - USE_RAG_ORCHESTRATOR: $USE_RAG_ORCHESTRATOR"
 echo ""
 echo "🔧 SERVICIOS:"
 echo "   🌐 CONFIG SERVICE: $POLITICAL_REFERRALS_SERVICE_URL"
@@ -57,6 +64,7 @@ echo "════════════════════════�
 echo "🎮 Servidor arrancando... Busca estos logs:"
 echo "   ✅ GeminiClient habilitado via feature flag"
 echo "   ✅ Configuraciones avanzadas de modelo habilitadas"
+echo "   🧠 RAGOrchestrator habilitado (si USE_RAG_ORCHESTRATOR=true)"
 echo "══════════════════════════════════════════════════════════════════════════════"
 echo ""
 

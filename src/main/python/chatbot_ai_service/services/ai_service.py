@@ -61,6 +61,30 @@ class AIService:
         elif self.use_advanced_model_configs and not self.use_gemini_client:
             logger.warning("⚠️ USE_ADVANCED_MODEL_CONFIGS=true pero USE_GEMINI_CLIENT=false. Las configs avanzadas requieren GeminiClient.")
             self.use_advanced_model_configs = False
+        
+        # 🚀 FASE 6: Feature flag para usar RAGOrchestrator
+        # Habilita el sistema completo de RAG con búsqueda híbrida y verificación
+        self.use_rag_orchestrator = os.getenv("USE_RAG_ORCHESTRATOR", "false").lower() == "true"
+        self.rag_orchestrator = None
+        
+        if self.use_rag_orchestrator:
+            if not self.use_gemini_client:
+                logger.warning("⚠️ USE_RAG_ORCHESTRATOR=true pero USE_GEMINI_CLIENT=false. RAG requiere GeminiClient.")
+                self.use_rag_orchestrator = False
+            else:
+                try:
+                    from chatbot_ai_service.orchestrators.rag_orchestrator import RAGOrchestrator
+                    self.rag_orchestrator = RAGOrchestrator(
+                        gemini_client=self.gemini_client,
+                        document_service=document_context_service,
+                        enable_verification=True,
+                        enable_citations=True
+                    )
+                    logger.info("✅ RAGOrchestrator habilitado (USE_RAG_ORCHESTRATOR=true)")
+                except Exception as e:
+                    logger.error(f"❌ Error inicializando RAGOrchestrator: {e}")
+                    logger.warning("⚠️ Usando lógica original sin RAG")
+                    self.use_rag_orchestrator = False
     
     def _check_rate_limit(self):
         """Verifica y aplica rate limiting para evitar exceder cuota de API"""
@@ -1074,6 +1098,23 @@ Responde solo el JSON estricto sin comentarios:
                                   ai_config: Dict[str, Any], branding_config: Dict[str, Any], 
                                   tenant_id: str) -> str:
         """Genera respuesta usando IA con contexto de documentos"""
+        
+        # 🚀 FASE 6: Usar RAGOrchestrator si está habilitado
+        if self.use_rag_orchestrator and self.rag_orchestrator:
+            try:
+                logger.info(f"🎯 Usando RAGOrchestrator para generar respuesta")
+                response = await self.rag_orchestrator.process_query_simple(
+                    query=query,
+                    tenant_id=tenant_id,
+                    user_context=user_context
+                )
+                return response
+            except Exception as e:
+                logger.error(f"❌ Error usando RAGOrchestrator: {str(e)}")
+                logger.info("⚠️ Fallback a lógica original")
+                # Continuar con lógica original como fallback
+        
+        # Lógica original (sin RAG)
         self._ensure_model_initialized()
         if not self.model:
             return "Lo siento, el servicio de IA no está disponible."

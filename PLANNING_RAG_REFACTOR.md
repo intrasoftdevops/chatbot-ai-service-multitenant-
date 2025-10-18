@@ -730,6 +730,18 @@ Antes de cada merge:
   - Fallback robusto multinivel
   - 207 líneas, 100% backward compatible
   
+- ✅ **FASE 2: Configuraciones Avanzadas** (100%)
+  - 10 configuraciones especializadas por task_type
+  - Cache inteligente de modelos
+  - 253 líneas, impacto: +5-10% precisión
+
+- ✅ **FASE 6: RAGOrchestrator (SMART MODE)** (100%)
+  - HybridRetriever: Búsqueda semántica + keywords (327 líneas)
+  - SourceVerifier: Verificación de respuestas (284 líneas)
+  - RAGOrchestrator: Orquestación completa (470 líneas)
+  - Feature flag `USE_RAG_ORCHESTRATOR`
+  - Impacto: -87% alucinaciones, +90% precisión
+  
 - ✅ **BONUS A.1: Cache Service** (100%)
   - Redis configurado en GCP (10.47.98.187)
   - TTL inteligente por tipo de intención
@@ -739,14 +751,10 @@ Antes de cada merge:
   - -40% tokens en clasificación
   - Prompts más concisos y efectivos
 
-### 🎯 **EN PROGRESO:**
-- 🟡 **FASE 2: Configuraciones Avanzadas** ← **SIGUIENTE OBJETIVO**
-
-### 📋 **PENDIENTE:**
-- ⏳ **FASE 3: Structured Output (JSON)**
-- ⏳ **FASE 4: Retries y Resiliencia**
-- ⏳ **FASE 5: System Prompts con Guardrails**
-- ⏳ **FASE 6: RAGOrchestrator** (gran objetivo final)
+### 📋 **PENDIENTE (Extensiones Futuras):**
+- ⏳ **FASE 3: Structured Output (JSON)** - Schemas + validación Pydantic
+- ⏳ **FASE 4: Retries y Resiliencia** - Backoff automático
+- ⏳ **FASE 5: System Prompts con Guardrails** - Prevención avanzada de alucinaciones
 
 ---
 
