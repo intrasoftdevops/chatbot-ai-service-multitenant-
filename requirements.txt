@@ -1,7 +1,7 @@
 # FastAPI y dependencias web
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
-pydantic==2.5.0
+pydantic>=2.8.0  # Requerido por llama-index-core>=0.14.0
 pydantic-settings==2.1.0
 
 # Firebase

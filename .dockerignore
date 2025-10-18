@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+PLANNING*.md
+CONTEXTO*.md
+RESUMEN*.md
+SESIONES*.md
+TESTING.md
+README.md
+
+# Scripts
+run_server.sh
+restart_service.py
+run_tests.py
+test_*.py
+
+# GitHub
+.github/
+
+# Docker
+Dockerfile
+.dockerignore
+
+# Temporal
+.cursor/
+.DS_Store
+tmp/
+temp/
+
