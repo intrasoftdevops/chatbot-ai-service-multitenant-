@@ -95,26 +95,39 @@ class GeminiClient:
             return response.text
         except (ValueError, AttributeError) as e:
             # Si falla, es una respuesta multi-part
-            logger.debug(f"Respuesta multi-part detectada, extrayendo partes...")
+            logger.warning(f"⚠️ response.text falló: {str(e)}, intentando extracción manual...")
             try:
-                if response.candidates and len(response.candidates) > 0:
+                # Debug: Ver estructura de respuesta
+                logger.debug(f"🔍 Response type: {type(response)}")
+                logger.debug(f"🔍 Has candidates: {hasattr(response, 'candidates')}")
+                
+                if hasattr(response, 'candidates') and response.candidates and len(response.candidates) > 0:
                     candidate = response.candidates[0]
-                    if candidate.content and candidate.content.parts:
-                        # Concatenar todas las partes de texto
-                        text_parts = []
-                        for part in candidate.content.parts:
-                            if hasattr(part, 'text'):
-                                text_parts.append(part.text)
-                        result = ''.join(text_parts)
-                        logger.debug(f"✅ Texto extraído de respuesta multi-part: {len(result)} chars")
-                        return result
+                    logger.debug(f"🔍 Candidate type: {type(candidate)}")
+                    logger.debug(f"🔍 Has content: {hasattr(candidate, 'content')}")
+                    
+                    if hasattr(candidate, 'content') and candidate.content:
+                        logger.debug(f"🔍 Content has parts: {hasattr(candidate.content, 'parts')}")
+                        
+                        if hasattr(candidate.content, 'parts') and candidate.content.parts:
+                            # Concatenar todas las partes de texto
+                            text_parts = []
+                            for i, part in enumerate(candidate.content.parts):
+                                logger.debug(f"🔍 Part {i} type: {type(part)}, has text: {hasattr(part, 'text')}")
+                                if hasattr(part, 'text'):
+                                    text_parts.append(part.text)
+                            
+                            if text_parts:
+                                result = ''.join(text_parts)
+                                logger.info(f"✅ Texto extraído de respuesta multi-part: {len(result)} chars")
+                                return result
                 
                 # Si nada funciona, retornar mensaje de error
-                logger.error("❌ No se pudo extraer texto de la respuesta de Gemini")
+                logger.error(f"❌ No se pudo extraer texto de la respuesta de Gemini. Response tiene: candidates={hasattr(response, 'candidates')}")
                 return "Lo siento, no pude procesar la respuesta correctamente."
                 
             except Exception as ex:
-                logger.error(f"❌ Error extrayendo texto de respuesta multi-part: {str(ex)}")
+                logger.error(f"❌ Error extrayendo texto de respuesta multi-part: {str(ex)}", exc_info=True)
                 return "Lo siento, hubo un error procesando la respuesta."
     
     def _check_rate_limit(self):
