@@ -9,10 +9,17 @@ ENV PORT=8000
 # Crear directorio de trabajo
 WORKDIR /app
 
-# Instalar dependencias del sistema
+# Instalar dependencias del sistema necesarias para compilar paquetes de Python
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
+    make \
+    build-essential \
+    libffi-dev \
+    libssl-dev \
+    python3-dev \
+    cargo \
+    rustc \
     && rm -rf /var/lib/apt/lists/*
 
 # Copiar archivos de dependencias
