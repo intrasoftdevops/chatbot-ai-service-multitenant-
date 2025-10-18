@@ -218,6 +218,31 @@ class AIService:
         elif any(word in prompt_lower for word in ["estado", "mi estado", "progreso", "avance"]):
             return "Para ver tu estado actual, puntos y posición en el ranking, necesito verificar tu información. ¿Ya estás registrado como promotor?"
         
+        elif any(word in prompt_lower for word in ["cita", "agendar", "agendarme", "reunión", "reunion", "enlace", "calendly", "calendario"]):
+            # Respuesta directa con enlace de Calendly si está disponible
+            calendly_link = None
+            if tenant_config and tenant_config.get("link_calendly"):
+                calendly_link = tenant_config["link_calendly"]
+            
+            if calendly_link:
+                return f"""¡Perfecto! Te ayudo a agendar una cita con alguien de la campaña de {contact_name}.
+
+📅 *Para agendar tu reunión:*
+Puedes usar nuestro sistema de citas en línea: {calendly_link}
+
+🎯 *¿Qué puedes hacer en la reunión?*
+• Conocer más sobre las propuestas de {contact_name}
+• Hablar sobre oportunidades de voluntariado
+• Discutir ideas para la campaña
+• Coordinar actividades en tu región
+
+💡 *Mientras tanto:*
+¿Sabías que puedes sumar puntos invitando a tus amigos y familiares a unirse a este movimiento? Cada persona que se registre con tu código te suma 50 puntos al ranking.
+
+¿Te gustaría que te envíe tu link de referido para empezar a ganar puntos?"""
+            else:
+                return f"¡Excelente! Te ayudo a agendar una cita con alguien de la campaña de {contact_name}. Para poder darte el enlace correcto, necesito saber un poco más sobre el tipo de cita que buscas. ¿Te interesa hablar sobre voluntariado, prensa, temas de política, o algo más específico?"
+        
         else:
             return f"Entiendo tu mensaje. Estoy aquí para ayudarte con todo lo relacionado con la campaña de {contact_name}. ¿Hay algo específico en lo que pueda asistirte?"
     
