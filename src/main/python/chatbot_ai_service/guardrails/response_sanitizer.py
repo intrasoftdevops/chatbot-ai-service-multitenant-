@@ -57,20 +57,24 @@ class ResponseSanitizer:
         sanitized = response
         changes = []
         
-        # 1. Remover lenguaje especulativo
+        # 1. Remover URLs y referencias a archivos (SEGURIDAD - PRIORIDAD MÁXIMA)
+        sanitized, url_changes = self._remove_urls_and_files(sanitized)
+        changes.extend(url_changes)
+        
+        # 2. Remover lenguaje especulativo
         sanitized, spec_changes = self._remove_speculative_language(sanitized)
         changes.extend(spec_changes)
         
-        # 2. Remover o marcar números no verificados
+        # 3. Remover o marcar números no verificados
         if documents:
             sanitized, num_changes = self._sanitize_numbers(sanitized, documents)
             changes.extend(num_changes)
         
-        # 3. Remover opiniones personales
+        # 4. Remover opiniones personales
         sanitized, opinion_changes = self._remove_personal_opinions(sanitized)
         changes.extend(opinion_changes)
         
-        # 4. Agregar disclaimers si es necesario
+        # 5. Agregar disclaimers si es necesario
         if guardrail_result and not guardrail_result.all_passed:
             sanitized, disclaimer = self._add_disclaimer(sanitized, guardrail_result)
             if disclaimer:
@@ -80,6 +84,64 @@ class ResponseSanitizer:
             logger.info(f"✅ Sanitización completada: {len(changes)} cambios realizados")
         else:
             logger.debug("No se requirieron cambios de sanitización")
+        
+        return sanitized, changes
+    
+    def _remove_urls_and_files(self, response: str) -> Tuple[str, List[str]]:
+        """Remueve URLs y referencias a archivos (SEGURIDAD)"""
+        changes = []
+        sanitized = response
+        
+        # Patrones para detectar y remover URLs
+        url_patterns = [
+            (r'https?://[^\s\])\>]+', 'URL removida por seguridad'),  # http:// o https://
+            (r'www\.[^\s\])\>]+', 'enlace removido'),  # www.
+            (r'[a-zA-Z0-9-]+\.(com|org|net|io|co|gov|edu)[^\s\])\>]*', 'enlace removido'),  # dominios
+            (r'tinyurl\.com/[^\s\])\>]+', 'enlace removido'),  # TinyURL
+            (r'bit\.ly/[^\s\])\>]+', 'enlace removido'),  # Bit.ly
+            (r'drive\.google\.com[^\s\])\>]*', 'enlace removido'),  # Google Drive
+            (r'docs\.google\.com[^\s\])\>]*', 'enlace removido'),  # Google Docs
+            (r'storage\.googleapis\.com[^\s\])\>]*', 'enlace removido'),  # GCS
+        ]
+        
+        urls_found = []
+        for pattern, replacement in url_patterns:
+            matches = re.findall(pattern, sanitized, re.IGNORECASE)
+            if matches:
+                urls_found.extend(matches)
+                sanitized = re.sub(pattern, f'[{replacement}]', sanitized, flags=re.IGNORECASE)
+                changes.append(f"removed_url: {len(matches)} URLs")
+        
+        # Remover menciones de archivos
+        file_pattern = r'\b[\w-]+\.(pdf|docx?|xlsx?|txt|csv|md)\b'
+        file_matches = re.findall(file_pattern, sanitized, re.IGNORECASE)
+        if file_matches:
+            sanitized = re.sub(file_pattern, '[archivo removido]', sanitized, flags=re.IGNORECASE)
+            changes.append(f"removed_files: {len(file_matches)} archivos")
+        
+        # Remover frases que mencionan documentos
+        doc_phrases = [
+            r'te comparto (?:este|el) enlace',
+            r'encontrarás (?:en|todas las)',
+            r'puedes revisar (?:en|el documento)',
+            r'consulta (?:el|este) documento',
+            r'ver más en',
+            r'disponible en',
+        ]
+        
+        for phrase in doc_phrases:
+            if re.search(phrase, sanitized, re.IGNORECASE):
+                # Remover toda la oración que contiene la frase
+                sanitized = re.sub(
+                    rf'[^.!?]*{phrase}[^.!?]*[.!?]',
+                    '',
+                    sanitized,
+                    flags=re.IGNORECASE
+                )
+                changes.append(f"removed_doc_reference: {phrase}")
+        
+        if urls_found:
+            logger.warning(f"⚠️ SEGURIDAD: {len(urls_found)} URL(s) removidas de la respuesta")
         
         return sanitized, changes
     

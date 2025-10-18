@@ -97,6 +97,9 @@ class GuardrailVerifier:
         # 6. Verificar formato de respuesta
         checks.append(self._check_format(response))
         
+        # 7. Verificar que NO haya URLs/enlaces (seguridad)
+        checks.append(self._check_no_urls(response))
+        
         # Contar fallos críticos y warnings
         critical_failures = sum(1 for c in checks if not c.passed and c.severity == 'critical')
         warnings = sum(1 for c in checks if not c.passed and c.severity == 'warning')
@@ -315,6 +318,51 @@ class GuardrailVerifier:
             rule_name="appropriate_format",
             details=details,
             severity="info"  # Informativo, no crítico
+        )
+    
+    def _check_no_urls(self, response: str) -> GuardrailCheckResult:
+        """Verifica que NO haya URLs o enlaces en la respuesta (seguridad)"""
+        # Patrones para detectar URLs
+        url_patterns = [
+            r'https?://[^\s]+',  # http:// o https://
+            r'www\.[^\s]+',  # www.
+            r'[a-zA-Z0-9-]+\.(com|org|net|io|co|gov|edu)[^\s]*',  # dominios comunes
+            r'tinyurl\.com/[^\s]+',  # TinyURL específicamente
+            r'bit\.ly/[^\s]+',  # Bit.ly
+            r'drive\.google\.com[^\s]*',  # Google Drive
+            r'docs\.google\.com[^\s]*',  # Google Docs
+            r'storage\.googleapis\.com[^\s]*',  # GCS
+        ]
+        
+        found_urls = []
+        for pattern in url_patterns:
+            matches = re.findall(pattern, response, re.IGNORECASE)
+            found_urls.extend(matches)
+        
+        # También detectar menciones de archivos
+        file_mentions = re.findall(
+            r'\b[\w-]+\.(pdf|docx?|xlsx?|txt|csv|md)\b',
+            response,
+            re.IGNORECASE
+        )
+        
+        passed = len(found_urls) == 0 and len(file_mentions) == 0
+        
+        if not passed:
+            details_parts = []
+            if found_urls:
+                details_parts.append(f"{len(found_urls)} URL(s) detectada(s)")
+            if file_mentions:
+                details_parts.append(f"{len(file_mentions)} archivo(s) mencionado(s)")
+            details = "⚠️ SEGURIDAD: " + ", ".join(details_parts)
+        else:
+            details = "✅ Sin URLs ni referencias a archivos"
+        
+        return GuardrailCheckResult(
+            passed=passed,
+            rule_name="no_urls_or_files",
+            details=details,
+            severity="critical" if not passed else "info"
         )
     
     def _generate_recommendation(
