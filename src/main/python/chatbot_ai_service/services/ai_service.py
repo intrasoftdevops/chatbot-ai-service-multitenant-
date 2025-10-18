@@ -95,6 +95,16 @@ class AIService:
                     logger.error(f"❌ Error inicializando RAGOrchestrator: {e}")
                     logger.warning("⚠️ Usando lógica original sin RAG")
                     self.use_rag_orchestrator = False
+        
+        # 📊 Log resumen de features activadas
+        features_status = {
+            "GeminiClient": "✅" if self.use_gemini_client else "❌",
+            "Advanced Configs": "✅" if self.use_advanced_model_configs else "❌",
+            "RAG Orchestrator": "✅" if self.use_rag_orchestrator else "❌",
+            "Guardrails": "✅" if self.use_guardrails else "❌",
+            "Strict Guardrails": "✅" if self.strict_guardrails else "❌"
+        }
+        logger.info(f"🎛️ AIService inicializado | Features: {features_status}")
     
     def _check_rate_limit(self):
         """Verifica y aplica rate limiting para evitar exceder cuota de API"""
@@ -1085,24 +1095,27 @@ Responde solo el JSON estricto sin comentarios:
         """Asegura que los documentos del tenant estén cargados"""
         try:
             # Verificar si ya tenemos documentos cargados
-            if document_context_service.get_tenant_document_info(tenant_id):
+            doc_info = document_context_service.get_tenant_document_info(tenant_id)
+            if doc_info:
+                logger.debug(f"📚 Documentos ya cargados para tenant {tenant_id}: {doc_info.get('document_count', 0)} docs")
                 return
             
             # Obtener URL del bucket de documentación
             documentation_bucket_url = ai_config.get("documentation_bucket_url")
             
             if documentation_bucket_url:
-                logger.info(f"Cargando documentos para tenant {tenant_id} desde: {documentation_bucket_url}")
+                logger.info(f"📥 Iniciando carga de documentos para tenant {tenant_id} desde: {documentation_bucket_url}")
                 success = await document_context_service.load_tenant_documents(tenant_id, documentation_bucket_url)
                 if success:
-                    logger.info(f"Documentos cargados exitosamente para tenant {tenant_id}")
+                    doc_info = document_context_service.get_tenant_document_info(tenant_id)
+                    logger.info(f"✅ Documentos cargados para tenant {tenant_id}: {doc_info.get('document_count', 0)} docs")
                 else:
-                    logger.warning(f"No se pudieron cargar documentos para tenant {tenant_id}")
+                    logger.warning(f"⚠️ No se pudieron cargar documentos para tenant {tenant_id}")
             else:
-                logger.info(f"No hay bucket de documentación configurado para tenant {tenant_id}")
+                logger.debug(f"ℹ️ No hay bucket de documentación configurado para tenant {tenant_id}")
                 
         except Exception as e:
-            logger.error(f"Error cargando documentos para tenant {tenant_id}: {str(e)}")
+            logger.error(f"❌ Error cargando documentos para tenant {tenant_id}: {str(e)}", exc_info=True)
     
     async def _generate_ai_response(self, query: str, user_context: Dict[str, Any], 
                                   ai_config: Dict[str, Any], branding_config: Dict[str, Any], 
@@ -1112,16 +1125,17 @@ Responde solo el JSON estricto sin comentarios:
         # 🚀 FASE 6: Usar RAGOrchestrator si está habilitado
         if self.use_rag_orchestrator and self.rag_orchestrator:
             try:
-                logger.info(f"🎯 Usando RAGOrchestrator para generar respuesta")
+                logger.info(f"🎯 Usando RAGOrchestrator | tenant_id={tenant_id} | query='{query[:50]}...'")
                 response = await self.rag_orchestrator.process_query_simple(
                     query=query,
                     tenant_id=tenant_id,
                     user_context=user_context
                 )
+                logger.info(f"✅ RAG respuesta generada | length={len(response)} chars")
                 return response
             except Exception as e:
-                logger.error(f"❌ Error usando RAGOrchestrator: {str(e)}")
-                logger.info("⚠️ Fallback a lógica original")
+                logger.error(f"❌ Error usando RAGOrchestrator: {str(e)}", exc_info=True)
+                logger.info("⚠️ Fallback a lógica original (sin RAG)")
                 # Continuar con lógica original como fallback
         
         # Lógica original (sin RAG)
