@@ -15,6 +15,7 @@ from chatbot_ai_service.services.configuration_service import configuration_serv
 from chatbot_ai_service.services.document_context_service import document_context_service
 from chatbot_ai_service.services.session_context_service import session_context_service
 from chatbot_ai_service.services.blocking_notification_service import BlockingNotificationService
+from chatbot_ai_service.services.cache_service import cache_service
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,31 @@ class AIService:
         self.blocking_notification_service = BlockingNotificationService()
         # Configurar URL del servicio Java
         self.blocking_notification_service.set_java_service_url("http://localhost:8080")
+        
+        # 🚀 FASE 1: Feature flag para usar GeminiClient
+        # Permite migración gradual sin romper funcionalidad existente
+        self.use_gemini_client = os.getenv("USE_GEMINI_CLIENT", "f").lower() == "true"
+        self.gemini_client = None
+        
+        if self.use_gemini_client:
+            try:
+                from chatbot_ai_service.clients.gemini_client import GeminiClient
+                self.gemini_client = GeminiClient()
+                logger.info("✅ GeminiClient habilitado via feature flag USE_GEMINI_CLIENT=true")
+            except Exception as e:
+                logger.error(f"❌ Error inicializando GeminiClient: {e}")
+                logger.warning("⚠️ Usando lógica original de AIService como fallback")
+                self.use_gemini_client = False
+        
+        # 🚀 FASE 2: Feature flag para usar configuraciones avanzadas por tarea
+        # Permite optimizar temperatura, top_p, etc. según el tipo de tarea
+        self.use_advanced_model_configs = os.getenv("USE_ADVANCED_MODEL_CONFIGS", "false").lower() == "true"
+        
+        if self.use_advanced_model_configs and self.use_gemini_client:
+            logger.info("✅ Configuraciones avanzadas de modelo habilitadas (USE_ADVANCED_MODEL_CONFIGS=true)")
+        elif self.use_advanced_model_configs and not self.use_gemini_client:
+            logger.warning("⚠️ USE_ADVANCED_MODEL_CONFIGS=true pero USE_GEMINI_CLIENT=false. Las configs avanzadas requieren GeminiClient.")
+            self.use_advanced_model_configs = False
     
     def _check_rate_limit(self):
         """Verifica y aplica rate limiting para evitar exceder cuota de API"""
@@ -195,8 +221,39 @@ class AIService:
             logger.error(f"Error llamando a Gemini REST API: {str(e)}")
             return f"Error: {str(e)}"
     
-    async def _generate_content(self, prompt: str) -> str:
-        """Genera contenido usando Gemini, fallback a REST API si gRPC falla"""
+    async def _generate_content(self, prompt: str, task_type: str = "chat_conversational") -> str:
+        """
+        Genera contenido usando Gemini, fallback a REST API si gRPC falla
+        
+        Args:
+            prompt: Texto a enviar a Gemini
+            task_type: Tipo de tarea para configuración optimizada (Fase 2)
+        
+        Returns:
+            Respuesta generada por Gemini
+        """
+        
+        # 🚀 FASE 1 + 2: Delegar a GeminiClient si está habilitado
+        if self.use_gemini_client and self.gemini_client:
+            try:
+                # Usar configuraciones avanzadas si están habilitadas (Fase 2)
+                use_custom_config = self.use_advanced_model_configs
+                
+                if use_custom_config:
+                    logger.debug(f"🔄 Delegando a GeminiClient con task_type='{task_type}'")
+                else:
+                    logger.debug("🔄 Delegando generación de contenido a GeminiClient")
+                
+                return await self.gemini_client.generate_content(
+                    prompt, 
+                    task_type=task_type,
+                    use_custom_config=use_custom_config
+                )
+            except Exception as e:
+                logger.warning(f"⚠️ GeminiClient falló, usando lógica original: {e}")
+                # Continuar con lógica original como fallback
+        
+        # MANTENER: Lógica original completa como fallback
         # Verificar si debemos usar fallback por alta carga
         if self._should_use_fallback():
             logger.info("Alta carga detectada, usando fallback inteligente")
@@ -299,6 +356,28 @@ class AIService:
             logger.info(f"🔍 Clasificación completa: {classification_result}")
             logger.info(f"🧠 Intención extraída: {intent} (confianza: {confidence:.2f})")
             
+            # 1.5 NUEVO: Intentar obtener respuesta del caché
+            cached_response = cache_service.get_cached_response(
+                tenant_id=tenant_id,
+                query=query,
+                intent=intent
+            )
+            
+            if cached_response:
+                processing_time = time.time() - start_time
+                logger.info(f"🚀 Respuesta servida desde caché (latencia: {processing_time:.2f}s)")
+                
+                # Agregar respuesta del bot a la sesión
+                session_context_service.add_message(session_id, "assistant", cached_response.get("response", ""))
+                
+                return {
+                    **cached_response,
+                    "from_cache": True,
+                    "processing_time": processing_time,
+                    "tenant_id": tenant_id,
+                    "session_id": session_id
+                }
+            
             # 2. SEGUNDO: Verificar si debemos usar fallback por alta carga
             if self._should_use_fallback():
                 logger.info("Alta carga detectada en chat, usando fallback general")
@@ -307,7 +386,7 @@ class AIService:
                 # Procesar según la intención clasificada
                 if intent == "cita_campaña":
                     # Respuesta específica para agendar citas
-                    response = self._handle_appointment_request(branding_config)
+                    response = self._handle_appointment_request(branding_config, tenant_config)
                 elif intent == "saludo_apoyo":
                     # Respuesta específica para saludos
                     response = await self._generate_ai_response_with_session(
@@ -340,13 +419,28 @@ class AIService:
             
             processing_time = time.time() - start_time
             
+            # NUEVO: Guardar en caché si es cacheable
+            response_data = {
+                "response": response,
+                "intent": intent,
+                "confidence": confidence
+            }
+            
+            cache_service.cache_response(
+                tenant_id=tenant_id,
+                query=query,
+                response=response_data,
+                intent=intent
+            )
+            
             return {
                 "response": response,
                 "processing_time": processing_time,
                 "tenant_id": tenant_id,
                 "session_id": session_id,
                 "intent": intent,
-                "confidence": confidence
+                "confidence": confidence,
+                "from_cache": False
             }
             
         except Exception as e:
@@ -371,8 +465,8 @@ class AIService:
             # Construir prompt con contexto de sesión
             prompt = self._build_session_prompt(query, user_context, branding_config, session_context)
             
-            # Generar respuesta
-            response_text = await self._generate_content(prompt)
+            # 🚀 FASE 2: Usar configuración optimizada para chat con sesión
+            response_text = await self._generate_content(prompt, task_type="chat_with_session")
             
             return response_text
             
@@ -430,10 +524,11 @@ Respuesta:
         
         return prompt
     
-    def _handle_appointment_request(self, branding_config: Dict[str, Any]) -> str:
+    def _handle_appointment_request(self, branding_config: Dict[str, Any], tenant_config: Dict[str, Any] = None) -> str:
         """Maneja solicitudes de agendar citas"""
         contact_name = branding_config.get("contactName", "el candidato")
-        calendly_link = branding_config.get("link_calendly", "https://calendly.com/dq-campana/reunion")
+        # El link_calendly está en el nivel raíz de tenant_config, no en branding
+        calendly_link = tenant_config.get("link_calendly") if tenant_config else "https://calendly.com/dq-campana/reunion"
         
         return f"""¡Perfecto! Te ayudo a agendar una cita con alguien de la campaña de {contact_name}. 
 
@@ -998,8 +1093,8 @@ Responde solo el JSON estricto sin comentarios:
             # Construir prompt con contexto de documentos
             prompt = self._build_chat_prompt(query, user_context, branding_config, relevant_context)
             
-            # Generar respuesta
-            response_text = await self._generate_content(prompt)
+            # 🚀 FASE 2: Usar configuración optimizada para chat conversacional
+            response_text = await self._generate_content(prompt, task_type="chat_conversational")
             
             return response_text
             
@@ -1134,7 +1229,8 @@ Responde solo el JSON estricto sin comentarios:
             Responde solo con la categoría más apropiada basándote en la INTENCIÓN del mensaje.
             """
             
-            response_text = await self._generate_content(prompt)
+            # 🚀 FASE 2: Usar configuración optimizada para clasificación de intenciones
+            response_text = await self._generate_content(prompt, task_type="intent_classification")
             category = response_text.strip().lower()
             
             # Validar categoría
@@ -1177,7 +1273,8 @@ Responde solo el JSON estricto sin comentarios:
             Si no se encuentra, responde con "no_encontrado".
             """
             
-            response_text = await self._generate_content(prompt)
+            # 🚀 FASE 2: Usar configuración optimizada para extracción de datos
+            response_text = await self._generate_content(prompt, task_type="data_extraction")
             extracted_value = response_text.strip()
             
             if extracted_value.lower() == "no_encontrado":
@@ -1396,7 +1493,8 @@ Responde SOLO con un JSON válido en este formato:
             Responde en formato: SI|ciudad o NO
             """
             
-            response_text = await self._generate_content(prompt)
+            # 🚀 FASE 2: Usar configuración optimizada para normalización de ubicaciones
+            response_text = await self._generate_content(prompt, task_type="location_normalization")
             result = response_text.strip()
             
             if result.startswith("SI|"):
@@ -1457,7 +1555,8 @@ Responde SOLO con un JSON válido en este formato:
             else:
                 return True
             
-            response_text = await self._generate_content(prompt)
+            # 🚀 FASE 2: Usar configuración optimizada para validación de datos
+            response_text = await self._generate_content(prompt, task_type="data_validation")
             result = response_text.strip().upper()
             
             logger.info(f"Validación IA para {data_type} '{data}': {result}")
