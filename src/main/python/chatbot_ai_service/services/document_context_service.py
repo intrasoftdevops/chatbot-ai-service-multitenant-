@@ -111,18 +111,21 @@ class DocumentContextService:
                         model_name="models/embedding-001",
                         api_key=api_key
                     )
+                    logger.info("✅ Modelos LlamaIndex configurados: gemini-2.0-flash-exp + embedding-001")
                 
                 if Settings is not None and SimpleNodeParser is not None:
                     try:
-                        # API moderna
+                        # API moderna - configurar modelos explícitamente
                         Settings.llm = self._llm
                         Settings.embed_model = self._embedding_model
                         Settings.node_parser = SimpleNodeParser.from_defaults(
                             chunk_size=1024,
                             chunk_overlap=200
                         )
-                    except Exception:
-                        pass
+                        logger.info("✅ Settings de LlamaIndex configurados correctamente")
+                    except Exception as e:
+                        logger.error(f"❌ Error configurando Settings de LlamaIndex: {str(e)}")
+                        raise
                 
                 logger.info("Modelos LlamaIndex inicializados correctamente")
             except Exception as e:
