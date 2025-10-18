@@ -1,63 +1,86 @@
-# Dockerfile para Chatbot AI Service Multi-Tenant
-FROM python:3.11-slim
+# ============================================================================
+# Multi-stage Dockerfile optimizado para Chatbot AI Service Multi-Tenant
+# ============================================================================
 
-# Configurar variables de entorno
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PORT=8000
+# ============================================================================
+# STAGE 1: Builder - Instala dependencias y compila paquetes
+# ============================================================================
+FROM python:3.11-slim AS builder
 
-# Crear directorio de trabajo
-WORKDIR /app
+# Variables de entorno para build
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Instalar dependencias del sistema necesarias para compilar paquetes de Python
-RUN apt-get update && apt-get install -y \
+WORKDIR /build
+
+# Instalar SOLO dependencias necesarias para compilar
+# Separamos en capas para mejor cache
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
     make \
-    build-essential \
     libffi-dev \
     libssl-dev \
-    python3-dev \
-    cargo \
-    rustc \
     && rm -rf /var/lib/apt/lists/*
 
-# Copiar archivos de dependencias
+# Copiar requirements y actualizar pip
 COPY requirements.txt .
+RUN pip install --upgrade pip setuptools wheel
 
-# Actualizar pip, setuptools y wheel primero
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel
-
-# Instalar dependencias pesadas primero con VERSIONES EXACTAS
-# Versiones específicas evitan resolución compleja de pip en Cloud Build
-RUN pip install --no-cache-dir \
+# Instalar dependencias en un directorio específico (para copiar después)
+RUN pip install --prefix=/install --no-warn-script-location \
     google-generativeai==0.8.5 \
     llama-index-core==0.14.5 \
     llama-index-llms-gemini==0.6.1 \
     llama-index-embeddings-gemini==0.4.1
 
-# Instalar el resto de dependencias
-RUN pip install --no-cache-dir -r requirements.txt
+# Instalar resto de dependencias
+RUN pip install --prefix=/install --no-warn-script-location -r requirements.txt
 
-# Copiar código fuente (Python package root)
-COPY src/main/python/ .
+# ============================================================================
+# STAGE 2: Runtime - Imagen final optimizada
+# ============================================================================
+FROM python:3.11-slim
 
-# Asegurar PYTHONPATH para imports desde /app
-ENV PYTHONPATH=/app
+# Variables de entorno
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PORT=8000 \
+    PYTHONPATH=/app \
+    NLTK_DATA=/app/nltk_data
 
-# Configurar NLTK_DATA para LlamaIndex
-ENV NLTK_DATA=/app/nltk_data
+WORKDIR /app
 
-# Crear usuario no root
+# Instalar SOLO runtime dependencies (no build tools)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libssl3 \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Copiar dependencias instaladas desde builder
+COPY --from=builder /install /usr/local
+
+# Crear usuario no root ANTES de copiar archivos
 RUN useradd --create-home --shell /bin/bash app \
-    && chown -R app:app /app \
     && mkdir -p /app/nltk_data \
-    && chown -R app:app /app/nltk_data
+    && chown -R app:app /app
+
+# Copiar código fuente
+COPY --chown=app:app src/main/python/ .
+
+# Cambiar a usuario no root
 USER app
 
-# Exponer puerto
-EXPOSE $PORT
+# Health check (sin dependencias extras)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:${PORT}/health')" || exit 1
 
-# Comando de inicio (usar puerto proporcionado por Cloud Run)
+# Exponer puerto
+EXPOSE ${PORT}
+
+# Comando de inicio
 CMD ["sh", "-c", "python -m uvicorn chatbot_ai_service.main:app --host 0.0.0.0 --port ${PORT}"]
 
