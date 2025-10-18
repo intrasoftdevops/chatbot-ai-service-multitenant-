@@ -489,14 +489,17 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
                         query, user_context, ai_config, branding_config, tenant_id, session_id
                     )
             
+            # Filtrar enlaces de la respuesta para WhatsApp
+            filtered_response = self._filter_links_from_response(response)
+            
             # Agregar respuesta del asistente a la sesión
-            session_context_service.add_message(session_id, "assistant", response, metadata={"intent": intent, "confidence": confidence})
+            session_context_service.add_message(session_id, "assistant", filtered_response, metadata={"intent": intent, "confidence": confidence})
             
             processing_time = time.time() - start_time
             
             # NUEVO: Guardar en caché si es cacheable
             response_data = {
-                "response": response,
+                "response": filtered_response,
                 "intent": intent,
                 "confidence": confidence
             }
@@ -509,7 +512,7 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
             )
             
             return {
-                "response": response,
+                "response": filtered_response,
                 "processing_time": processing_time,
                 "tenant_id": tenant_id,
                 "session_id": session_id,
@@ -613,6 +616,56 @@ Respuesta:
 """
         
         return prompt
+    
+    def _filter_links_from_response(self, response: str) -> str:
+        """
+        Elimina completamente enlaces y referencias a enlaces de las respuestas para WhatsApp
+        """
+        import re
+        
+        # Patrones para detectar enlaces y referencias a enlaces
+        patterns_to_remove = [
+            r'https?://[^\s\)]+',  # URLs http/https
+            r'www\.[^\s\)]+',      # URLs www
+            r'[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}[^\s\)]*',  # Dominios genéricos
+            r'\[([^\]]+)\]\([^)]+\)',  # Enlaces markdown [texto](url)
+        ]
+        
+        # Frases comunes que mencionan enlaces
+        link_phrases = [
+            r'puedes revisar este enlace[^.]*\.',
+            r'puedes consultar este enlace[^.]*\.',
+            r'visita este enlace[^.]*\.',
+            r'accede a este enlace[^.]*\.',
+            r'consulta el siguiente enlace[^.]*\.',
+            r'revisa el siguiente enlace[^.]*\.',
+            r'puedes ver más información en[^.]*\.',
+            r'para más información visita[^.]*\.',
+            r'allí encontrarás[^.]*\.',
+            r'allí podrás[^.]*\.',
+            r'en el siguiente enlace[^.]*\.',
+            r'en este enlace[^.]*\.',
+        ]
+        
+        filtered_response = response
+        
+        # Eliminar enlaces directos
+        for pattern in patterns_to_remove:
+            filtered_response = re.sub(pattern, '', filtered_response)
+        
+        # Eliminar frases que mencionan enlaces
+        for phrase_pattern in link_phrases:
+            filtered_response = re.sub(phrase_pattern, '', filtered_response, flags=re.IGNORECASE)
+        
+        # Limpiar espacios múltiples y saltos de línea
+        filtered_response = re.sub(r'\s+', ' ', filtered_response)
+        filtered_response = re.sub(r'\n\s*\n', '\n', filtered_response)
+        
+        # Limpiar puntuación duplicada
+        filtered_response = re.sub(r'\.\s*\.', '.', filtered_response)
+        filtered_response = re.sub(r'\?\s*\?', '?', filtered_response)
+        
+        return filtered_response.strip()
     
     def _handle_appointment_request(self, branding_config: Dict[str, Any], tenant_config: Dict[str, Any] = None) -> str:
         """Maneja solicitudes de agendar citas"""
