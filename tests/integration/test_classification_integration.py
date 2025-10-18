@@ -13,7 +13,7 @@ async def test_classification_integration():
     
     print("🎯 PRUEBA DE CLASIFICACIÓN + CONTEXTO + SESIONES")
     print("=" * 60)
-    print("📦 Documentos: daniel-quintero-docs")
+    print("📦 Documentos: bucket-name")
     print("🏢 Tenant: 473173")
     print("🧠 Clasificación + Contexto + Sesiones")
     print()
@@ -37,7 +37,7 @@ async def test_classification_integration():
         print("\n2️⃣ Cargando documentos...")
         try:
             load_request = {
-                "documentation_bucket_url": "https://storage.googleapis.com/daniel-quintero-docs"
+                "documentation_bucket_url": "https://storage.googleapis.com/bucket-name"
             }
             
             response = await client.post(
@@ -62,9 +62,9 @@ async def test_classification_integration():
         
         test_messages = [
             {
-                "query": "Hola, ¿quién es Daniel Quintero?",
-                "expected_intent": "conocer_daniel",
-                "description": "Pregunta sobre Daniel Quintero"
+                "query": "Hola, ¿quién es el candidato?",
+                "expected_intent": "conocer_candidato",
+                "description": "Pregunta sobre el candidato"
             },
             {
                 "query": "quiero agendar cita con alguien de la campaña",

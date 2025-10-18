@@ -1,142 +1,84 @@
 #!/usr/bin/env python3
 """
-Script para ejecutar tests del sistema de clasificación de intenciones
+Test runner para el chatbot AI service
+
+Este script ejecuta los tests de clasificación de mensajes maliciosos
+y genera un reporte detallado de los resultados.
 """
 
 import sys
 import os
-import subprocess
-import argparse
+import pytest
+from pathlib import Path
 
-def run_tests(test_type="all", verbose=False, coverage=False):
-    """
-    Ejecuta tests del sistema
+# Agregar el directorio raíz al path para imports
+project_root = Path(__file__).parent
+sys.path.insert(0, str(project_root))
+
+def run_malicious_tests():
+    """Ejecuta tests específicos para clasificación de mensajes maliciosos"""
+    print("🧪 Ejecutando tests de clasificación de mensajes maliciosos...")
     
-    Args:
-        test_type: Tipo de tests a ejecutar (all, unit, integration, specific)
-        verbose: Si mostrar output detallado
-        coverage: Si generar reporte de cobertura
-    """
-    
-    # Comandos base
-    cmd = ["python", "-m", "pytest"]
-    
-    # Agregar directorio de tests
-    cmd.append("tests/")
-    
-    # Configurar verbosidad
-    if verbose:
-        cmd.append("-vv")
-    else:
-        cmd.append("-v")
-    
-    # Configurar tipo de tests
-    if test_type == "unit":
-        cmd.extend(["-m", "unit"])
-    elif test_type == "integration":
-        cmd.extend(["-m", "integration"])
-    elif test_type == "fast":
-        cmd.extend(["-m", "not slow"])
-    elif test_type == "specific":
-        # Ejecutar solo tests específicos
-        cmd.extend([
-            "tests/test_intent_classification.py::TestIntentClassification::test_malicious_intent_classification",
-            "tests/test_intent_classification.py::TestIntentClassification::test_campaign_appointment_classification"
-        ])
-    
-    # Agregar cobertura si se solicita
-    if coverage:
-        cmd.extend([
-            "--cov=chatbot_ai_service",
-            "--cov-report=html",
-            "--cov-report=term-missing"
-        ])
-    
-    # Agregar configuración adicional
-    cmd.extend([
-        "--tb=short",
-        "--color=yes"
+    # Ejecutar tests con reporte detallado
+    result = pytest.main([
+        "tests/unit/test_malicious_classification.py",
+        "-v",  # Verbose
+        "--tb=short",  # Traceback corto
+        "--durations=10",  # Mostrar los 10 tests más lentos
+        "-m", "malicious",  # Solo tests marcados como malicious
     ])
     
-    print(f"Ejecutando tests: {' '.join(cmd)}")
-    print("-" * 50)
+    return result
+
+def run_all_tests():
+    """Ejecuta todos los tests del proyecto"""
+    print("🧪 Ejecutando todos los tests...")
+    
+    result = pytest.main([
+        "tests/",
+        "-v",
+        "--tb=short",
+        "--durations=10",
+    ])
+    
+    return result
+
+def run_coverage_tests():
+    """Ejecuta tests con reporte de cobertura"""
+    print("🧪 Ejecutando tests con cobertura...")
     
     try:
-        result = subprocess.run(cmd, check=True)
-        print("\n" + "=" * 50)
-        print("✅ Todos los tests pasaron exitosamente!")
-        
-        if coverage:
-            print("\n📊 Reporte de cobertura generado en htmlcov/index.html")
-        
-        return True
-        
-    except subprocess.CalledProcessError as e:
-        print("\n" + "=" * 50)
-        print(f"❌ Tests fallaron con código de salida: {e.returncode}")
-        return False
-    except FileNotFoundError:
-        print("❌ Error: pytest no encontrado. Instala con: pip install pytest pytest-asyncio")
-        return False
+        result = pytest.main([
+            "tests/",
+            "--cov=chatbot_ai_service",
+            "--cov-report=html",
+            "--cov-report=term-missing",
+            "-v"
+        ])
+        return result
+    except ImportError:
+        print("⚠️ pytest-cov no está instalado. Ejecutando tests sin cobertura...")
+        return run_all_tests()
 
 def main():
-    """Función principal"""
-    parser = argparse.ArgumentParser(description="Ejecutar tests del sistema de clasificación de intenciones")
-    
-    parser.add_argument(
-        "--type", 
-        choices=["all", "unit", "integration", "fast", "specific"],
-        default="all",
-        help="Tipo de tests a ejecutar"
-    )
-    
-    parser.add_argument(
-        "--verbose", "-v",
-        action="store_true",
-        help="Mostrar output detallado"
-    )
-    
-    parser.add_argument(
-        "--coverage", "-c",
-        action="store_true",
-        help="Generar reporte de cobertura"
-    )
-    
-    parser.add_argument(
-        "--install-deps",
-        action="store_true",
-        help="Instalar dependencias de testing"
-    )
-    
-    args = parser.parse_args()
-    
-    # Instalar dependencias si se solicita
-    if args.install_deps:
-        print("📦 Instalando dependencias de testing...")
-        deps = [
-            "pytest",
-            "pytest-asyncio",
-            "pytest-cov",
-            "httpx",
-            "fastapi[all]"
-        ]
+    """Función principal del test runner"""
+    if len(sys.argv) > 1:
+        command = sys.argv[1]
         
-        for dep in deps:
-            subprocess.run([sys.executable, "-m", "pip", "install", dep])
-        
-        print("✅ Dependencias instaladas!")
-        return
-    
-    # Ejecutar tests
-    success = run_tests(
-        test_type=args.type,
-        verbose=args.verbose,
-        coverage=args.coverage
-    )
-    
-    if not success:
-        sys.exit(1)
+        if command == "malicious":
+            return run_malicious_tests()
+        elif command == "all":
+            return run_all_tests()
+        elif command == "coverage":
+            return run_coverage_tests()
+        else:
+            print(f"❌ Comando desconocido: {command}")
+            print("Comandos disponibles: malicious, all, coverage")
+            return 1
+    else:
+        # Por defecto, ejecutar tests de mensajes maliciosos
+        return run_malicious_tests()
 
 if __name__ == "__main__":
-    main()
-
+    exit_code = main()
+    sys.exit(exit_code)

@@ -870,7 +870,7 @@ async def interpret_natural_selection(user_response: str, options: List[Dict], c
         - "NO_CLARO" si no puedes determinar qué es
         
         Ejemplos de interpretación:
-        - "¿quién es Daniel Quintero?" -> NO_ES_SELECCION
+        - "¿quién es el candidato?" -> NO_ES_SELECCION
         - "¿por qué me preguntas esto?" -> NO_ES_SELECCION
         - "1" -> 1
         - "la primera" -> 1

@@ -13,7 +13,7 @@ from typing import Dict, Any
 
 # Configuración
 CHATBOT_SERVICE_URL = "http://localhost:8000"
-TENANT_ID = "daniel_dev"  # ID del tenant de prueba
+TENANT_ID = "test_dev"  # ID del tenant de prueba
 
 # URLs de prueba - actualiza estas con URLs reales
 TEST_DOCUMENT_URLS = [

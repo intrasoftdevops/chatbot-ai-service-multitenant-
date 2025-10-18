@@ -10,13 +10,13 @@ from urllib.parse import urlparse
 async def test_gcs_integration():
     """Prueba la integración directa con GCS"""
     
-    bucket_url = "https://storage.googleapis.com/daniel-quintero-docs"
+    bucket_url = "https://storage.googleapis.com/bucket-name"
     
     print(f"🧪 Probando integración directa con GCS: {bucket_url}")
     
     # Parsear URL de GCS
     parsed_url = urlparse(bucket_url)
-    # Para URLs como https://storage.googleapis.com/daniel-quintero-docs
+    # Para URLs como https://storage.googleapis.com/bucket-name
     if parsed_url.netloc == "storage.googleapis.com":
         bucket_name = parsed_url.path.lstrip("/")
     else:

@@ -341,7 +341,7 @@ class DocumentContextService:
             # Parsear URL de GCS
             # Formato: https://storage.googleapis.com/bucket-name
             parsed_url = urlparse(bucket_url)
-            # Para URLs como https://storage.googleapis.com/daniel-quintero-docs
+            # Para URLs como https://storage.googleapis.com/bucket-name
             if parsed_url.netloc == "storage.googleapis.com":
                 bucket_name = parsed_url.path.lstrip("/")
             else:

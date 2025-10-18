@@ -13,9 +13,9 @@ async def test_final_integration():
     
     print("🎯 PRUEBA FINAL - Integración LlamaIndex con Documentos Reales")
     print("=" * 70)
-    print("📦 Bucket: daniel-quintero-docs")
+    print("📦 Bucket: bucket-name")
     print("📄 Documentos: README.md, context.md, faq.md")
-    print("🏢 Tenant: daniel_dev")
+    print("🏢 Tenant: test_dev")
     print()
     
     # Esperar un momento para que el usuario vea la información
@@ -41,11 +41,11 @@ async def test_final_integration():
         print("\n2️⃣ Cargando documentos desde GCS...")
         try:
             load_request = {
-                "documentation_bucket_url": "https://storage.googleapis.com/daniel-quintero-docs"
+                "documentation_bucket_url": "https://storage.googleapis.com/bucket-name"
             }
             
             response = await client.post(
-                "http://localhost:8000/api/v1/tenants/daniel_dev/load-documents",
+                "http://localhost:8000/api/v1/tenants/test_dev/load-documents",
                 json=load_request
             )
             
@@ -67,7 +67,7 @@ async def test_final_integration():
         print("\n3️⃣ Verificando información de documentos...")
         try:
             response = await client.get(
-                "http://localhost:8000/api/v1/tenants/daniel_dev/documents/info"
+                "http://localhost:8000/api/v1/tenants/test_dev/documents/info"
             )
             
             result = response.json()
@@ -80,11 +80,11 @@ async def test_final_integration():
             print(f"❌ Error obteniendo información: {e}")
         
         # 4. Probar chat con contexto específico
-        print("\n4️⃣ Probando chat con contexto específico de Daniel Quintero...")
+        print("\n4️⃣ Probando chat con contexto específico del candidato...")
         
         test_queries = [
             {
-                "query": "¿Cuáles son las principales propuestas de Daniel Quintero?",
+                "query": "¿Cuáles son las principales propuestas del candidato?",
                 "expected_keywords": ["salud", "educación", "corrupción", "empleo"]
             },
             {
@@ -96,7 +96,7 @@ async def test_final_integration():
                 "expected_keywords": ["salud", "universalización", "medicamentos", "hospitales"]
             },
             {
-                "query": "¿Quién es Daniel Quintero?",
+                "query": "¿Quién es el candidato?",
                 "expected_keywords": ["ingeniero", "político", "medellín", "antioquia"]
             }
         ]
@@ -115,7 +115,7 @@ async def test_final_integration():
                 }
                 
                 response = await client.post(
-                    "http://localhost:8000/api/v1/tenants/daniel_dev/chat",
+                    "http://localhost:8000/api/v1/tenants/test_dev/chat",
                     json=chat_request
                 )
                 
@@ -146,7 +146,7 @@ async def test_final_integration():
         print(f"\n5️⃣ Limpiando cache...")
         try:
             response = await client.delete(
-                "http://localhost:8000/api/v1/tenants/daniel_dev/documents"
+                "http://localhost:8000/api/v1/tenants/test_dev/documents"
             )
             
             if response.status_code == 200:
@@ -168,7 +168,7 @@ async def test_final_integration():
     print("   ✅ API REST para gestión de documentos")
     print()
     print("🚀 La IA ahora puede responder preguntas específicas sobre:")
-    print("   - Propuestas de Daniel Quintero")
+    print("   - Propuestas del candidato")
     print("   - Información de la campaña")
     print("   - FAQ específicas del candidato")
     print("   - Contexto regional y demográfico")

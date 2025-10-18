@@ -46,7 +46,7 @@ class ConfigurationService:
             url = f"{self.java_service_url}/api/v1/tenants/{tenant_id}"
             logger.info(f"Llamando a URL: {url}")
             
-            with httpx.Client(timeout=10.0, headers=headers) as client:
+            with httpx.Client(timeout=30.0, headers=headers) as client:
                 response = client.get(url)
                 logger.info(f"Respuesta recibida: status={response.status_code}, headers={dict(response.headers)}")
                 

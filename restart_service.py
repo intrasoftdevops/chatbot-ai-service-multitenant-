@@ -31,7 +31,7 @@ def restart_service():
     try:
         # Cambiar al directorio correcto
         import os
-        os.chdir("/Users/santiagobuitragorojas/Documents/Intrasoft/Repos/daniel-quintero-repos/Refactor/chatbot-ai-service-multitenant/src/main/python")
+        os.chdir("/Users/santiagobuitragorojas/Documents/Intrasoft/Repos/political-referrals-repos/Refactor/chatbot-ai-service-multitenant/src/main/python")
         
         # Ejecutar el servicio
         subprocess.run([

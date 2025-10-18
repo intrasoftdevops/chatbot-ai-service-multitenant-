@@ -7,7 +7,7 @@ la configuración del proyecto Political Referrals via HTTP.
 import logging
 import time
 import os
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 import google.generativeai as genai
 import httpx
@@ -140,12 +140,40 @@ class AIService:
         else:
             return "Gracias por tu mensaje. Te ayudo a completar tu registro paso a paso."
     
+    async def _generate_intelligent_response_without_documents(self, query: str, user_context: Dict[str, Any], 
+                                                           branding_config: Dict[str, Any], tenant_config: Dict[str, Any]) -> str:
+        """Genera una respuesta inteligente cuando no hay documentos disponibles"""
+        try:
+            contact_name = branding_config.get("contactName", "el candidato")
+            
+            # Analizar la consulta para dar una respuesta contextual
+            query_lower = query.lower()
+            
+            if "aguas vivas" in query_lower:
+                return f"¡Excelente pregunta! {contact_name} tiene propuestas específicas sobre el manejo del agua y recursos hídricos. Te puedo ayudar a conectarte con nuestro equipo para obtener información detallada sobre estas propuestas. ¿Te gustaría que te contacte alguien del equipo?"
+            
+            elif "cuándo inicia" in query_lower or "cuando inicia" in query_lower or "inicia la campaña" in query_lower:
+                return f"La campaña de {contact_name} está en marcha y trabajando activamente. Te puedo ayudar a conectarte con nuestro equipo para obtener información actualizada sobre las actividades y eventos de la campaña. ¿Te gustaría recibir información sobre próximos eventos?"
+            
+            elif any(word in query_lower for word in ["propuesta", "propone", "plan", "planes", "política", "políticas"]):
+                return f"{contact_name} tiene propuestas específicas en diferentes áreas. Te puedo ayudar a conectarte con nuestro equipo para obtener información detallada sobre las propuestas que más te interesen. ¿Hay algún tema específico que te gustaría conocer?"
+            
+            elif any(word in query_lower for word in ["experiencia", "trayectoria", "historial", "antecedentes"]):
+                return f"{contact_name} tiene una amplia experiencia y trayectoria. Te puedo ayudar a conectarte con nuestro equipo para obtener información detallada sobre su experiencia y antecedentes. ¿Te gustaría recibir información específica sobre algún área?"
+            
+            else:
+                return f"Hola! Soy el asistente virtual de la campaña de {contact_name}. Te puedo ayudar con información sobre la campaña y conectarte con nuestro equipo para resolver tus consultas específicas. ¿Hay algo en particular que te gustaría saber?"
+                
+        except Exception as e:
+            logger.error(f"Error generando respuesta inteligente: {str(e)}")
+            return f"Hola! Soy el asistente virtual de la campaña de {branding_config.get('contactName', 'el candidato')}. ¿En qué puedo ayudarte?"
+
     def _get_general_fallback_response(self, prompt: str, tenant_config: dict = None) -> str:
         """Genera respuesta de fallback para conversaciones generales (usuarios registrados)"""
         prompt_lower = prompt.lower()
         
         # Obtener información del tenant para respuestas personalizadas
-        contact_name = "Daniel Quintero Presidente"
+        contact_name = "el candidato"
         if tenant_config and tenant_config.get("branding", {}).get("contact_name"):
             contact_name = tenant_config["branding"]["contact_name"]
         
@@ -221,19 +249,36 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
             return f"Entiendo tu mensaje. Estoy aquí para ayudarte con todo lo relacionado con la campaña de {contact_name}. ¿Hay algo específico en lo que pueda asistirte?"
     
     def _ensure_model_initialized(self):
-        """Inicializa el modelo de forma lazy"""
+        """Inicializa el modelo de forma lazy con timeout"""
         if self._initialized:
             return
             
         self.api_key = os.getenv("GEMINI_API_KEY")
         if self.api_key:
             try:
-                # Configuración básica para Gemini AI
-                genai.configure(api_key=self.api_key)
-                self.model = genai.GenerativeModel('gemini-2.5-flash')
-                logger.info("Modelo Gemini inicializado correctamente")
+                logger.info(f"✅ GEMINI_API_KEY cargada correctamente: {self.api_key[:10]}...")
+                
+                # Configuración básica para Gemini AI con timeout
+                import signal
+                
+                def timeout_handler(signum, frame):
+                    raise TimeoutError("Timeout inicializando Gemini")
+                
+                signal.signal(signal.SIGALRM, timeout_handler)
+                signal.alarm(5)  # 5 segundos timeout
+                
+                try:
+                    genai.configure(api_key=self.api_key)
+                    self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
+                    logger.info("✅ Modelo Gemini inicializado correctamente")
+                finally:
+                    signal.alarm(0)  # Cancelar timeout
+                    
+            except TimeoutError:
+                logger.warning("⚠️ Timeout inicializando Gemini, usando fallback")
+                self.model = None
             except Exception as e:
-                logger.error(f"Error inicializando modelo Gemini: {str(e)}")
+                logger.error(f"❌ Error inicializando modelo Gemini: {str(e)}")
                 self.model = None
         else:
             logger.warning("GEMINI_API_KEY no configurado")
@@ -383,24 +428,30 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
             else:
                 # Clasificar la intención del mensaje usando IA
                 classification_result = await self.classify_intent(tenant_id, query, user_context, session_id)
-                intent = classification_result.get("category", "default")
+                intent = classification_result.get("category", "saludo_apoyo")  # Cambiar default de "default" a "saludo_apoyo"
                 confidence = classification_result.get("confidence", 0.0)
+                
+                # 🔧 DEBUG: Log detallado de la clasificación
+                logger.info(f"🧠 CLASIFICACIÓN RESULTADO: intent='{intent}', confidence={confidence:.2f}")
+                logger.info(f"📝 Mensaje clasificado: '{query[:100]}...'")
             
-            # 🚀 OPTIMIZACIÓN 2: Solo cargar documentos si la intención es conocer_candidato
+            # 🚀 OPTIMIZACIÓN 2: RAG con orden correcto: primero documentos, luego fallback
             document_context = None
             if intent == "conocer_candidato":
-                logger.info(f"📚 Cargando documentos para consulta sobre candidato: {query}")
-                # Verificar cache de documentos antes de cargar
-                if not self._is_tenant_documents_loaded(tenant_id):
-                    logger.info(f"📚 Cargando documentos para tenant {tenant_id} (primera vez)")
-                    await self._ensure_tenant_documents_loaded(tenant_id, ai_config)
-                else:
-                    logger.info(f"✅ Documentos ya cargados para tenant {tenant_id}")
-                
-                # Obtener contexto de documentos
-                document_context = await document_context_service.get_relevant_context(tenant_id, query, max_results=3)
-                if document_context:
-                    session_context_service.update_document_context(session_id, document_context)
+                logger.info(f"📚 Consulta sobre candidato detectada: {query}")
+                # PRIMERO: Intentar obtener información de documentos
+                try:
+                    logger.info(f"📚 Usando RAG para consultar documentos del tenant {tenant_id}")
+                    document_context = await self._fast_rag_search(tenant_id, query, ai_config)
+                    if document_context:
+                        logger.info(f"📚 Información encontrada en documentos: {len(document_context)} caracteres")
+                    else:
+                        logger.info(f"📚 No se encontró información en documentos, usando fallback genérico")
+                        document_context = "gemini_direct"
+                except Exception as e:
+                    logger.error(f"❌ Error en RAG: {e}")
+                    # Solo usar fallback si hay error
+                    document_context = "gemini_direct"
             else:
                 logger.info(f"🎯 Intención '{intent}' no requiere documentos, saltando carga")
             
@@ -430,15 +481,18 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
             
             # 🚀 OPTIMIZACIÓN 3: Respuestas rápidas para casos comunes
             if intent == "conocer_candidato":
-                logger.info(f"📚 RESPUESTA CON DOCUMENTOS: conocer_candidato")
-                # Solo usar documentos si están disponibles
-                if document_context:
-                    response = await self._generate_ai_response_with_session(
-                        query, user_context, ai_config, branding_config, tenant_id, session_id
+                logger.info(f"📚 RESPUESTA ESPECIALIZADA: conocer_candidato")
+                # Generar respuesta especializada para consultas sobre el candidato
+                if document_context and document_context != "gemini_direct":
+                    logger.info(f"📚 Usando contexto de documentos para respuesta")
+                    response = await self._generate_candidate_response_with_documents(
+                        query, user_context, branding_config, tenant_config, document_context
                     )
                 else:
-                    # Fallback si no hay documentos disponibles
-                    response = f"Hola {user_context.get('user_name', '')}! Te puedo ayudar con información sobre {branding_config.get('contactName', 'el candidato')}. ¿Hay algo específico que te gustaría saber?"
+                    logger.info(f"📚 Usando Gemini directamente para respuesta rápida")
+                    response = await self._generate_candidate_response_gemini_direct(
+                        query, user_context, branding_config, tenant_config
+                    )
             elif intent == "cita_campaña":
                 logger.info(f"🎯 RESPUESTA RÁPIDA: cita_campaña")
                 response = self._handle_appointment_request(branding_config, tenant_config)
@@ -450,8 +504,8 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
                 response = self._get_volunteer_response(branding_config)
             else:
                 # Procesar según la intención clasificada con IA
-                if intent == "conocer_daniel":
-                    # Respuesta específica sobre Daniel Quintero
+                if intent == "conocer_candidato":
+                    # Respuesta específica sobre el candidato
                     response = await self._generate_ai_response_with_session(
                         query, user_context, ai_config, branding_config, tenant_id, session_id
                     )
@@ -608,13 +662,350 @@ Respuesta:
         
         return prompt
     
+    async def _get_available_documents(self, documentation_bucket_url: str) -> List[str]:
+        """Obtiene la lista de documentos disponibles en el bucket"""
+        try:
+            import httpx
+            
+            # Obtener lista de documentos del bucket
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(documentation_bucket_url)
+                if response.status_code == 200:
+                    # Parsear XML para obtener nombres de archivos
+                    import xml.etree.ElementTree as ET
+                    root = ET.fromstring(response.text)
+                    documents = []
+                    for contents in root.findall('.//{http://doc.s3.amazonaws.com/2006-03-01}Contents'):
+                        key = contents.find('{http://doc.s3.amazonaws.com/2006-03-01}Key')
+                        if key is not None and key.text:
+                            documents.append(key.text)
+                    logger.info(f"📚 Documentos disponibles: {len(documents)} archivos")
+                    return documents
+                else:
+                    logger.warning(f"⚠️ No se pudo obtener lista de documentos: {response.status_code}")
+                    return []
+        except Exception as e:
+            logger.error(f"❌ Error obteniendo lista de documentos: {e}")
+            return []
+    
+    async def _get_document_content_for_query(self, query: str, documentation_bucket_url: str) -> Optional[str]:
+        """Obtiene contenido real de documentos relevantes para la consulta"""
+        try:
+            import httpx
+            import pypdf
+            import io
+            
+            # Mapear consultas a documentos específicos de manera genérica
+            query_lower = query.lower()
+            
+            # Obtener todos los documentos disponibles
+            all_documents = await self._get_available_documents(documentation_bucket_url)
+            
+            # Filtrar documentos relevantes basándose en palabras clave genéricas
+            relevant_docs = []
+            query_words = query_lower.split()
+            
+            for doc_name in all_documents:
+                doc_lower = doc_name.lower()
+                # Buscar coincidencias entre palabras de la consulta y el nombre del documento
+                if any(word in doc_lower for word in query_words if len(word) > 3):  # Solo palabras de más de 3 caracteres
+                    relevant_docs.append(doc_name)
+            
+            # Si no se encontraron documentos específicos, usar los primeros 2 documentos disponibles
+            if not relevant_docs and all_documents:
+                relevant_docs = all_documents[:2]
+            
+            logger.info(f"📚 Buscando documentos relevantes: {relevant_docs}")
+            
+            # Descargar y procesar documentos
+            content_parts = []
+            for doc_name in relevant_docs[:2]:  # Limitar a 2 documentos para evitar timeout
+                try:
+                    # Construir URL del documento
+                    doc_url = f"{documentation_bucket_url}/{doc_name}"
+                    logger.info(f"📥 Descargando documento: {doc_name}")
+                    
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        response = await client.get(doc_url)
+                        if response.status_code == 200:
+                            # Procesar PDF
+                            if doc_name.endswith('.pdf'):
+                                pdf_content = io.BytesIO(response.content)
+                                pdf_reader = pypdf.PdfReader(pdf_content)
+                                text = ""
+                                for page in pdf_reader.pages[:3]:  # Solo primeras 3 páginas
+                                    text += page.extract_text() + "\n"
+                                if text.strip():
+                                    content_parts.append(f"=== {doc_name} ===\n{text[:2000]}...")  # Limitar a 2000 chars
+                                    logger.info(f"✅ Documento {doc_name} procesado: {len(text)} caracteres")
+                            
+                            # Procesar DOCX
+                            elif doc_name.endswith('.docx'):
+                                from docx import Document as DocxDocument
+                                doc_content = io.BytesIO(response.content)
+                                doc = DocxDocument(doc_content)
+                                text = ""
+                                for paragraph in doc.paragraphs[:20]:  # Solo primeras 20 líneas
+                                    text += paragraph.text + "\n"
+                                if text.strip():
+                                    content_parts.append(f"=== {doc_name} ===\n{text[:2000]}...")  # Limitar a 2000 chars
+                                    logger.info(f"✅ Documento {doc_name} procesado: {len(text)} caracteres")
+                        else:
+                            logger.warning(f"⚠️ No se pudo descargar {doc_name}: {response.status_code}")
+                            
+                except Exception as e:
+                    logger.warning(f"⚠️ Error procesando {doc_name}: {e}")
+                    continue
+            
+            if content_parts:
+                full_content = "\n\n".join(content_parts)
+                logger.info(f"📚 Contenido total obtenido: {len(full_content)} caracteres")
+                return full_content
+            else:
+                logger.warning("⚠️ No se pudo obtener contenido de ningún documento")
+                return None
+                
+        except Exception as e:
+            logger.error(f"❌ Error obteniendo contenido de documentos: {e}")
+            return None
+    
+    async def _fast_rag_search(self, tenant_id: str, query: str, ai_config: Dict[str, Any]) -> Optional[str]:
+        """RAG rápido usando Gemini para buscar en documentos sin LlamaIndex"""
+        try:
+            # Obtener URL del bucket de documentos
+            documentation_bucket_url = ai_config.get("documentation_bucket_url")
+            if not documentation_bucket_url:
+                logger.warning(f"⚠️ No hay URL de bucket de documentos para tenant {tenant_id}")
+                return None
+            
+            logger.info(f"🔍 RAG rápido: buscando en bucket {documentation_bucket_url}")
+            
+            # Inicializar Gemini directamente
+            try:
+                api_key = os.getenv("GEMINI_API_KEY")
+                if not api_key:
+                    logger.warning("⚠️ GEMINI_API_KEY no disponible")
+                    return None
+                
+                genai.configure(api_key=api_key)
+                model = genai.GenerativeModel('gemini-2.0-flash-exp')
+                logger.info("✅ Modelo Gemini inicializado para RAG")
+                
+            except Exception as e:
+                logger.error(f"❌ Error inicializando modelo: {e}")
+                return None
+            
+            # Intentar obtener contenido real de documentos específicos
+            document_content = await self._get_document_content_for_query(query, documentation_bucket_url)
+            
+            if document_content:
+                logger.info(f"📚 Contenido de documentos obtenido: {len(document_content)} caracteres")
+                # Usar el contenido real de los documentos
+                prompt = f"""
+                Eres un asistente que busca información específica en documentos políticos.
+                
+                PREGUNTA DEL USUARIO: "{query}"
+                
+                CONTENIDO DE DOCUMENTOS DISPONIBLE:
+                {document_content}
+                
+                INSTRUCCIONES:
+                1. Busca información relevante sobre esta pregunta en el contenido de documentos proporcionado
+                2. Si encuentras información específica, extrae los puntos más importantes
+                3. Si no encuentras información específica, responde "NO_ENCONTRADO"
+                4. Responde solo con la información encontrada, sin agregar explicaciones adicionales
+                5. Máximo 500 palabras
+                
+                Busca información relevante para la pregunta: "{query}"
+                """
+            else:
+                logger.info("📚 No se pudo obtener contenido de documentos, usando títulos")
+                # Fallback a solo títulos
+                prompt = f"""
+                Eres un asistente que busca información específica en documentos políticos.
+                
+                PREGUNTA DEL USUARIO: "{query}"
+                
+                INSTRUCCIONES:
+                1. Basándote en los títulos de documentos disponibles, determina si hay información relevante
+                2. Si encuentras información específica, extrae los puntos más importantes
+                3. Si no encuentras información específica, responde "NO_ENCONTRADO"
+                4. Responde solo con la información encontrada, sin agregar explicaciones adicionales
+                5. Máximo 500 palabras
+                
+                DOCUMENTOS DISPONIBLES:
+                Se encuentran documentos políticos y de campaña disponibles para consulta.
+                
+                Busca información relevante para la pregunta: "{query}"
+                """
+            
+            try:
+                response = model.generate_content(prompt)
+                result = response.text.strip()
+                
+                if "NO_ENCONTRADO" in result or len(result) < 50:
+                    logger.info(f"🔍 RAG rápido: No se encontró información específica para '{query}'")
+                    return None
+                
+                logger.info(f"🔍 RAG rápido: Información encontrada ({len(result)} caracteres)")
+                return result
+                
+            except Exception as e:
+                logger.error(f"❌ Error en Gemini RAG: {e}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"❌ Error en RAG rápido: {e}")
+            return None
+    
+    async def _generate_candidate_response_gemini_direct(self, query: str, user_context: Dict[str, Any], 
+                                                        branding_config: Dict[str, Any], tenant_config: Dict[str, Any]) -> str:
+        """Genera respuesta especializada usando Gemini directamente (más rápido)"""
+        try:
+            contact_name = branding_config.get("contact_name", "el candidato")
+            
+            # Usar Gemini directamente para respuesta rápida
+            self._ensure_model_initialized()
+            if self.model:
+                prompt = f"""
+                Eres el asistente virtual de {contact_name}. El usuario pregunta: "{query}"
+                
+                INSTRUCCIONES:
+                1. Responde específicamente sobre las propuestas de {contact_name} relacionadas con la pregunta
+                2. Mantén un tono profesional y político, enfocado en las propuestas del candidato
+                3. Si no tienes información específica, ofrece conectar al usuario con el equipo de la campaña
+                4. Responde en máximo 200 palabras
+                
+                Responde de manera natural y útil sobre las propuestas de {contact_name}.
+                """
+                
+                try:
+                    response = self.model.generate_content(prompt)
+                    return response.text
+                except Exception as e:
+                    logger.warning(f"Error con Gemini, usando fallback: {e}")
+            
+            # Fallback genérico
+            return f"""¡Excelente pregunta sobre "{query}"!
+
+{contact_name} tiene propuestas específicas sobre este tema. Te puedo ayudar a conectarte con nuestro equipo especializado para obtener información detallada sobre sus políticas y planes.
+
+¿Te gustaría que te contacte alguien del equipo de la campaña para brindarte información más específica?"""
+
+        except Exception as e:
+            logger.error(f"Error generando respuesta con Gemini directo: {e}")
+            return f"¡Excelente pregunta! {contact_name} tiene propuestas específicas sobre este tema. Te puedo ayudar a conectarte con nuestro equipo para obtener información detallada."
+    
+    async def _generate_candidate_response_with_documents(self, query: str, user_context: Dict[str, Any], 
+                                                         branding_config: Dict[str, Any], tenant_config: Dict[str, Any], 
+                                                         document_context: str) -> str:
+        """Genera respuesta especializada usando documentos reales"""
+        try:
+            contact_name = branding_config.get("contact_name", "el candidato")
+            
+            # Usar Gemini para generar respuesta específica con documentos
+            self._ensure_model_initialized()
+            if self.model:
+                prompt = f"""
+                Eres el asistente virtual de {contact_name}. El usuario pregunta: "{query}"
+                
+                CONTEXTO DE DOCUMENTOS DISPONIBLE:
+                {document_context}
+                
+                INSTRUCCIONES:
+                1. Responde específicamente sobre las propuestas de {contact_name} basándote ÚNICAMENTE en el contexto de documentos proporcionado
+                2. Si encuentras información relevante en el contexto, úsala para dar una respuesta precisa y específica
+                3. Si no hay información específica en el contexto sobre el tema preguntado, explica que puedes conectar al usuario con el equipo especializado
+                4. Mantén un tono profesional y político
+                5. Responde en máximo 200 palabras
+                6. NO inventes información que no esté en el contexto de documentos
+                
+                Responde basándote ÚNICAMENTE en el contexto de documentos proporcionado.
+                """
+                
+                try:
+                    response = self.model.generate_content(prompt)
+                    return response.text
+                except Exception as e:
+                    logger.warning(f"Error con Gemini, usando fallback: {e}")
+            
+            # Fallback con contexto de documentos
+            return f"""¡Excelente pregunta sobre "{query}"! 
+
+Basándome en la documentación de {contact_name}, puedo proporcionarte información específica sobre sus propuestas relacionadas con este tema.
+
+CONTEXTO ENCONTRADO:
+{document_context[:500]}...
+
+¿Te gustaría conocer más detalles sobre estas propuestas? Puedo conectarte con nuestro equipo especializado para brindarte información más específica."""
+            
+        except Exception as e:
+            logger.error(f"Error generando respuesta con documentos: {e}")
+            return f"¡Excelente pregunta! {contact_name} tiene propuestas específicas sobre este tema. Te puedo ayudar a conectarte con nuestro equipo para obtener información detallada."
+    
+    async def _generate_candidate_response(self, query: str, user_context: Dict[str, Any], 
+                                         branding_config: Dict[str, Any], tenant_config: Dict[str, Any]) -> str:
+        """Genera respuesta especializada para consultas sobre el candidato"""
+        try:
+            contact_name = branding_config.get("contact_name", "el candidato")
+            
+            # Usar Gemini para generar respuesta específica sobre el candidato
+            self._ensure_model_initialized()
+            if self.model:
+                prompt = f"""
+                Eres el asistente virtual de {contact_name}. El usuario pregunta: "{query}"
+                
+                Responde específicamente sobre las propuestas, políticas, planes o información relacionada con {contact_name}.
+                
+                Si la pregunta es sobre "aguas vivas" o temas relacionados con agua, explica las propuestas específicas de {contact_name} sobre:
+                - Gestión del agua
+                - Recursos hídricos
+                - Políticas ambientales
+                - Sostenibilidad
+                
+                Mantén un tono profesional y político, enfocado en las propuestas del candidato.
+                Si no tienes información específica, ofrece conectar al usuario con el equipo de la campaña.
+                
+                Responde en máximo 200 palabras.
+                """
+                
+                try:
+                    response = self.model.generate_content(prompt)
+                    return response.text
+                except Exception as e:
+                    logger.warning(f"Error con Gemini, usando fallback: {e}")
+            
+            # Fallback inteligente
+            query_lower = query.lower()
+            if any(word in query_lower for word in ["aguas vivas", "agua", "hídrico", "hidrico", "recurso"]):
+                return f"""¡Excelente pregunta sobre "{query}"! 
+
+{contact_name} tiene propuestas específicas sobre el manejo sostenible del agua y recursos hídricos. Sus políticas incluyen:
+
+🌊 **Gestión Integral del Agua**: Planes para garantizar acceso equitativo al agua potable
+💧 **Conservación de Recursos**: Estrategias para proteger y conservar los recursos hídricos
+🌱 **Sostenibilidad Ambiental**: Propuestas para un manejo responsable del medio ambiente
+
+¿Te gustaría conocer más detalles sobre estas propuestas? Puedo conectarte con nuestro equipo especializado para brindarte información más específica."""
+            
+            return f"""¡Excelente pregunta sobre "{query}"! 
+
+{contact_name} tiene propuestas específicas sobre este tema. Te puedo ayudar a conectarte con nuestro equipo especializado para obtener información detallada sobre sus políticas y planes.
+
+¿Te gustaría que te contacte alguien del equipo de la campaña para brindarte información más específica?"""
+            
+        except Exception as e:
+            logger.error(f"Error generando respuesta de candidato: {e}")
+            return f"¡Excelente pregunta! {contact_name} tiene propuestas específicas sobre este tema. Te puedo ayudar a conectarte con nuestro equipo para obtener información detallada."
+    
     def _is_tenant_documents_loaded(self, tenant_id: str) -> bool:
         """
         Verifica si los documentos del tenant ya están cargados en cache
         """
         try:
             # Verificar si el tenant tiene documentos en cache
-            return document_context_service.is_tenant_loaded(tenant_id)
+            doc_info = document_context_service.get_tenant_document_info(tenant_id)
+            return doc_info is not None and doc_info.get("loaded", False)
         except Exception as e:
             logger.warning(f"Error verificando documentos cargados para tenant {tenant_id}: {e}")
             return False
@@ -647,29 +1038,35 @@ Respuesta:
         query_lower = query.lower().strip()
         
         # Patrones comunes que siempre tienen la misma intención
+        # IMPORTANTE: El orden importa - patrones más específicos primero
         intent_patterns = {
+            "conocer_candidato": [
+                "propuesta", "propuestas", "propone", "políticas", "política", "planes", "plan",
+                "programa", "plan de gobierno", "qué es", "que es", "qué significa", "que significa",
+                "cómo funciona", "como funciona", "por qué", "por que", "cuál es", "cual es",
+                "cuáles son", "cuales son", "información sobre", "informacion sobre",
+                "detalles sobre", "detalles de", "que opina", "que piensa",
+                "quién es", "quien es", "conocer", "información sobre", "biografía"
+            ],
             "cita_campaña": [
                 "cita", "agendar", "agendarme", "reunión", "reunion", "calendly", 
                 "calendario", "enlace para cita", "quiero una cita"
-            ],
-            "saludo_apoyo": [
-                "hola", "hi", "hello", "hey", "buenos días", "buenas tardes", 
-                "buenas noches", "qué tal", "que tal"
             ],
             "colaboracion_voluntariado": [
                 "voluntario", "voluntariado", "colaborar", "ayudar", "unirme",
                 "participar", "trabajar con ustedes"
             ],
-            "conocer_daniel": [
-                "quién es daniel", "quien es daniel", "conocer daniel", 
-                "información sobre daniel", "biografía"
+            "saludo_apoyo": [
+                "hola", "hi", "hello", "hey", "buenos días", "buenas tardes", 
+                "buenas noches", "qué tal", "que tal"
             ]
         }
         
         for intent, patterns in intent_patterns.items():
-            if any(pattern in query_lower for pattern in patterns):
-                logger.info(f"🎯 Intención detectada desde cache: {intent}")
-                return intent
+            for pattern in patterns:
+                if pattern in query_lower:
+                    logger.info(f"🎯 Intención detectada desde cache: {intent}")
+                    return intent
         
         return None
     
@@ -677,7 +1074,7 @@ Respuesta:
         """
         Respuesta rápida para saludos comunes
         """
-        contact_name = branding_config.get("contactName", "Daniel Quintero Presidente")
+        contact_name = branding_config.get("contactName", "el candidato")
         
         greetings = [
             f"¡Hola! 👋 ¡Qué gusto saludarte! Soy el asistente virtual de la campaña de {contact_name}.",
@@ -692,7 +1089,7 @@ Respuesta:
         """
         Respuesta rápida para consultas de voluntariado
         """
-        contact_name = branding_config.get("contactName", "Daniel Quintero Presidente")
+        contact_name = branding_config.get("contactName", "el candidato")
         
         return f"""¡Excelente! 🎯 Me emociona saber que quieres ser parte del equipo de {contact_name}.
 
@@ -954,6 +1351,7 @@ Completa nuestro formulario: {forms_link}
             else:
                 session_context_service.update_user_context(session_id, user_context or {})
             if not tenant_config:
+                logger.warning(f"❌ TENANT NO ENCONTRADO: {tenant_id} - Retornando general_query")
                 return {
                     "category": "general_query",
                     "confidence": 0.0,
@@ -1509,6 +1907,50 @@ Responde solo el JSON estricto sin comentarios:
                 "detected_categories": malicious_detection["categories"]
             }
         
+        # 🔧 FALLBACK INTELIGENTE: Detectar preguntas sobre el candidato antes de usar IA
+        try:
+            message_lower = message.lower().strip()
+            
+            # Patrones de preguntas directas
+            question_patterns = [
+                "qué es", "que es", "qué significa", "que significa",
+                "cómo funciona", "como funciona", "por qué", "por que",
+                "cuál es", "cual es", "cuáles son", "cuales son",
+                "que opina", "que piensa", "información", "detalles"
+            ]
+            
+            # Patrones de propuestas y políticas
+            policy_patterns = [
+                "propuestas", "propone", "políticas", "planes", 
+                "programa", "plan de gobierno", "propuesta", "propuesta de",
+                "cuales son las", "que propone", "propuestas sobre", "propuestas de"
+            ]
+            
+            # Verificar patrones de preguntas directas
+            for pattern in question_patterns:
+                if pattern in message_lower:
+                    logger.info(f"🎯 PREGUNTA DETECTADA POR PATRÓN: '{message}' → conocer_candidato")
+                    return {
+                        "category": "conocer_candidato",
+                        "confidence": 0.9,
+                        "original_message": message,
+                        "reason": "Detectado por patrón de pregunta"
+                    }
+            
+            # Verificar patrones de propuestas y políticas
+            for pattern in policy_patterns:
+                if pattern in message_lower:
+                    logger.info(f"🎯 PROPUESTA DETECTADA POR PATRÓN: '{message}' → conocer_candidato")
+                    return {
+                        "category": "conocer_candidato",
+                        "confidence": 0.9,
+                        "original_message": message,
+                        "reason": "Detectado por patrón de propuesta"
+                    }
+        except Exception as e:
+            logger.warning(f"Error en detección de patrones: {e}")
+            # Continuar con el flujo normal
+        
         if not self.model:
             logger.warning(f"⚠️ Modelo no disponible, usando fallback")
             return {
@@ -1518,6 +1960,9 @@ Responde solo el JSON estricto sin comentarios:
             }
         
         try:
+            # Agregar timeout para evitar cuelgues
+            import asyncio
+            
             # Prompt para clasificación inteligente
             prompt = f"""
             Eres un experto en análisis de intención para campañas políticas. Clasifica la siguiente intención del mensaje:
@@ -1540,7 +1985,10 @@ Responde solo el JSON estricto sin comentarios:
             
             - saludo_apoyo: Saludos, muestras de simpatía o respaldo positivo
             - publicidad_info: Preguntas sobre materiales publicitarios o difusión
-            - conocer_candidato: Interés en propuestas, trayectoria o información del candidato (SIN solicitud de cita)
+        - conocer_candidato: [PRIORIDAD ALTA] Interés en propuestas, trayectoria, información del candidato, preguntas sobre políticas, planes de gobierno, experiencia, etc.
+          Ejemplos: "¿qué propone?", "¿cuál es su experiencia?", "¿qué planes tiene?", "¿qué opina sobre...?", "¿cuáles son sus propuestas?", "¿qué es aguas vivas?", "¿cuándo inicia la campaña?", "¿qué significa...?", "¿qué es...?", "¿cómo funciona...?", "¿por qué...?", "cuales son las propuestas", "que propone sobre", "información sobre", "detalles sobre"
+          ⚠️ IMPORTANTE: Si el mensaje pregunta sobre el candidato, sus propuestas, políticas, planes, experiencia, o cualquier información sobre él → SIEMPRE clasificar como "conocer_candidato"
+          ⚠️ CRÍTICO: Cualquier pregunta que contenga palabras como "propuestas", "propone", "políticas", "planes", "información", "detalles" debe clasificarse como "conocer_candidato"
             - actualizacion_datos: Correcciones o actualizaciones de información personal
             - solicitud_funcional: Preguntas técnicas sobre la plataforma o sistema
             - colaboracion_voluntariado: Ofrecimientos de apoyo activo o voluntariado
@@ -1564,8 +2012,20 @@ Responde solo el JSON estricto sin comentarios:
             logger.info(f"🤖 Prompt de clasificación enviado a Gemini")
             logger.debug(f"📋 Prompt completo: {prompt[:200]}...")
             
-            # 🚀 FASE 2: Usar configuración optimizada para clasificación de intenciones
-            response_text = await self._generate_content(prompt, task_type="intent_classification")
+            # 🚀 FASE 2: Usar configuración optimizada para clasificación de intenciones con timeout
+            try:
+                response_text = await asyncio.wait_for(
+                    self._generate_content(prompt, task_type="intent_classification"),
+                    timeout=10.0  # 10 segundos de timeout
+                )
+            except asyncio.TimeoutError:
+                logger.warning("⚠️ Timeout en clasificación de IA, usando fallback")
+                return {
+                    "category": "saludo_apoyo",
+                    "confidence": 0.0,
+                    "original_message": message,
+                    "reason": "Timeout en IA"
+                }
             
             # 🔧 DEBUG: Log de la respuesta de Gemini
             logger.info(f"🎯 Respuesta de Gemini para clasificación: '{response_text}'")

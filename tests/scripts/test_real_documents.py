@@ -11,7 +11,7 @@ from typing import Dict, Any
 
 # Configuración
 CHATBOT_SERVICE_URL = "http://localhost:8000"
-TENANT_ID = "daniel_dev"
+TENANT_ID = "test_dev"
 
 async def test_with_real_url(document_url: str):
     """Prueba la integración con una URL real de documentos"""

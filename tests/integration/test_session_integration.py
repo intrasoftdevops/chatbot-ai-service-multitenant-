@@ -13,8 +13,8 @@ async def test_session_integration():
     
     print("🎯 PRUEBA DE SESIONES CON CONTEXTO PERSISTENTE")
     print("=" * 60)
-    print("📦 Documentos: daniel-quintero-docs")
-    print("🏢 Tenant: daniel_dev")
+    print("📦 Documentos: bucket-name")
+    print("🏢 Tenant: test_dev")
     print("💬 Sesión persistente con contexto")
     print()
     
@@ -37,11 +37,11 @@ async def test_session_integration():
         print("\n2️⃣ Cargando documentos...")
         try:
             load_request = {
-                "documentation_bucket_url": "https://storage.googleapis.com/daniel-quintero-docs"
+                "documentation_bucket_url": "https://storage.googleapis.com/bucket-name"
             }
             
             response = await client.post(
-                "http://localhost:8000/api/v1/tenants/daniel_dev/load-documents",
+                "http://localhost:8000/api/v1/tenants/test_dev/load-documents",
                 json=load_request
             )
             
@@ -62,8 +62,8 @@ async def test_session_integration():
         
         conversation_flow = [
             {
-                "query": "Hola, ¿quién es Daniel Quintero?",
-                "expected_context": "biografía, ingeniero, político"
+                "query": "Hola, ¿quién es el candidato?",
+                "expected_context": "biografía, información del candidato"
             },
             {
                 "query": "¿Cuáles son sus propuestas principales?",
@@ -98,7 +98,7 @@ async def test_session_integration():
                 }
                 
                 response = await client.post(
-                    "http://localhost:8000/api/v1/tenants/daniel_dev/chat",
+                    "http://localhost:8000/api/v1/tenants/test_dev/chat",
                     json=chat_request
                 )
                 
@@ -134,7 +134,7 @@ async def test_session_integration():
         print(f"\n4️⃣ Verificando información de la sesión {session_id}...")
         try:
             response = await client.get(
-                f"http://localhost:8000/api/v1/tenants/daniel_dev/sessions/{session_id}/info"
+                f"http://localhost:8000/api/v1/tenants/test_dev/sessions/{session_id}/info"
             )
             
             if response.status_code == 200:
@@ -154,7 +154,7 @@ async def test_session_integration():
         print(f"\n5️⃣ Verificando estadísticas de sesiones...")
         try:
             response = await client.get(
-                "http://localhost:8000/api/v1/tenants/daniel_dev/sessions/stats"
+                "http://localhost:8000/api/v1/tenants/test_dev/sessions/stats"
             )
             
             if response.status_code == 200:
@@ -184,7 +184,7 @@ async def test_session_integration():
             }
             
             response = await client.post(
-                "http://localhost:8000/api/v1/tenants/daniel_dev/chat",
+                "http://localhost:8000/api/v1/tenants/test_dev/chat",
                 json=follow_up_request
             )
             
@@ -210,7 +210,7 @@ async def test_session_integration():
         print(f"\n7️⃣ Limpiando sesión de prueba...")
         try:
             response = await client.delete(
-                f"http://localhost:8000/api/v1/tenants/daniel_dev/sessions/{session_id}"
+                f"http://localhost:8000/api/v1/tenants/test_dev/sessions/{session_id}"
             )
             
             if response.status_code == 200:
