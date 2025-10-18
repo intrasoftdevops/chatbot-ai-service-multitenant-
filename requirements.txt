@@ -42,5 +42,5 @@ pytest-asyncio==0.21.1
 
 # Utilidades
 python-dotenv==1.0.0
-typing-extensions==4.8.0
+typing-extensions>=4.12.2  # Requerido por pydantic>=2.8.0
 
