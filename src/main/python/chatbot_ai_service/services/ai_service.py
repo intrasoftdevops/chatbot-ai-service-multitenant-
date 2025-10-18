@@ -1125,6 +1125,9 @@ Responde solo el JSON estricto sin comentarios:
         # 🚀 FASE 6: Usar RAGOrchestrator si está habilitado
         if self.use_rag_orchestrator and self.rag_orchestrator:
             try:
+                # 🔧 FIX: Asegurar que documentos estén cargados ANTES de usar RAG
+                await self._ensure_tenant_documents_loaded(tenant_id, ai_config)
+                
                 logger.info(f"🎯 Usando RAGOrchestrator | tenant_id={tenant_id} | query='{query[:50]}...'")
                 response = await self.rag_orchestrator.process_query_simple(
                     query=query,
@@ -1144,6 +1147,9 @@ Responde solo el JSON estricto sin comentarios:
             return "Lo siento, el servicio de IA no está disponible."
         
         try:
+            # 🔧 FIX: Asegurar que documentos estén cargados antes de buscar contexto
+            await self._ensure_tenant_documents_loaded(tenant_id, ai_config)
+            
             # Obtener contexto relevante de documentos del cliente
             relevant_context = ""
             try:
