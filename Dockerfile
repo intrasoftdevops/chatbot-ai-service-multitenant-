@@ -82,5 +82,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 EXPOSE ${PORT}
 
 # Comando de inicio con Granian (servidor Rust ultrarrápido)
-CMD ["sh", "-c", "granian --interface asgi chatbot_ai_service.main:app --host 0.0.0.0 --port ${PORT} --workers 2 --threads 2 --blocking-threads 4"]
+# --workers 2: Procesos paralelos (aprovechar CPU de Cloud Run)
+# Nota: ASGI no soporta --blocking-threads > 1, pero 2 workers ya da paralelización
+CMD ["sh", "-c", "granian --interface asgi chatbot_ai_service.main:app --host 0.0.0.0 --port ${PORT} --workers 2"]
 

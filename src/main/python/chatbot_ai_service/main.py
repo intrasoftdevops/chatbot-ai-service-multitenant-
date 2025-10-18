@@ -8,7 +8,6 @@ Recibe configuración del proyecto Political Referrals via HTTP.
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import uvicorn
 import os
 from dotenv import load_dotenv
 import logging
@@ -81,11 +80,5 @@ async def health_check():
         "version": "1.0.0"
     }
 
-if __name__ == "__main__":
-    port = int(os.getenv("PORT", 8000))
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=port,
-        reload=os.getenv("ENVIRONMENT") == "development"
-    )
+# Nota: La aplicación se ejecuta con Granian (servidor ASGI en Rust)
+# Ver run_server.sh (local) o Dockerfile (producción) para configuración del servidor
