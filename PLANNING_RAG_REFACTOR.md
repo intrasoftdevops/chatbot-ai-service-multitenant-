@@ -1336,6 +1336,141 @@ CMD ["sh", "-c", "granian --interface asgi chatbot_ai_service.main:app --host 0.
 
 ---
 
-**Última actualización**: 18 Oct 2025 - Sesión Completa: Debugging + Optimización + Docker Local Validation  
+## 🔒 GUARDRAIL ANTI-LEAKAGE: SEGURIDAD CRÍTICA (18 Oct 2025 - Tarde)
+
+### 🚨 PROBLEMA DETECTADO:
+El sistema estaba **compartiendo URLs y enlaces** a documentos de entrenamiento en las respuestas a usuarios finales.
+
+**Ejemplo real reportado por usuario:**
+```
+Para que tengas más detalles, te comparto este enlace donde encontrarás 
+todas las evidencias y pruebas relacionadas con el caso Aguas Vivas y 
+el supuesto "cartel de los lotes": https://tinyurl.com/um2f9nxw
+
+Allí podrás revisar documentos como:
+* Avalúos de los terrenos
+* Derechos de petición y escrituras
+* Decretos relevantes (2502 de 2019 y 566 de 2011)
+```
+
+### 🎯 RIESGO:
+- ✅ Exposición de documentos internos privados
+- ✅ Leak de información sensible del cliente
+- ✅ Violación de políticas de confidencialidad
+- ✅ Acceso no autorizado a material de campaña
+
+### ✅ SOLUCIÓN IMPLEMENTADA: 3 CAPAS DE PROTECCIÓN
+
+#### **Capa 1: System Prompts (Prevención)**
+```python
+# system_prompts.py - BASE_GUARDRAILS actualizado
+[PROHIBICIONES ABSOLUTAS]:
+6. NUNCA compartas URLs, enlaces, links o referencias directas a documentos fuente
+7. NUNCA menciones nombres de archivos, rutas o ubicaciones de documentos
+
+[OBLIGACIONES CRITICAS]:
+5. SIEMPRE responde SOLO con el contenido, SIN revelar fuentes externas
+
+[SEGURIDAD]: NUNCA expongas URLs, enlaces, o referencias a documentos internos.
+```
+
+#### **Capa 2: GuardrailVerifier (Detección)**
+```python
+# guardrail_verifier.py - Nuevo check _check_no_urls()
+def _check_no_urls(self, response: str) -> GuardrailCheckResult:
+    """Verifica que NO haya URLs o enlaces (seguridad)"""
+    # Detecta:
+    - http://, https:// 
+    - www.
+    - TinyURL, Bit.ly
+    - Google Drive, Docs, GCS
+    - Archivos: .pdf, .docx, .xlsx, .txt, etc.
+    
+    severity="critical"  # Bloquea respuesta si detecta URLs
+```
+
+#### **Capa 3: ResponseSanitizer (Remoción)**
+```python
+# response_sanitizer.py - Nuevo método _remove_urls_and_files()
+def _remove_urls_and_files(self, response: str):
+    """PRIORIDAD MÁXIMA - Paso #1 de sanitización"""
+    # Reemplaza:
+    - URLs → [URL removida por seguridad]
+    - Archivos → [archivo removido]
+    
+    # Remueve frases:
+    - "te comparto este enlace"
+    - "encontrarás en"
+    - "puedes revisar el documento"
+    - "consulta el documento"
+    
+    # Log warning cuando detecta leaks
+```
+
+### 📊 COBERTURA DE PATRONES:
+
+| Tipo | Patrón | Acción |
+|------|--------|--------|
+| URLs HTTP/S | `https?://[^\s]+` | ✅ Detectado + Removido |
+| www | `www.[^\s]+` | ✅ Detectado + Removido |
+| TinyURL | `tinyurl.com/[^\s]+` | ✅ Detectado + Removido |
+| Bit.ly | `bit.ly/[^\s]+` | ✅ Detectado + Removido |
+| Google Drive | `drive.google.com` | ✅ Detectado + Removido |
+| Google Docs | `docs.google.com` | ✅ Detectado + Removido |
+| GCS | `storage.googleapis.com` | ✅ Detectado + Removido |
+| Archivos PDF | `*.pdf` | ✅ Detectado + Removido |
+| Archivos Word | `*.docx, *.doc` | ✅ Detectado + Removido |
+| Archivos Excel | `*.xlsx, *.xls` | ✅ Detectado + Removido |
+| Texto | `*.txt, *.md, *.csv` | ✅ Detectado + Removido |
+
+### 🧪 FLUJO DE PROTECCIÓN:
+
+```mermaid
+Gemini Model
+    ↓
+System Prompt: "NUNCA compartas URLs"
+    ↓
+Response Generated
+    ↓
+GuardrailVerifier: ¿Tiene URLs?
+    ↓ SÍ (CRITICAL FAIL)
+    ↓
+ResponseSanitizer: Remover URLs
+    ↓
+Response Final: URLs removidas + log de warning
+    ↓
+Usuario Final: Sin acceso a documentos internos ✅
+```
+
+### 🎯 RESULTADO:
+
+| Aspecto | Antes | Ahora |
+|---------|-------|-------|
+| URLs en respuestas | ❌ Expuestas | ✅ Bloqueadas |
+| Archivos mencionados | ❌ Visibles | ✅ Removidos |
+| Frases de compartir | ❌ Presentes | ✅ Eliminadas |
+| Logs de seguridad | ❌ No | ✅ Sí (warning) |
+| Protección | ❌ 0 capas | ✅ 3 capas |
+
+### 💥 IMPACTO:
+
+- ✅ **Seguridad**: Documentos internos NUNCA expuestos
+- ✅ **Confidencialidad**: Material de campaña protegido
+- ✅ **Compliance**: Políticas de privacidad respetadas
+- ✅ **Trazabilidad**: Logs cuando se detecta intento de leak
+- ✅ **Automático**: No requiere intervención manual
+
+### 🚀 DEPLOYMENT:
+
+```bash
+✅ git add system_prompts.py guardrail_verifier.py response_sanitizer.py
+✅ git commit -m "sec(guardrails): Implementar guardrail anti-leakage"
+✅ git push origin dev
+⏳ GitHub Actions → Cloud Build → Cloud Run (en progreso)
+```
+
+---
+
+**Última actualización**: 18 Oct 2025 - Sesión Completa: Debugging + Optimización + Docker + Seguridad Crítica  
 **Responsable**: Equipo de IA
-**Estado**: 🟢 Fases 1, 2, 5 y 6 completadas + 8 bugs resueltos + Docker optimizado (multi-stage, -45% tamaño) + Granian 100% funcional (probado localmente) - Deployment a Cloud Run en progreso
+**Estado**: 🟢 Fases 1, 2, 5 y 6 completadas + 8 bugs resueltos + Docker optimizado (multi-stage, -45% tamaño) + Granian 100% funcional + Guardrail Anti-Leakage implementado (3 capas) - Deployment a Cloud Run en progreso
