@@ -33,7 +33,7 @@ llama-index-llms-gemini>=0.6.0  # Gemini LLM integration (v0.6.1)
 llama-index-embeddings-gemini>=0.4.0  # Gemini Embeddings (v0.4.1)
 
 # Logging y monitoreo
-python-json-logger==2.0.7
+python-json-logger==4.0.0
 structlog==23.2.0
 
 # Testing
