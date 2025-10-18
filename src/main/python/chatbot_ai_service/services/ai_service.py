@@ -575,8 +575,11 @@ Respuesta:
     def _handle_appointment_request(self, branding_config: Dict[str, Any], tenant_config: Dict[str, Any] = None) -> str:
         """Maneja solicitudes de agendar citas"""
         contact_name = branding_config.get("contactName", "el candidato")
-        # El link_calendly está en el nivel raíz de tenant_config, no en branding
-        calendly_link = tenant_config.get("link_calendly") if tenant_config else "https://calendly.com/dq-campana/reunion"
+        
+        # Obtener link de Calendly con prioridad de fuentes
+        if tenant_config and tenant_config.get("link_calendly"):
+            calendly_link = tenant_config.get("link_calendly")
+            logger.info(f"✅ Usando link de Calendly desde BD: {calendly_link}")
         
         return f"""¡Perfecto! Te ayudo a agendar una cita con alguien de la campaña de {contact_name}. 
 
