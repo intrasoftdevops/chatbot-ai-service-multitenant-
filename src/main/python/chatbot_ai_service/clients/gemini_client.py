@@ -116,8 +116,11 @@ class GeminiClient:
                             for i, part in enumerate(candidate.content.parts):
                                 logger.debug(f"🔍 Part {i} type: {type(part)}, has text: {hasattr(part, 'text')}")
                                 logger.debug(f"🔍 Part {i} structure: {dir(part)}")
-                                if hasattr(part, 'text'):
+                                if hasattr(part, 'text') and part.text:
                                     text_parts.append(part.text)
+                                else:
+                                    # Si el part no tiene text, convertir a string
+                                    text_parts.append(str(part))
                             
                             if text_parts:
                                 result = ''.join(text_parts)
