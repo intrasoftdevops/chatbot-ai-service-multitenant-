@@ -38,6 +38,13 @@ except ImportError:
     DOCX_SUPPORT = False
     logging.warning("python-docx no disponible - soporte Word deshabilitado")
 
+try:
+    import openpyxl
+    EXCEL_SUPPORT = True
+except ImportError:
+    EXCEL_SUPPORT = False
+    logging.warning("openpyxl no disponible - soporte Excel deshabilitado")
+
 # Verificar que LlamaIndex esté disponible y resolver rutas según versión
 LLAMA_INDEX_SUPPORT = False
 try:
@@ -320,9 +327,9 @@ class DocumentContextService:
                     documents = []
                     
                     for item in data.get("items", []):
-                        # Filtrar solo archivos de texto, PDF y Word
+                        # Filtrar solo archivos de texto, PDF, Word y Excel
                         name = item.get("name", "")
-                        if name.endswith(('.txt', '.md', '.pdf', '.docx', '.doc')):
+                        if name.endswith(('.txt', '.md', '.pdf', '.docx', '.doc', '.xlsx', '.xls')):
                             # Construir URL pública del archivo
                             file_url = f"https://storage.googleapis.com/storage/v1/b/{bucket_name}/o/{name}?alt=media"
                             
@@ -358,7 +365,7 @@ class DocumentContextService:
         """Obtiene documentos de una URL directa"""
         try:
             # Si es una URL directa a un documento
-            if url.endswith(('.pdf', '.txt', '.docx', '.md')):
+            if url.endswith(('.pdf', '.txt', '.docx', '.md', '.xlsx', '.xls')):
                 return [{
                     "filename": url.split('/')[-1],
                     "url": url,
@@ -419,6 +426,12 @@ class DocumentContextService:
                         else:
                             logger.warning("Soporte para Word no disponible - python-docx no instalado")
                             return None
+                    elif 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' in content_type or url.endswith(('.xlsx', '.xls')):
+                        if EXCEL_SUPPORT:
+                            return self._extract_excel_text(response.content)
+                        else:
+                            logger.warning("Soporte para Excel no disponible - openpyxl no instalado")
+                            return None
                     else:
                         # Intentar como texto plano
                         try:
@@ -444,6 +457,8 @@ class DocumentContextService:
             'pdf': 'application/pdf',
             'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
             'doc': 'application/msword',
+            'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'xls': 'application/vnd.ms-excel',
             'rtf': 'application/rtf'
         }
         
@@ -542,6 +557,43 @@ class DocumentContextService:
             
         except Exception as e:
             logger.error(f"Error extrayendo texto de Word: {str(e)}")
+            return None
+    
+    def _extract_excel_text(self, excel_content: bytes) -> Optional[str]:
+        """Extrae texto de un archivo Excel"""
+        try:
+            excel_file = io.BytesIO(excel_content)
+            workbook = openpyxl.load_workbook(excel_file, data_only=True)
+            
+            text_content = []
+            
+            # Procesar todas las hojas
+            for sheet_name in workbook.sheetnames:
+                sheet = workbook[sheet_name]
+                
+                # Agregar nombre de la hoja como sección
+                text_content.append(f"\n=== {sheet_name} ===\n")
+                
+                # Extraer todas las celdas con contenido
+                for row in sheet.iter_rows():
+                    row_values = []
+                    for cell in row:
+                        if cell.value is not None:
+                            # Convertir el valor a string
+                            value = str(cell.value).strip()
+                            if value:
+                                row_values.append(value)
+                    
+                    # Solo agregar filas con contenido
+                    if row_values:
+                        text_content.append(" | ".join(row_values))
+            
+            extracted_text = "\n".join(text_content)
+            logger.info(f"Texto extraído de Excel: {len(extracted_text)} caracteres de {len(workbook.sheetnames)} hoja(s)")
+            return extracted_text
+            
+        except Exception as e:
+            logger.error(f"Error extrayendo texto de Excel: {str(e)}")
             return None
     
     def _simple_search(self, documents: List[Dict[str, Any]], query: str, max_results: int) -> str:
