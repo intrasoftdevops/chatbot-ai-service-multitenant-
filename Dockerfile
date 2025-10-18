@@ -18,7 +18,18 @@ RUN apt-get update && apt-get install -y \
 # Copiar archivos de dependencias
 COPY requirements.txt .
 
-# Instalar dependencias de Python
+# Actualizar pip, setuptools y wheel primero
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
+# Instalar dependencias pesadas primero (LlamaIndex + Google AI)
+# Esto evita timeouts en Cloud Build al instalar en orden óptimo
+RUN pip install --no-cache-dir \
+    google-generativeai>=0.8.5 \
+    llama-index-core>=0.14.0 \
+    llama-index-llms-gemini>=0.6.0 \
+    llama-index-embeddings-gemini>=0.4.0
+
+# Instalar el resto de dependencias
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copiar código fuente (Python package root)
