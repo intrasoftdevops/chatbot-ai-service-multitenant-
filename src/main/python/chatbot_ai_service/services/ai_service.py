@@ -413,20 +413,30 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
             # Agregar mensaje del usuario a la sesión
             session_context_service.add_message(session_id, "user", query)
             
-            # Cargar documentos del cliente si están disponibles
-            await self._ensure_tenant_documents_loaded(tenant_id, ai_config)
+            # 🚀 OPTIMIZACIÓN 1: Verificar cache de documentos antes de cargar
+            if not self._is_tenant_documents_loaded(tenant_id):
+                logger.info(f"📚 Cargando documentos para tenant {tenant_id} (primera vez)")
+                await self._ensure_tenant_documents_loaded(tenant_id, ai_config)
+            else:
+                logger.info(f"✅ Documentos ya cargados para tenant {tenant_id}")
             
             # Actualizar contexto de documentos en la sesión
             document_context = await document_context_service.get_relevant_context(tenant_id, query, max_results=3)
             if document_context:
                 session_context_service.update_document_context(session_id, document_context)
             
-            # 1. PRIMERO: Clasificar la intención del mensaje
-            classification_result = await self.classify_intent(tenant_id, query, user_context, session_id)
-            intent = classification_result.get("category", "default")  # El método classify_intent devuelve "category"
-            confidence = classification_result.get("confidence", 0.0)
+            # 🚀 OPTIMIZACIÓN 2: Intentar obtener intención desde cache primero
+            cached_intent = self._get_cached_intent(query)
+            if cached_intent:
+                intent = cached_intent
+                confidence = 0.95  # Alta confianza para patrones conocidos
+                logger.info(f"🎯 Usando intención desde cache: {intent}")
+            else:
+                # Clasificar la intención del mensaje usando IA
+                classification_result = await self.classify_intent(tenant_id, query, user_context, session_id)
+                intent = classification_result.get("category", "default")
+                confidence = classification_result.get("confidence", 0.0)
             
-            logger.info(f"🔍 Clasificación completa: {classification_result}")
             logger.info(f"🧠 Intención extraída: {intent} (confianza: {confidence:.2f})")
             
             # 1.5 NUEVO: Intentar obtener respuesta del caché
@@ -451,23 +461,22 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
                     "session_id": session_id
                 }
             
-            # 2. SEGUNDO: Verificar si debemos usar fallback por alta carga
-            if self._should_use_fallback():
+            # 🚀 OPTIMIZACIÓN 3: Respuestas rápidas para casos comunes
+            if intent == "cita_campaña":
+                logger.info(f"🎯 RESPUESTA RÁPIDA: cita_campaña")
+                response = self._handle_appointment_request(branding_config, tenant_config)
+            elif intent == "saludo_apoyo":
+                logger.info(f"🎯 RESPUESTA RÁPIDA: saludo_apoyo")
+                response = self._get_greeting_response(branding_config)
+            elif intent == "colaboracion_voluntariado":
+                logger.info(f"🎯 RESPUESTA RÁPIDA: colaboracion_voluntariado")
+                response = self._get_volunteer_response(branding_config)
+            elif self._should_use_fallback():
                 logger.info("Alta carga detectada en chat, usando fallback general")
                 response = self._get_general_fallback_response(query, tenant_config)
             else:
-                # Procesar según la intención clasificada
-                if intent == "cita_campaña":
-                    # 🔧 DEBUG: Log de entrada a manejo de cita
-                    logger.info(f"🎯 INTENCIÓN DETECTADA: cita_campaña - Llamando _handle_appointment_request")
-                    # Respuesta específica para agendar citas
-                    response = self._handle_appointment_request(branding_config, tenant_config)
-                elif intent == "saludo_apoyo":
-                    # Respuesta específica para saludos
-                    response = await self._generate_ai_response_with_session(
-                        query, user_context, ai_config, branding_config, tenant_id, session_id
-                    )
-                elif intent == "conocer_daniel":
+                # Procesar según la intención clasificada con IA
+                if intent == "conocer_daniel":
                     # Respuesta específica sobre Daniel Quintero
                     response = await self._generate_ai_response_with_session(
                         query, user_context, ai_config, branding_config, tenant_id, session_id
@@ -475,9 +484,6 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
                 elif intent == "solicitud_funcional":
                     # Respuesta específica para consultas funcionales
                     response = self._handle_functional_request(query, branding_config)
-                elif intent == "colaboracion_voluntariado":
-                    # Respuesta específica para voluntariado
-                    response = self._handle_volunteer_request(branding_config)
                 elif intent == "malicioso":
                     # Manejo específico para comportamiento malicioso
                     response = await self._handle_malicious_behavior(
@@ -616,6 +622,84 @@ Respuesta:
 """
         
         return prompt
+    
+    def _is_tenant_documents_loaded(self, tenant_id: str) -> bool:
+        """
+        Verifica si los documentos del tenant ya están cargados en cache
+        """
+        try:
+            # Verificar si el tenant tiene documentos en cache
+            return document_context_service.is_tenant_loaded(tenant_id)
+        except Exception as e:
+            logger.warning(f"Error verificando documentos cargados para tenant {tenant_id}: {e}")
+            return False
+    
+    def _get_cached_intent(self, query: str) -> Optional[str]:
+        """
+        Obtiene intención desde cache para consultas comunes
+        """
+        query_lower = query.lower().strip()
+        
+        # Patrones comunes que siempre tienen la misma intención
+        intent_patterns = {
+            "cita_campaña": [
+                "cita", "agendar", "agendarme", "reunión", "reunion", "calendly", 
+                "calendario", "enlace para cita", "quiero una cita"
+            ],
+            "saludo_apoyo": [
+                "hola", "hi", "hello", "hey", "buenos días", "buenas tardes", 
+                "buenas noches", "qué tal", "que tal"
+            ],
+            "colaboracion_voluntariado": [
+                "voluntario", "voluntariado", "colaborar", "ayudar", "unirme",
+                "participar", "trabajar con ustedes"
+            ],
+            "conocer_daniel": [
+                "quién es daniel", "quien es daniel", "conocer daniel", 
+                "información sobre daniel", "biografía"
+            ]
+        }
+        
+        for intent, patterns in intent_patterns.items():
+            if any(pattern in query_lower for pattern in patterns):
+                logger.info(f"🎯 Intención detectada desde cache: {intent}")
+                return intent
+        
+        return None
+    
+    def _get_greeting_response(self, branding_config: Dict[str, Any]) -> str:
+        """
+        Respuesta rápida para saludos comunes
+        """
+        contact_name = branding_config.get("contactName", "Daniel Quintero Presidente")
+        
+        greetings = [
+            f"¡Hola! 👋 ¡Qué gusto saludarte! Soy el asistente virtual de la campaña de {contact_name}.",
+            f"¡Hola! 😊 ¡Bienvenido! Estoy aquí para ayudarte con información sobre la campaña de {contact_name}.",
+            f"¡Hola! 🎉 ¡Excelente día! Soy tu asistente para todo lo relacionado con {contact_name}."
+        ]
+        
+        import random
+        return random.choice(greetings)
+    
+    def _get_volunteer_response(self, branding_config: Dict[str, Any]) -> str:
+        """
+        Respuesta rápida para consultas de voluntariado
+        """
+        contact_name = branding_config.get("contactName", "Daniel Quintero Presidente")
+        
+        return f"""¡Excelente! 🎯 Me emociona saber que quieres ser parte del equipo de {contact_name}.
+
+🌟 *¿Cómo puedes ayudar?*
+• Difundir el mensaje en redes sociales
+• Participar en actividades de campo
+• Organizar eventos en tu comunidad
+• Invitar amigos y familiares
+
+💡 *¿Sabías que puedes ganar puntos?*
+Cada persona que se registre con tu código te suma 50 puntos al ranking. ¡Es una forma divertida de competir mientras ayudas!
+
+¿Te gustaría que te envíe tu link de referido para empezar a ganar puntos?"""
     
     def _filter_links_from_response(self, response: str) -> str:
         """
