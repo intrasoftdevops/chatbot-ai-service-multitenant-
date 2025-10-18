@@ -1,6 +1,7 @@
 # FastAPI y dependencias web
 fastapi==0.104.1
-uvicorn[standard]==0.24.0
+granian[reload]==1.6.4  # Servidor ASGI ultrarrápido (Rust)
+# uvicorn[standard]==0.24.0  # Reemplazado por Granian (2-3x más rápido)
 pydantic>=2.8.0  # Requerido por llama-index-core>=0.14.0
 pydantic-settings==2.1.0
 

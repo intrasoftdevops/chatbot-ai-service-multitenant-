@@ -81,6 +81,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 # Exponer puerto
 EXPOSE ${PORT}
 
-# Comando de inicio
-CMD ["sh", "-c", "python -m uvicorn chatbot_ai_service.main:app --host 0.0.0.0 --port ${PORT}"]
+# Comando de inicio con Granian (servidor Rust ultrarrápido)
+CMD ["sh", "-c", "granian --interface asgi chatbot_ai_service.main:app --host 0.0.0.0 --port ${PORT} --workers 2 --threads 2 --blocking-threads 4"]
 

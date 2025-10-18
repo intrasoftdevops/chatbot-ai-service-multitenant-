@@ -70,7 +70,7 @@ echo "   🌐 CONFIG SERVICE: $POLITICAL_REFERRALS_SERVICE_URL"
 echo "   💾 REDIS: $REDIS_ENABLED (Host: $REDIS_HOST)"
 echo ""
 echo "══════════════════════════════════════════════════════════════════════════════"
-echo "🎮 Servidor arrancando... Busca estos logs:"
+echo "🎮 Servidor arrancando con Granian (Rust - 2-3x más rápido)... Busca estos logs:"
 echo "   ✅ GeminiClient habilitado via feature flag"
 echo "   ✅ Configuraciones avanzadas de modelo habilitadas"
 echo "   🛡️ Guardrails estrictos habilitados"
@@ -78,5 +78,6 @@ echo "   🧠 RAGOrchestrator habilitado (si USE_RAG_ORCHESTRATOR=true)"
 echo "══════════════════════════════════════════════════════════════════════════════"
 echo ""
 
-python3 src/main/python/chatbot_ai_service/main.py
+# Usar Granian (servidor Rust ultrarrápido) con reload para desarrollo
+granian --interface asgi chatbot_ai_service.main:app --host 0.0.0.0 --port 8000 --reload --workers 1
 
