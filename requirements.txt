@@ -26,6 +26,11 @@ aiohttp==3.9.1
 # Cache
 redis==5.0.1
 
+# LlamaIndex para RAG
+llama-index==0.10.25
+llama-index-llms-gemini==0.1.4
+llama-index-embeddings-gemini==0.1.2
+
 # Logging y monitoreo
 python-json-logger==2.0.7
 structlog==23.2.0
