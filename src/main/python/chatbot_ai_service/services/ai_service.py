@@ -1271,7 +1271,7 @@ Responde solo el JSON estricto sin comentarios:
             prompt = f"""
             Eres un experto en análisis de intención para campañas políticas. Clasifica la siguiente intención del mensaje:
             
-            CATEGORÍAS:
+            CATEGORÍAS (EN ORDEN DE PRIORIDAD):
             
             - malicioso: Mensajes con INTENCIÓN NEGATIVA, AGRESIVA o OFENSIVA hacia la campaña, candidato o equipo. Analiza el TONO y PROPÓSITO, no solo palabras específicas:
               * Insultos o ataques personales (directos o indirectos)
@@ -1280,16 +1280,21 @@ Responde solo el JSON estricto sin comentarios:
               * Mensajes de provocación o spam
               * Cualquier mensaje que busque dañar, ofender o agredir
             
-            - cita_campaña: Solicitudes para agendar, confirmar o coordinar reuniones
+            - cita_campaña: [PRIORIDAD ALTA] Cualquier solicitud para agendar, coordinar, tener una reunión o cita. 
+              Ejemplos: "quiero una cita", "agendar reunión", "hablar con alguien", "coordinar encuentro", "me gustaría reunirme"
+              ⚠️ IMPORTANTE: Si el mensaje menciona "cita", "reunión", "agendar", "coordinar", "hablar con alguien de la campaña" → SIEMPRE clasificar como "cita_campaña"
+            
+            - atencion_humano: Solicitudes EXPLÍCITAS para hablar con un agente humano o persona real
+              Ejemplos: "quiero hablar con una persona real", "necesito un humano", "dame un asesor"
+            
             - saludo_apoyo: Saludos, muestras de simpatía o respaldo positivo
             - publicidad_info: Preguntas sobre materiales publicitarios o difusión
-            - conocer_candidato: Interés en propuestas, trayectoria o información del candidato
+            - conocer_candidato: Interés en propuestas, trayectoria o información del candidato (SIN solicitud de cita)
             - actualizacion_datos: Correcciones o actualizaciones de información personal
             - solicitud_funcional: Preguntas técnicas sobre la plataforma o sistema
             - colaboracion_voluntariado: Ofrecimientos de apoyo activo o voluntariado
             - quejas: Reclamos constructivos sobre gestión o procesos
             - lider: Mensajes de líderes comunitarios buscando coordinación
-            - atencion_humano: Solicitudes para hablar con agente humano
             - atencion_equipo_interno: Mensajes del equipo interno de la campaña
             - registration_response: Respuestas a preguntas de registro
             
