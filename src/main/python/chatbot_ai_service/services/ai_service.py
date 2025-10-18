@@ -34,8 +34,12 @@ class AIService:
         self.api_key = None
         # Servicio para notificar bloqueos
         self.blocking_notification_service = BlockingNotificationService()
-        # Configurar URL del servicio Java
-        self.blocking_notification_service.set_java_service_url("http://localhost:8080")
+        # Configurar URL del servicio Java desde variable de entorno
+        java_service_url = os.getenv("POLITICAL_REFERRALS_SERVICE_URL")
+        if java_service_url:
+            self.blocking_notification_service.set_java_service_url(java_service_url)
+        else:
+            logger.warning("POLITICAL_REFERRALS_SERVICE_URL no configurado - funcionalidad de bloqueo limitada")
         
         # 🚀 FASE 1: Feature flag para usar GeminiClient
         # Permite migración gradual sin romper funcionalidad existente
