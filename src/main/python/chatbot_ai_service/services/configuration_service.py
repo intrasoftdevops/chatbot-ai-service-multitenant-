@@ -89,8 +89,8 @@ class ConfigurationService:
             Configuración de IA
         """
         config = self.get_tenant_config(tenant_id)
-        if config and "aiConfig" in config:
-            return config["aiConfig"]
+        if config and "ai_config" in config:
+            return config["ai_config"]
         
         # Configuración por defecto
         return {
