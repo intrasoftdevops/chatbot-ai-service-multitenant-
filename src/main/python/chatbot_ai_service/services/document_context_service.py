@@ -60,13 +60,16 @@ try:
     try:
         from llama_index.llms.gemini import Gemini as _Gem
         from llama_index.embeddings.gemini import GeminiEmbedding as _GemEmb
-    except ImportError:
+    except ImportError as e:
+        logging.warning(f"⚠️ No se pudo importar Gemini para LlamaIndex: {str(e)}")
         _Gem = None
         _GemEmb = None
     VectorStoreIndex, Document, Settings, StorageContext, load_index_from_storage = _VSI, _Doc, _Settings, _SC, _load
     SimpleNodeParser, Gemini, GeminiEmbedding = _SNP, _Gem, _GemEmb
     LLAMA_INDEX_SUPPORT = True
-except ImportError:
+    logging.info("✅ LlamaIndex cargado correctamente (modo moderno)")
+except ImportError as e:
+    logging.error(f"❌ Error cargando LlamaIndex moderno: {str(e)}")
     try:
         # Rutas legacy (<0.9)
         from llama_index import (
@@ -78,9 +81,10 @@ except ImportError:
         VectorStoreIndex, Document, Settings = _VSI, _Doc, _Settings
         SimpleNodeParser = _SNP
         LLAMA_INDEX_SUPPORT = True
-        logging.warning("LlamaIndex en modo legacy: sin Gemini LLM/Embeddings integrados")
-    except ImportError:
-        logging.warning("LlamaIndex no disponible - funcionalidad de documentos limitada")
+        logging.warning("⚠️ LlamaIndex en modo legacy (sin Gemini integrado)")
+    except ImportError as e2:
+        logging.error(f"❌ LlamaIndex no disponible: {str(e2)}")
+        logging.warning("⚠️ Documentos se cargarán sin indexación vectorial (modo simple)")
 
 logger = logging.getLogger(__name__)
 

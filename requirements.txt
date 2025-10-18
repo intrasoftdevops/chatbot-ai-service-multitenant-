@@ -26,10 +26,11 @@ aiohttp==3.9.1
 # Cache
 redis==5.0.1
 
-# LlamaIndex para RAG
-llama-index==0.10.25
-llama-index-llms-gemini==0.1.4
-llama-index-embeddings-gemini==0.1.2
+# LlamaIndex para RAG (enfoque customizado según docs oficiales)
+# https://docs.llamaindex.ai/en/stable/
+llama-index-core>=0.14.0  # Core framework (v0.14.5)
+llama-index-llms-gemini>=0.6.0  # Gemini LLM integration (v0.6.1)
+llama-index-embeddings-gemini>=0.4.0  # Gemini Embeddings (v0.4.1)
 
 # Logging y monitoreo
 python-json-logger==2.0.7
