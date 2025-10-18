@@ -437,17 +437,18 @@ class DocumentContextService:
                         else:
                             logger.warning("Soporte para PDF no disponible - PyPDF2 no instalado")
                             return None
-                    elif 'application/vnd.openxmlformats' in content_type or url.endswith('.docx'):
-                        if DOCX_SUPPORT:
-                            return self._extract_docx_text(response.content)
-                        else:
-                            logger.warning("Soporte para Word no disponible - python-docx no instalado")
-                            return None
-                    elif 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' in content_type or url.endswith(('.xlsx', '.xls')):
+                    # IMPORTANTE: Chequear Excel ANTES de Word (Excel también contiene 'openxmlformats')
+                    elif 'spreadsheetml.sheet' in content_type or url.endswith(('.xlsx', '.xls')):
                         if EXCEL_SUPPORT:
                             return self._extract_excel_text(response.content)
                         else:
                             logger.warning("Soporte para Excel no disponible - openpyxl no instalado")
+                            return None
+                    elif 'wordprocessingml.document' in content_type or url.endswith('.docx'):
+                        if DOCX_SUPPORT:
+                            return self._extract_docx_text(response.content)
+                        else:
+                            logger.warning("Soporte para Word no disponible - python-docx no instalado")
                             return None
                     else:
                         # Intentar como texto plano
