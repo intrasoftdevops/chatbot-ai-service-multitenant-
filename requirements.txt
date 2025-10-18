@@ -9,7 +9,8 @@ firebase-admin==6.4.0
 google-cloud-firestore==2.13.1
 
 # Google AI (Gemini)
-# Versión estable sin problemas de gRPC
+# Versión 0.3.2 (estable, API compatible con nuestro código)
+# NOTA: response_mime_type no soportado, pero el sistema funciona sin él
 google-generativeai==0.3.2
 
 # Document processing

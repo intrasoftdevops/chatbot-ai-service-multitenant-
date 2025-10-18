@@ -159,23 +159,33 @@ class DocumentContextService:
                 logger.error("Modelos de IA no disponibles para cargar documentos")
                 return False
             
-            logger.info(f"Cargando documentos para tenant {tenant_id} desde: {documentation_bucket_url}")
+            logger.info(f"📚 Cargando documentos para tenant {tenant_id} desde: {documentation_bucket_url}")
             
             # Verificar si ya tenemos un índice en cache
             if tenant_id in self._index_cache:
-                logger.info(f"Índice ya existe en cache para tenant {tenant_id}")
+                logger.info(f"✅ Índice ya existe en cache para tenant {tenant_id}")
                 return True
             
             # Obtener lista de documentos del bucket
+            logger.info(f"📥 Obteniendo lista de documentos desde bucket...")
             documents = await self._fetch_documents_from_bucket(documentation_bucket_url)
             
             if not documents:
-                logger.warning(f"No se encontraron documentos en el bucket para tenant {tenant_id}")
+                logger.warning(f"⚠️ No se encontraron documentos en el bucket para tenant {tenant_id} (URL: {documentation_bucket_url})")
                 return False
             
+            # Log de tipos de archivos encontrados
+            file_types = {}
+            for doc in documents:
+                ext = doc['filename'].split('.')[-1].lower()
+                file_types[ext] = file_types.get(ext, 0) + 1
+            logger.info(f"📊 Documentos encontrados: {len(documents)} archivos - {dict(file_types)}")
+            
             # Crear documentos de LlamaIndex
+            logger.info(f"📖 Procesando {len(documents)} documentos...")
             llama_documents = []
-            for doc_info in documents:
+            total_chars = 0
+            for idx, doc_info in enumerate(documents, 1):
                 try:
                     content = await self._download_document_content(doc_info["url"])
                     if content:
@@ -189,16 +199,18 @@ class DocumentContextService:
                             }
                         )
                         llama_documents.append(document)
-                        logger.info(f"Documento cargado: {doc_info['filename']}")
+                        total_chars += len(content)
+                        logger.info(f"✅ [{idx}/{len(documents)}] {doc_info['filename']} - {len(content):,} chars")
                 except Exception as e:
-                    logger.error(f"Error cargando documento {doc_info['filename']}: {str(e)}")
+                    logger.error(f"❌ Error cargando documento {doc_info['filename']}: {str(e)}")
                     continue
             
             if not llama_documents:
-                logger.warning(f"No se pudieron cargar documentos válidos para tenant {tenant_id}")
+                logger.warning(f"⚠️ No se pudieron cargar documentos válidos para tenant {tenant_id}")
                 return False
             
             # Crear índice vectorial
+            logger.info(f"🔨 Creando índice vectorial con {len(llama_documents)} documentos...")
             index = VectorStoreIndex.from_documents(llama_documents)
             
             # Guardar en cache
@@ -206,10 +218,15 @@ class DocumentContextService:
             self._document_cache[tenant_id] = {
                 "bucket_url": documentation_bucket_url,
                 "document_count": len(llama_documents),
-                "loaded_at": logger.info(f"Documentos cargados para tenant {tenant_id}: {len(llama_documents)} documentos")
+                "total_chars": total_chars
             }
             
-            logger.info(f"Índice creado exitosamente para tenant {tenant_id} con {len(llama_documents)} documentos")
+            logger.info(
+                f"✅ Índice creado exitosamente para tenant {tenant_id} | "
+                f"{len(llama_documents)} documentos | "
+                f"{total_chars:,} caracteres totales | "
+                f"~{total_chars // 1000}K tokens estimados"
+            )
             return True
             
         except Exception as e:

@@ -219,7 +219,13 @@ class GeminiClient:
             # Guardar en cache
             self.models_cache[config_hash] = model
             
-            logger.info(f"✅ Modelo {model_name} creado con config personalizada (temp={generation_config['temperature']})")
+            logger.info(
+                f"✅ Modelo creado: {model_name} | "
+                f"temp={generation_config['temperature']}, "
+                f"top_p={generation_config.get('top_p', 'N/A')}, "
+                f"top_k={generation_config.get('top_k', 'N/A')}, "
+                f"max_tokens={generation_config.get('max_output_tokens', 'N/A')}"
+            )
             
             return model
             
@@ -255,6 +261,9 @@ class GeminiClient:
         Raises:
             Exception: Si ambos métodos (gRPC y REST) fallan
         """
+        # Log de inicio
+        logger.debug(f"🎯 Generando contenido | task_type={task_type}, use_custom_config={use_custom_config}")
+        
         # Aplicar rate limiting
         self._check_rate_limit()
         
@@ -264,6 +273,7 @@ class GeminiClient:
                 from chatbot_ai_service.config.model_configs import get_config_for_task
                 
                 config = get_config_for_task(task_type)
+                logger.debug(f"📋 Config obtenida para {task_type}: model={config.get('model_name')}, temp={config.get('temperature')}")
                 model = self._get_or_create_model(config)
                 
                 if model:
