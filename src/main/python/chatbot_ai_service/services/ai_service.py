@@ -109,6 +109,23 @@ class AIService:
             "Strict Guardrails": "✅" if self.strict_guardrails else "❌"
         }
         logger.info(f"🎛️ AIService inicializado | Features: {features_status}")
+        
+        # 🚀 OPTIMIZACIÓN: Pre-inicializar modelo para reducir cold start
+        self._pre_warm_model()
+    
+    def _pre_warm_model(self):
+        """Pre-calienta el modelo para reducir latencia en primera respuesta"""
+        try:
+            logger.info("🔥 Pre-calentando modelo Gemini...")
+            self._ensure_model_initialized()
+            if self.model:
+                # Hacer una llamada simple para "despertar" el modelo
+                test_prompt = "Responde solo: OK"
+                self.model.generate_content(test_prompt)
+                logger.info("✅ Modelo pre-calentado exitosamente")
+        except Exception as e:
+            logger.warning(f"⚠️ No se pudo pre-calentar el modelo: {e}")
+            # No es crítico, el modelo se inicializará en la primera llamada real
     
     def _check_rate_limit(self):
         """Verifica y aplica rate limiting para evitar exceder cuota de API"""
@@ -506,8 +523,17 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
                         query, user_context, ai_config, branding_config, tenant_id, session_id
                     )
             
-            # Filtrar enlaces de la respuesta para WhatsApp
-            filtered_response = self._filter_links_from_response(response)
+            # Filtrar enlaces de la respuesta para WhatsApp (excepto citas)
+            if intent == "cita_campaña":
+                filtered_response = response  # No filtrar enlaces de Calendly
+                logger.info("📅 Respuesta de cita - manteniendo enlaces de Calendly")
+            else:
+                filtered_response = self._filter_links_from_response(response)
+            
+            # Limitar respuesta a máximo 1000 caracteres
+            if len(filtered_response) > 1000:
+                logger.warning(f"⚠️ Respuesta muy larga ({len(filtered_response)} chars), truncando a 1000")
+                filtered_response = filtered_response[:997] + "..."
             
             # Agregar respuesta del asistente a la sesión
             session_context_service.add_message(session_id, "assistant", filtered_response, metadata={"intent": intent, "confidence": confidence})
@@ -619,6 +645,8 @@ INSTRUCCIONES:
 5. Si no tienes información específica, sé honesto al respecto
 6. Integra sutilmente elementos motivacionales sin ser explícito sobre "EPIC MEANING" o "DEVELOPMENT"
 7. **IMPORTANTE**: Si el usuario pide agendar una cita, usar el enlace específico de ENLACE DE CITAS
+8. **CRÍTICO**: Mantén la respuesta concisa, máximo 800 caracteres
+9. **NO menciones enlaces** a documentos externos, solo da información directa
 
 SISTEMA DE PUNTOS Y RANKING:
 - Cada referido registrado suma 50 puntos
@@ -733,13 +761,43 @@ Cada persona que se registre con tu código te suma 50 puntos al ranking. ¡Es u
 
 ¿Te gustaría que te envíe tu link de referido para empezar a ganar puntos?"""
     
-    def _filter_links_from_response(self, response: str) -> str:
+    def _filter_links_from_response(self, response: str, intent: str = None) -> str:
         """
         Elimina completamente enlaces y referencias a enlaces de las respuestas para WhatsApp
+        EXCEPTO enlaces de Calendly cuando la intención es cita_campaña
         """
         import re
         
-        # Patrones para detectar enlaces y referencias a enlaces
+        # Si es una respuesta de cita, mantener enlaces de Calendly
+        if intent == "cita_campaña":
+            logger.info("📅 Intención de cita detectada, manteniendo enlaces de Calendly")
+            # Solo limpiar referencias a enlaces pero mantener enlaces de Calendly
+            link_phrases = [
+                r'puedes revisar este enlace[^.]*\.',
+                r'puedes consultar este enlace[^.]*\.',
+                r'visita este enlace[^.]*\.',
+                r'accede a este enlace[^.]*\.',
+                r'consulta el siguiente enlace[^.]*\.',
+                r'revisa el siguiente enlace[^.]*\.',
+                r'puedes ver más información en[^.]*\.',
+                r'para más información visita[^.]*\.',
+                r'allí encontrarás[^.]*\.',
+                r'allí podrás[^.]*\.',
+                r'en el siguiente enlace[^.]*\.',
+                r'en este enlace[^.]*\.',
+                r'\*\*Enlace a[^*]*\*\*[^.]*\.',
+                r'te puedo compartir algunos enlaces[^.]*\.',
+                r'te puedo compartir[^.]*enlaces[^.]*\.',
+                r'compartir.*enlaces.*información[^.]*\.',
+            ]
+            
+            filtered_response = response
+            for phrase_pattern in link_phrases:
+                filtered_response = re.sub(phrase_pattern, '', filtered_response, flags=re.IGNORECASE)
+            
+            return filtered_response.strip()
+        
+        # Para todas las demás intenciones, eliminar TODOS los enlaces
         patterns_to_remove = [
             r'https?://[^\s\)]+',  # URLs http/https
             r'www\.[^\s\)]+',      # URLs www
