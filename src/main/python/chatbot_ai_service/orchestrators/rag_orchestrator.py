@@ -168,7 +168,7 @@ class RAGOrchestrator:
             reverse=True
         )[:max_results]
         
-        logger.info(f"📚 Recuperados {len(final_docs)} documentos únicos")
+        logger.info(f"Recuperados {len(final_docs)} documentos únicos")
         return final_docs
     
     def _build_rag_context(
@@ -234,7 +234,7 @@ class RAGOrchestrator:
             # Detectar automáticamente el tipo de prompt
             prompt_type = self.prompt_builder.detect_prompt_type(query)
             
-            logger.debug(f"🎯 Tipo de prompt detectado: {prompt_type.value}")
+            logger.debug(f"Tipo de prompt detectado: {prompt_type.value}")
             
             # Construir prompt con guardrails
             prompt = self.prompt_builder.build_prompt(
@@ -255,11 +255,11 @@ class RAGOrchestrator:
 Eres un asistente virtual para una campaña política. Tu objetivo es proporcionar información PRECISA y VERIFICABLE.
 
 **REGLAS FUNDAMENTALES:**
-1. 🎯 SOLO responde con información de los DOCUMENTOS proporcionados
-2. 📚 Si la información está en los documentos, úsala y cita la fuente
-3. 🚫 Si NO está en los documentos, di explícitamente "No tengo esa información en los documentos disponibles"
-4. ❌ NUNCA inventes datos, números, fechas o detalles que no estén en los documentos
-5. 💡 Si la pregunta requiere información no disponible, sugiere contactar al equipo de campaña
+1. SOLO responde con información de los DOCUMENTOS proporcionados
+2. Si la información está en los documentos, úsala pero NO cites la fuente
+3. Si NO está en los documentos, di explícitamente "No tengo esa información en los documentos disponibles"
+4. NUNCA inventes datos, números, fechas o detalles que no estén en los documentos
+5. Si la pregunta requiere información no disponible, sugiere contactar al equipo de campaña
 
 **CONTEXTO DEL USUARIO:**
 {user_info}
@@ -341,7 +341,7 @@ Eres un asistente virtual para una campaña política. Tu objetivo es proporcion
         Returns:
             RAGResponse con respuesta completa y metadata
         """
-        logger.info(f"🎯 Procesando query RAG: '{query}' para tenant {tenant_id}")
+        logger.info(f"Procesando query RAG: '{query}' para tenant {tenant_id}")
         
         start_time = None
         try:
@@ -470,8 +470,15 @@ Eres un asistente virtual para una campaña política. Tu objetivo es proporcion
             metadata["warnings"] = guardrail_result.warnings
             metadata["sanitization_applied"] = sanitization_applied
         
+        # Log de documentos utilizados para la respuesta
+        if documents:
+            doc_names = [doc.filename for doc in documents]
+            logger.info(f"DOCUMENTOS UTILIZADOS PARA LA RESPUESTA: {doc_names}")
+        else:
+            logger.info("RESPUESTA GENERADA SIN DOCUMENTOS (información general)")
+        
         logger.info(
-            f"✅ Query RAG procesado exitosamente "
+            f"Query RAG procesado exitosamente "
             f"({len(documents)} docs, {processing_time:.2f}s)" if processing_time else ""
         )
         
