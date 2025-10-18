@@ -2,7 +2,7 @@
 
 ## 📋 Descripción
 
-**Chatbot AI Service Multi-Tenant** es el servicio de IA que proporciona capacidades conversacionales avanzadas para múltiples campañas políticas. Integra clasificación de intenciones, análisis de contexto y respuestas personalizadas usando Gemini AI y LlamaIndex.
+**Chatbot AI Service Multi-Tenant** es el servicio de IA genérico que proporciona capacidades conversacionales avanzadas para múltiples campañas políticas. Integra clasificación de intenciones, análisis de contexto y respuestas personalizadas usando Gemini AI y LlamaIndex. **El sistema es completamente genérico y no contiene referencias específicas a clientes particulares.**
 
 ## ✨ Funcionalidades Principales
 
@@ -89,8 +89,8 @@ WATI_API_TOKEN=your-wati-token-here
 
 #### URLs de Servicios
 ```bash
-POLITICAL_REFERRALS_SERVICE_URL_DEV=https://political-referrals-multitenant-wa-dev-xxxxx-uc.a.run.app
-POLITICAL_REFERRALS_SERVICE_URL_PROD=https://political-referrals-multitenant-wa-prod-xxxxx-uc.a.run.app
+POLITICAL_REFERRALS_SERVICE_URL_DEV=https://political-referrals-multitenant-dev-xxxxx-uc.a.run.app
+POLITICAL_REFERRALS_SERVICE_URL_PROD=https://political-referrals-multitenant-prod-xxxxx-uc.a.run.app
 GAMIFICATION_SERVICE_URL_DEV=https://your-gamification-service-dev.run.app
 GAMIFICATION_SERVICE_URL_PROD=https://your-gamification-service-prod.run.app
 ```
@@ -287,7 +287,7 @@ El sistema incluye un **RAG Orchestrator completo** que proporciona respuestas b
 #### Ejemplo de Respuesta RAG:
 ```json
 {
-  "response": "💡 *Respuesta basada en documentos de la campaña:*\n\nEl candidato propone para educación:\n\n1. Construcción de 100 nuevas escuelas en zonas rurales [Documento 1]\n2. Inversión de $500M en infraestructura educativa [Documento 1]\n\n📚 **Fuentes:**\n[1] Plan de Gobierno 2025 - Educación (relevancia: 95%)"
+  "response": "💡 *Respuesta basada en documentos de la campaña:*\n\nEl candidato propone para educación:\n\n1. Construcción de nuevas escuelas en zonas rurales [Documento 1]\n2. Inversión en infraestructura educativa [Documento 1]\n\n📚 **Fuentes:**\n[1] Plan de Gobierno - Educación (relevancia: 95%)"
 }
 ```
 
@@ -489,6 +489,7 @@ pytest --log-cli-level=DEBUG
 4. **Configurar cache Redis** (opcional)
 5. **Desplegar en Google Cloud Run**
 6. **Activar RAG Orchestrator** para respuestas basadas en documentos
+7. **Configurar documentos específicos** para cada tenant político
 
 ---
 
