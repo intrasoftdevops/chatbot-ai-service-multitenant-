@@ -729,6 +729,10 @@ Cada persona que se registre con tu código te suma 50 puntos al ranking. ¡Es u
             r'allí podrás[^.]*\.',
             r'en el siguiente enlace[^.]*\.',
             r'en este enlace[^.]*\.',
+            r'\*\*Enlace a[^*]*\*\*[^.]*\.',  # **Enlace a...**
+            r'te puedo compartir algunos enlaces[^.]*\.',
+            r'te puedo compartir[^.]*enlaces[^.]*\.',
+            r'compartir.*enlaces.*información[^.]*\.',
         ]
         
         filtered_response = response
@@ -741,13 +745,21 @@ Cada persona que se registre con tu código te suma 50 puntos al ranking. ¡Es u
         for phrase_pattern in link_phrases:
             filtered_response = re.sub(phrase_pattern, '', filtered_response, flags=re.IGNORECASE)
         
+        # Limpiar caracteres sueltos y puntuación rota
+        filtered_response = re.sub(r'\[\s*\)', '', filtered_response)  # [) suelto
+        filtered_response = re.sub(r'\[\s*\]', '', filtered_response)  # [] suelto
+        filtered_response = re.sub(r'\*\s*\*', '', filtered_response)  # ** suelto
+        filtered_response = re.sub(r':\s*\*', ':', filtered_response)   # :* suelto
+        
         # Limpiar espacios múltiples y saltos de línea
         filtered_response = re.sub(r'\s+', ' ', filtered_response)
         filtered_response = re.sub(r'\n\s*\n', '\n', filtered_response)
         
-        # Limpiar puntuación duplicada
+        # Limpiar puntuación duplicada y mal formada
         filtered_response = re.sub(r'\.\s*\.', '.', filtered_response)
         filtered_response = re.sub(r'\?\s*\?', '?', filtered_response)
+        filtered_response = re.sub(r':\s*\.', '.', filtered_response)  # :. mal formado
+        filtered_response = re.sub(r'\*\s*\.', '.', filtered_response)  # *. mal formado
         
         return filtered_response.strip()
     
