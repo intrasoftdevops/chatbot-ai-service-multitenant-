@@ -191,15 +191,30 @@ class GeminiClient:
                 generation_config["top_k"] = config["top_k"]
             
             # Agregar response_mime_type si está presente (para JSON)
+            # NOTA: Este campo solo funciona en versiones recientes de google-generativeai
             if "response_mime_type" in config:
                 generation_config["response_mime_type"] = config["response_mime_type"]
             
             # Crear modelo con configuración
             model_name = config.get("model_name", "gemini-2.0-flash")
-            model = genai.GenerativeModel(
-                model_name=model_name,
-                generation_config=generation_config
-            )
+            
+            try:
+                # Intentar crear con configuración completa (incluyendo response_mime_type si está)
+                model = genai.GenerativeModel(
+                    model_name=model_name,
+                    generation_config=generation_config
+                )
+            except (TypeError, ValueError) as e:
+                # Si falla por campo no soportado, reintentar sin response_mime_type
+                if "response_mime_type" in str(e) or "Unknown field" in str(e):
+                    logger.warning(f"⚠️ response_mime_type no soportado en esta versión, reintentando sin él")
+                    generation_config_fallback = {k: v for k, v in generation_config.items() if k != "response_mime_type"}
+                    model = genai.GenerativeModel(
+                        model_name=model_name,
+                        generation_config=generation_config_fallback
+                    )
+                else:
+                    raise
             
             # Guardar en cache
             self.models_cache[config_hash] = model
