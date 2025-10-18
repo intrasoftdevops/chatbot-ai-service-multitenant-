@@ -9,9 +9,9 @@ firebase-admin==6.4.0
 google-cloud-firestore==2.13.1
 
 # Google AI (Gemini)
-# Versión 0.3.2 (estable, API compatible con nuestro código)
-# NOTA: response_mime_type no soportado, pero el sistema funciona sin él
-google-generativeai==0.3.2
+# Versión moderna requerida por llama-index-core>=0.14.0
+# Nuestro código maneja multi-part responses correctamente
+google-generativeai>=0.8.5
 
 # Document processing
 pypdf==4.0.1
