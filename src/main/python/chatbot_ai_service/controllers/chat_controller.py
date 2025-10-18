@@ -118,8 +118,7 @@ async def process_chat_message(tenant_id: str, request: ChatRequest):
             tenant_id=tenant_id,
             query=request.query,
             user_context=request.user_context,
-            session_id=request.session_id if request.maintain_context else None,
-            tenant_config=request.tenant_config
+            session_id=request.session_id if request.maintain_context else None
         )
         # Loggear intención devuelta por el servicio de IA
         try:
