@@ -108,12 +108,14 @@ class GeminiClient:
                     
                     if hasattr(candidate, 'content') and candidate.content:
                         logger.debug(f"🔍 Content has parts: {hasattr(candidate.content, 'parts')}")
+                        logger.debug(f"🔍 Content structure: {dir(candidate.content)}")
                         
                         if hasattr(candidate.content, 'parts') and candidate.content.parts:
                             # Concatenar todas las partes de texto
                             text_parts = []
                             for i, part in enumerate(candidate.content.parts):
                                 logger.debug(f"🔍 Part {i} type: {type(part)}, has text: {hasattr(part, 'text')}")
+                                logger.debug(f"🔍 Part {i} structure: {dir(part)}")
                                 if hasattr(part, 'text'):
                                     text_parts.append(part.text)
                             
@@ -121,6 +123,8 @@ class GeminiClient:
                                 result = ''.join(text_parts)
                                 logger.info(f"✅ Texto extraído de respuesta multi-part: {len(result)} chars")
                                 return result
+                        else:
+                            logger.error(f"❌ Content no tiene parts o parts está vacío. Content: {candidate.content}")
                 
                 # Si nada funciona, retornar mensaje de error
                 logger.error(f"❌ No se pudo extraer texto de la respuesta de Gemini. Response tiene: candidates={hasattr(response, 'candidates')}")
