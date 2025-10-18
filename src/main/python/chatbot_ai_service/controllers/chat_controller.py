@@ -19,6 +19,7 @@ class ChatRequest(BaseModel):
     session_id: str
     user_context: Optional[Dict[str, Any]] = {}
     maintain_context: bool = True  # Mantener contexto de sesión
+    tenant_config: Optional[Dict[str, Any]] = None  # Configuración del tenant
 
 class ChatResponse(BaseModel):
     response: str
@@ -117,7 +118,8 @@ async def process_chat_message(tenant_id: str, request: ChatRequest):
             tenant_id=tenant_id,
             query=request.query,
             user_context=request.user_context,
-            session_id=request.session_id if request.maintain_context else None
+            session_id=request.session_id if request.maintain_context else None,
+            tenant_config=request.tenant_config
         )
         # Loggear intención devuelta por el servicio de IA
         try:

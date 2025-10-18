@@ -70,6 +70,46 @@ class AIService:
         # Analizar el prompt para dar respuesta contextual
         prompt_lower = prompt.lower()
         
+        # Detectar si es una validación de datos
+        if "evalúa si el siguiente texto es un nombre o apellido válido" in prompt_lower:
+            # Extraer el texto a validar del prompt
+            import re
+            text_match = re.search(r'Texto: "([^"]+)"', prompt)
+            if text_match:
+                text_to_validate = text_match.group(1).strip()
+                # Validación simple de apellidos compuestos
+                if len(text_to_validate) >= 2 and len(text_to_validate) <= 50:
+                    # Verificar que contenga solo letras, espacios, guiones y apostrofes
+                    if re.match(r"^[a-zA-ZáéíóúÁÉÍÓÚñÑ\s\-']+$", text_to_validate):
+                        return "SI"
+            return "NO"
+        elif "evalúa si el siguiente texto es una ciudad válida" in prompt_lower:
+            # Extraer el texto a validar del prompt
+            import re
+            text_match = re.search(r'Texto: "([^"]+)"', prompt)
+            if text_match:
+                text_to_validate = text_match.group(1).strip().lower()
+                # Lista básica de ciudades colombianas
+                colombian_cities = [
+                    "bogota", "bogotá", "medellin", "medellín", "cali", "barranquilla",
+                    "cartagena", "bucaramanga", "cucuta", "cúcuta", "ibague", "ibagué",
+                    "pereira", "santa marta", "valledupar", "monteria", "montería",
+                    "neiva", "villavicencio", "tunja", "florencia", "yopal", "popayan",
+                    "popayán", "quibdo", "quibdó", "riohacha", "san andres", "san andrés",
+                    "providencia", "pasto", "manizales", "armenia", "sincelejo", "palmira",
+                    "buenaventura", "tulua", "tuluá", "dosquebradas", "santa rosa de cabal",
+                    "cienaga", "ciénaga", "aguachica", "cerete", "cereté", "pitalito",
+                    "acacias", "acacías", "duitama", "sogamoso", "maicao", "turbo",
+                    "apartado", "apartadó", "leticia", "mocoa", "la nevera", "medallo",
+                    "la arenosa", "curramba", "la sucursal del cielo", "sultana del valle",
+                    "la ciudad bonita", "ciudad de los parques", "ciudad heroica",
+                    "corralito de piedra", "la capital"
+                ]
+                if text_to_validate in colombian_cities:
+                    return "SI"
+            return "SI"  # Por defecto aceptar ciudades
+        
+        # Respuestas contextuales para otros casos
         if "nombre" in prompt_lower or "llamo" in prompt_lower:
             return "Por favor, comparte tu nombre completo para continuar con el registro."
         elif "ciudad" in prompt_lower or "vives" in prompt_lower:
@@ -209,7 +249,7 @@ class AIService:
         # Fallback a REST API
         return await self._call_gemini_rest_api(prompt)
     
-    async def process_chat_message(self, tenant_id: str, query: str, user_context: Dict[str, Any], session_id: str = None) -> Dict[str, Any]:
+    async def process_chat_message(self, tenant_id: str, query: str, user_context: Dict[str, Any], session_id: str = None, tenant_config: Dict[str, Any] = None) -> Dict[str, Any]:
         """
         Procesa un mensaje de chat usando IA específica del tenant con sesión persistente y clasificación
         
@@ -227,17 +267,26 @@ class AIService:
         try:
             logger.info(f"Procesando mensaje para tenant {tenant_id}, sesión: {session_id}")
             
-            # Obtener configuración del tenant desde el servicio Java
-            tenant_config = configuration_service.get_tenant_config(tenant_id)
+            # Usar configuración del tenant pasada como parámetro o obtenerla del servicio Java
             if not tenant_config:
-                return {
-                    "response": "Lo siento, no puedo procesar tu mensaje en este momento.",
-                    "error": "Tenant no encontrado"
-                }
+                tenant_config = configuration_service.get_tenant_config(tenant_id)
+                if not tenant_config:
+                    return {
+                        "response": "Lo siento, no puedo procesar tu mensaje en este momento.",
+                        "error": "Tenant no encontrado"
+                    }
             
             # Obtener configuración de IA
             ai_config = configuration_service.get_ai_config(tenant_id)
             branding_config = configuration_service.get_branding_config(tenant_id)
+            
+            # Usar configuración del tenant para branding si está disponible
+            if tenant_config and "contact_name" in tenant_config:
+                branding_config["contactName"] = tenant_config["contact_name"]
+            if tenant_config and "link_calendly" in tenant_config:
+                branding_config["link_calendly"] = tenant_config["link_calendly"]
+            if tenant_config and "link_forms" in tenant_config:
+                branding_config["link_forms"] = tenant_config["link_forms"]
             
             # Gestionar sesión
             if not session_id:
@@ -601,6 +650,33 @@ Completa nuestro formulario: {forms_link}
             # Detectar preguntas
             if "?" in text or any(w in lowered for w in ["qué", "que ", "cómo", "como ", "quién", "quien ", "dónde", "donde ", "por qué", "por que"]):
                 return {"type": "info", "value": None, "confidence": 0.85}
+            
+            # Si el estado es WAITING_CITY, verificar si es una ciudad conocida
+            if state == "WAITING_CITY":
+                known_cities = [
+                    "bogota", "bogotá", "medellin", "medellín", "cali", "barranquilla",
+                    "cartagena", "bucaramanga", "cucuta", "cúcuta", "ibague", "ibagué",
+                    "pereira", "santa marta", "valledupar", "monteria", "montería",
+                    "neiva", "villavicencio", "tunja", "florencia", "yopal", "popayan",
+                    "popayán", "quibdo", "quibdó", "riohacha", "san andres", "san andrés",
+                    "providencia", "pasto", "manizales", "armenia", "sincelejo", "palmira",
+                    "buenaventura", "tulua", "tuluá", "dosquebradas", "santa rosa de cabal",
+                    "cienaga", "ciénaga", "aguachica", "cerete", "cereté", "pitalito",
+                    "acacias", "acacías", "duitama", "sogamoso", "maicao", "turbo",
+                    "apartado", "apartadó", "leticia", "mocoa", "la nevera", "medallo",
+                    "la arenosa", "curramba", "la sucursal del cielo", "sultana del valle",
+                    "la ciudad bonita", "ciudad de los parques", "ciudad heroica",
+                    "corralito de piedra", "la capital"
+                ]
+                
+                # Verificar coincidencia exacta
+                if lowered in known_cities:
+                    return {"type": "city", "value": text, "confidence": 0.9}
+                
+                # Verificar coincidencia parcial para frases como "vivo en bogota"
+                for city in known_cities:
+                    if city in lowered:
+                        return {"type": "city", "value": text, "confidence": 0.8}
             
             # Detectar nombres (lógica mejorada)
             words = text.split()
@@ -1182,16 +1258,42 @@ INSTRUCCIONES ESPECÍFICAS:
 - Si el usuario hace una pregunta, clasifica como "info"
 - Considera el contexto de la conversación anterior
 - Sé inteligente para entender frases naturales como "listo, mi nombre es Santiago Buitrago Rojas"
-- PRIORIDAD: Si el estado es WAITING_CITY y el mensaje contiene información de ubicación, clasifica como "city"
+- PRIORIDAD MÁXIMA: Si el estado es WAITING_CITY, cualquier mención de ciudad colombiana debe clasificarse como "city"
+
+CIUDADES COLOMBIANAS CONOCIDAS (acepta variaciones con/sin tildes):
+- Bogotá/Bogota, Medellín/Medellin, Cali, Barranquilla, Cartagena
+- Bucaramanga, Cúcuta/Cucuta, Ibagué/Ibague, Pereira, Santa Marta
+- Valledupar, Montería/Monteria, Neiva, Villavicencio, Tunja
+- Florencia, Yopal, Popayán/Popayan, Quibdó/Quibdo, Riohacha
+- San Andrés/San Andres, Providencia, Pasto, Manizales, Armenia
+- Sincelejo, Cúcuta/Cucuta, Palmira, Buenaventura, Tuluá/Tulua
+- Dosquebradas, Santa Rosa de Cabal, Ciénaga/Cienaga, Aguachica
+- Cereté/Cerete, Pitalito, Acacías/Acacias, Duitama, Sogamoso
+- Maicao, Turbo, Apartadó, Quibdó/Quibdo, Leticia, Mocoa
+
+REGLAS ESPECIALES PARA CIUDADES:
+- Si el mensaje es SOLO el nombre de una ciudad (ej: "bogota", "medellin"), clasifica como "city"
+- Si menciona "la capital" en contexto colombiano, es Bogotá
+- Si menciona "la nevera", "atenas suramericana", es Bogotá
+- Si menciona "medallo", "ciudad de la eterna primavera", es Medellín
+- Si menciona "la arenosa", "curramba", es Barranquilla
+- Si menciona "la sucursal del cielo", "sultana del valle", es Cali
+- Si menciona "la ciudad bonita", "ciudad de los parques", es Bucaramanga
+- Si menciona "ciudad heroica", "corralito de piedra", es Cartagena
 
 EJEMPLOS:
 - "listo, mi nombre es Santiago Buitrago Rojas" → type: "name", value: "Santiago Buitrago Rojas"
 - "ok, es Santiago Buitrago" → type: "name", value: "Santiago Buitrago"
+- "bogota" → type: "city", value: "bogota"
+- "bogotá" → type: "city", value: "bogotá"
+- "medellin" → type: "city", value: "medellin"
 - "vivo en Bogotá" → type: "city", value: "Bogotá"
-- "vivo en la capital" → type: "city", value: "Bogotá" (si es Colombia)
+- "vivo en la capital" → type: "city", value: "Bogotá"
 - "soy de Medellín" → type: "city", value: "Medellín"
 - "estoy en Cali" → type: "city", value: "Cali"
 - "resido en Barranquilla" → type: "city", value: "Barranquilla"
+- "la nevera" → type: "city", value: "Bogotá"
+- "medallo" → type: "city", value: "Medellín"
 - "¿Cómo funciona esto?" → type: "info", value: null
 - "Santiago" → type: "name", value: "Santiago"
 
@@ -1311,9 +1413,12 @@ Responde SOLO con un JSON válido en este formato:
                 
                 Considera:
                 - Debe ser un nombre/apellido real y apropiado
+                - Puede contener espacios para apellidos compuestos (ej: "García López", "Buitrago Rojas")
+                - Puede contener guiones para apellidos compuestos (ej: "García-López")
                 - No puede ser una palabra ofensiva, grosera o inapropiada
                 - No puede ser números, símbolos raros, o texto sin sentido
                 - Debe ser apropiado para uso en un sistema de registro
+                - Ejemplos válidos: "García", "López", "Buitrago Rojas", "García-López", "De la Cruz"
                 
                 Responde SOLO "SI" si es válido o "NO" si no es válido.
                 """
