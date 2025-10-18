@@ -109,8 +109,11 @@ class GeminiClient:
                     if hasattr(candidate, 'content') and candidate.content:
                         logger.debug(f"🔍 Content has parts: {hasattr(candidate.content, 'parts')}")
                         logger.debug(f"🔍 Content structure: {dir(candidate.content)}")
+                        if hasattr(candidate.content, 'parts'):
+                            logger.debug(f"🔍 Parts length: {len(candidate.content.parts) if candidate.content.parts else 'None'}")
+                            logger.debug(f"🔍 Parts content: {candidate.content.parts}")
                         
-                        if hasattr(candidate.content, 'parts') and candidate.content.parts:
+                        if hasattr(candidate.content, 'parts') and candidate.content.parts and len(candidate.content.parts) > 0:
                             # Concatenar todas las partes de texto
                             text_parts = []
                             for i, part in enumerate(candidate.content.parts):
