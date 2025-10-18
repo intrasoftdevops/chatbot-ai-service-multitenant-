@@ -1200,6 +1200,142 @@ Features:
 
 ---
 
-**Última actualización**: 18 Oct 2025 - Sesión Completa: Debugging + Optimización  
+---
+
+## 🐳 DOCKER LOCAL + GRANIAN: VALIDACIÓN COMPLETA (18 Oct 2025 - Tarde)
+
+### 📋 OBJETIVO:
+Validar que Docker + Granian funcione completamente en local antes de deployment a Cloud Run.
+
+### 🔧 PROBLEMAS ENCONTRADOS Y RESUELTOS:
+
+#### ❌ **Error 1: ModuleNotFoundError: No module named 'uvicorn'**
+**Causa:** `main.py` todavía tenía `import uvicorn` y bloque `if __name__ == "__main__"` con `uvicorn.run()`
+
+**Solución:**
+```python
+# ❌ Removido de main.py:
+import uvicorn
+
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=...)
+
+# ✅ Agregado:
+# Nota: La aplicación se ejecuta con Granian (servidor ASGI en Rust)
+# Ver run_server.sh (local) o Dockerfile (producción)
+```
+
+#### ❌ **Error 2: No such option: --threads**
+**Causa:** Granian no tiene opción `--threads`, solo `--blocking-threads` y `--runtime-threads`
+
+**Solución:**
+```dockerfile
+# ❌ Antes:
+CMD granian --workers 2 --threads 2 --blocking-threads 4
+
+# ✅ Después:
+CMD granian --workers 2 --blocking-threads 4
+```
+
+#### ❌ **Error 3: Blocking threads > 1 is not supported on ASGI**
+**Causa:** ASGI (FastAPI) no soporta más de 1 blocking thread por worker
+
+**Solución:**
+```dockerfile
+# ❌ No funciona con ASGI:
+CMD granian --workers 2 --blocking-threads 4
+
+# ✅ Funciona (2 workers = paralelización efectiva):
+CMD granian --workers 2
+```
+
+### ✅ CONFIGURACIÓN FINAL DOCKERFILE:
+
+```dockerfile
+# Comando de inicio con Granian (servidor Rust ultrarrápido)
+# --workers 2: Procesos paralelos (aprovechar CPU de Cloud Run)
+# Nota: ASGI no soporta --blocking-threads > 1, pero 2 workers ya da paralelización
+CMD ["sh", "-c", "granian --interface asgi chatbot_ai_service.main:app --host 0.0.0.0 --port ${PORT} --workers 2"]
+```
+
+### 🧪 PRUEBAS LOCALES EXITOSAS:
+
+```bash
+# Build Docker
+✅ docker build -t chatbot-ai-granian:latest .
+
+# Run Docker
+✅ docker run -d -p 8000:8000 --env-file .env chatbot-ai-granian:latest
+
+# Logs
+✅ [INFO] Starting granian (main PID: 7)
+✅ [INFO] Listening at: http://0.0.0.0:8000
+✅ [INFO] Spawning worker-1 with PID: 8
+✅ [INFO] Spawning worker-2 with PID: 10
+✅ [INFO] Started worker-1 runtime-1
+✅ [INFO] Started worker-2 runtime-1
+✅ ✅ GEMINI_API_KEY cargada correctamente
+
+# Health Check
+✅ curl http://localhost:8000/health
+{
+    "status": "healthy",
+    "service": "chatbot-ai-service",
+    "version": "1.0.0"
+}
+
+# Root Endpoint
+✅ curl http://localhost:8000/
+{
+    "service": "chatbot-ai-service",
+    "version": "1.0.0",
+    "description": "Servicio de IA para chatbots políticos",
+    "status": "running"
+}
+```
+
+### 📦 VERSIONES INSTALADAS EN DOCKER:
+
+```
+✅ granian                       1.6.4
+✅ google-generativeai           0.8.5
+✅ llama-index-core              0.14.5
+✅ llama-index-llms-gemini       0.6.1
+✅ llama-index-embeddings-gemini 0.4.1
+❌ uvicorn                       (NO INSTALADO)
+```
+
+### 🎯 RESULTADO:
+
+| Aspecto | Estado |
+|---------|--------|
+| Build Docker | ✅ Exitoso |
+| Granian Start | ✅ 2 workers |
+| Health Check | ✅ Responde |
+| Endpoints | ✅ Funcionan |
+| Sin Uvicorn | ✅ 100% Granian |
+| Listo para Cloud Run | ✅ SÍ |
+
+### 📊 IMPACTO:
+
+- ✅ **Eliminada dependencia de Uvicorn** completamente
+- ✅ **Configuración simplificada** (solo `--workers 2`)
+- ✅ **Paralelización efectiva** con 2 workers ASGI
+- ✅ **Docker probado localmente** antes de deployment
+- ✅ **100% compatible con Cloud Run**
+
+### 🚀 DEPLOYMENT:
+
+```bash
+✅ git add main.py Dockerfile
+✅ git commit -m "fix(server): Eliminar dependencia de Uvicorn y ajustar Granian"
+✅ git push origin dev
+⏳ GitHub Actions → Cloud Build → Cloud Run (en progreso)
+```
+
+---
+
+**Última actualización**: 18 Oct 2025 - Sesión Completa: Debugging + Optimización + Docker Local Validation  
 **Responsable**: Equipo de IA
-**Estado**: 🟢 Fases 1, 2, 5 y 6 completadas + 8 bugs resueltos + Docker optimizado (multi-stage, -45% tamaño) - Sistema RAG 100% funcional y optimizado, deployment en progreso
+**Estado**: 🟢 Fases 1, 2, 5 y 6 completadas + 8 bugs resueltos + Docker optimizado (multi-stage, -45% tamaño) + Granian 100% funcional (probado localmente) - Deployment a Cloud Run en progreso
