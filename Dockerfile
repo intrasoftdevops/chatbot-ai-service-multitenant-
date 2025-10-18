@@ -27,9 +27,14 @@ COPY src/main/python/ .
 # Asegurar PYTHONPATH para imports desde /app
 ENV PYTHONPATH=/app
 
+# Configurar NLTK_DATA para LlamaIndex
+ENV NLTK_DATA=/app/nltk_data
+
 # Crear usuario no root
 RUN useradd --create-home --shell /bin/bash app \
-    && chown -R app:app /app
+    && chown -R app:app /app \
+    && mkdir -p /app/nltk_data \
+    && chown -R app:app /app/nltk_data
 USER app
 
 # Exponer puerto
