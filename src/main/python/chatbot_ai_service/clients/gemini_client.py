@@ -80,6 +80,43 @@ class GeminiClient:
             
         self._initialized = True
     
+    def _extract_text_from_response(self, response) -> str:
+        """
+        Extrae texto de una respuesta de Gemini, manejando respuestas simples y multi-part
+        
+        Args:
+            response: Respuesta de Gemini (puede ser simple o multi-part)
+            
+        Returns:
+            Texto extraído de la respuesta
+        """
+        try:
+            # Intentar acceso rápido para respuestas simples
+            return response.text
+        except (ValueError, AttributeError) as e:
+            # Si falla, es una respuesta multi-part
+            logger.debug(f"Respuesta multi-part detectada, extrayendo partes...")
+            try:
+                if response.candidates and len(response.candidates) > 0:
+                    candidate = response.candidates[0]
+                    if candidate.content and candidate.content.parts:
+                        # Concatenar todas las partes de texto
+                        text_parts = []
+                        for part in candidate.content.parts:
+                            if hasattr(part, 'text'):
+                                text_parts.append(part.text)
+                        result = ''.join(text_parts)
+                        logger.debug(f"✅ Texto extraído de respuesta multi-part: {len(result)} chars")
+                        return result
+                
+                # Si nada funciona, retornar mensaje de error
+                logger.error("❌ No se pudo extraer texto de la respuesta de Gemini")
+                return "Lo siento, no pude procesar la respuesta correctamente."
+                
+            except Exception as ex:
+                logger.error(f"❌ Error extrayendo texto de respuesta multi-part: {str(ex)}")
+                return "Lo siento, hubo un error procesando la respuesta."
+    
     def _check_rate_limit(self):
         """
         Verifica y aplica rate limiting para evitar exceder cuota de API
@@ -165,9 +202,9 @@ class GeminiClient:
         config_items = sorted(config.items())
         config_hash = str(config_items)
         
-        # Si ya existe en cache, retornarlo
+        # Si ya existe en cache, retornarlo (modelo + config)
         if config_hash in self.models_cache:
-            logger.debug(f"📦 Usando modelo cacheado para task_type")
+            logger.debug(f"📦 Usando modelo cacheado")
             return self.models_cache[config_hash]
         
         # Asegurar que tenemos API key configurada
@@ -195,29 +232,18 @@ class GeminiClient:
             if "response_mime_type" in config:
                 generation_config["response_mime_type"] = config["response_mime_type"]
             
-            # Crear modelo con configuración
+            # Crear modelo SIN generation_config (siguiendo recomendación de comunidad)
+            # Los configs se pasarán directamente en generate_content()
             model_name = config.get("model_name", "gemini-2.0-flash")
             
-            try:
-                # Intentar crear con configuración completa (incluyendo response_mime_type si está)
-                model = genai.GenerativeModel(
-                    model_name=model_name,
-                    generation_config=generation_config
-                )
-            except (TypeError, ValueError) as e:
-                # Si falla por campo no soportado, reintentar sin response_mime_type
-                if "response_mime_type" in str(e) or "Unknown field" in str(e):
-                    logger.warning(f"⚠️ response_mime_type no soportado en esta versión, reintentando sin él")
-                    generation_config_fallback = {k: v for k, v in generation_config.items() if k != "response_mime_type"}
-                    model = genai.GenerativeModel(
-                        model_name=model_name,
-                        generation_config=generation_config_fallback
-                    )
-                else:
-                    raise
+            # Crear modelo base sin configuración
+            model = genai.GenerativeModel(model_name=model_name)
             
-            # Guardar en cache
-            self.models_cache[config_hash] = model
+            # Guardar modelo Y configuración en cache (juntos)
+            self.models_cache[config_hash] = {
+                "model": model,
+                "generation_config": generation_config
+            }
             
             logger.info(
                 f"✅ Modelo creado: {model_name} | "
@@ -227,7 +253,7 @@ class GeminiClient:
                 f"max_tokens={generation_config.get('max_output_tokens', 'N/A')}"
             )
             
-            return model
+            return self.models_cache[config_hash]
             
         except Exception as e:
             logger.error(f"❌ Error creando modelo con config personalizada: {str(e)}")
@@ -274,12 +300,16 @@ class GeminiClient:
                 
                 config = get_config_for_task(task_type)
                 logger.debug(f"📋 Config obtenida para {task_type}: model={config.get('model_name')}, temp={config.get('temperature')}")
-                model = self._get_or_create_model(config)
+                model_data = self._get_or_create_model(config)
                 
-                if model:
+                if model_data:
                     logger.debug(f"🚀 Usando modelo configurado para task_type='{task_type}'")
-                    response = model.generate_content(prompt)
-                    return response.text
+                    # Extraer modelo y config del dict
+                    model = model_data["model"]
+                    generation_config = model_data["generation_config"]
+                    # Pasar config directamente a generate_content (recomendación de comunidad)
+                    response = model.generate_content(prompt, generation_config=generation_config)
+                    return self._extract_text_from_response(response)
                 else:
                     logger.debug("⚠️ No se pudo crear modelo con config personalizada, usando modelo por defecto")
             except Exception as e:
@@ -293,7 +323,7 @@ class GeminiClient:
             if self.model:
                 logger.debug("🚀 Usando modelo por defecto (gRPC)")
                 response = self.model.generate_content(prompt)
-                return response.text
+                return self._extract_text_from_response(response)
         except Exception as e:
             logger.warning(f"⚠️ gRPC falló, usando REST API: {str(e)}")
         
