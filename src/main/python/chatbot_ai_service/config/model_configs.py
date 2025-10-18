@@ -43,7 +43,7 @@ MODEL_CONFIGS: Dict[str, Dict[str, Any]] = {
         "top_p": 0.1,  # Muy restrictivo
         "top_k": 1,  # Solo la mejor opción
         "max_output_tokens": 100,  # Respuestas cortas
-        "response_mime_type": "application/json",
+        # "response_mime_type": "application/json",  # No soportado en 0.3.2
         "description": "Para clasificar intenciones con alta precisión",
     },
     
@@ -56,7 +56,7 @@ MODEL_CONFIGS: Dict[str, Dict[str, Any]] = {
         "top_p": 0.1,
         "top_k": 1,
         "max_output_tokens": 512,
-        "response_mime_type": "application/json",
+        # "response_mime_type": "application/json",  # No soportado en 0.3.2
         "description": "Para extraer datos estructurados (nombre, ciudad, teléfono)",
     },
     
@@ -69,7 +69,7 @@ MODEL_CONFIGS: Dict[str, Dict[str, Any]] = {
         "top_p": 0.1,
         "top_k": 1,
         "max_output_tokens": 256,
-        "response_mime_type": "application/json",
+        # "response_mime_type": "application/json",  # No soportado en 0.3.2
         "description": "Para validar datos con criterios estrictos",
     },
     
@@ -94,7 +94,7 @@ MODEL_CONFIGS: Dict[str, Dict[str, Any]] = {
         "top_p": 0.1,
         "top_k": 1,
         "max_output_tokens": 200,
-        "response_mime_type": "application/json",
+        # "response_mime_type": "application/json",  # No soportado en 0.3.2
         "description": "Para detectar intentos maliciosos con alta precisión",
     },
     
@@ -107,7 +107,7 @@ MODEL_CONFIGS: Dict[str, Dict[str, Any]] = {
         "top_p": 0.2,
         "top_k": 5,
         "max_output_tokens": 512,
-        "response_mime_type": "application/json",
+        # "response_mime_type": "application/json",  # No soportado en 0.3.2
         "description": "Para analizar respuestas en flujo de registro",
     },
     
@@ -120,7 +120,7 @@ MODEL_CONFIGS: Dict[str, Dict[str, Any]] = {
         "top_p": 0.1,
         "top_k": 1,
         "max_output_tokens": 100,
-        "response_mime_type": "application/json",
+        # "response_mime_type": "application/json",  # No soportado en 0.3.2
         "description": "Para normalizar nombres de ciudades con precisión",
     },
     
