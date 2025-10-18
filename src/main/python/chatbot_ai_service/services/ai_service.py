@@ -1135,11 +1135,12 @@ Responde solo el JSON estricto sin comentarios:
                 # 🔧 FIX: Asegurar que documentos estén cargados ANTES de usar RAG
                 await self._ensure_tenant_documents_loaded(tenant_id, ai_config)
                 
-                logger.info(f"🎯 Usando RAGOrchestrator | tenant_id={tenant_id} | query='{query[:50]}...'")
+                logger.info(f"🎯 Usando RAGOrchestrator | tenant_id={tenant_id} | session_id={session_id} | query='{query[:50]}...'")
                 response = await self.rag_orchestrator.process_query_simple(
                     query=query,
                     tenant_id=tenant_id,
-                    user_context=user_context
+                    user_context=user_context,
+                    session_id=session_id
                 )
                 logger.info(f"✅ RAG respuesta generada | length={len(response)} chars")
                 return response

@@ -335,11 +335,19 @@ class PromptBuilder:
         return prompt
     
     def _format_user_context(self, user_context: Optional[Dict[str, Any]]) -> str:
-        """Formatea el contexto del usuario"""
+        """Formatea el contexto del usuario INCLUYENDO contexto de sesión"""
         if not user_context:
             return "No hay contexto adicional del usuario."
         
         parts = []
+        
+        # 🔧 FIX: Incluir contexto de sesión si está disponible
+        if user_context.get("session_context"):
+            parts.append("=== CONTEXTO DE LA CONVERSACIÓN ===")
+            parts.append(user_context["session_context"])
+            parts.append("")
+        
+        # Contexto básico del usuario
         if user_context.get("user_name"):
             parts.append(f"- Nombre del usuario: {user_context['user_name']}")
         if user_context.get("user_city"):

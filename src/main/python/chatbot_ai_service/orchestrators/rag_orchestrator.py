@@ -220,15 +220,22 @@ class RAGOrchestrator:
     ) -> str:
         """
         Construye el prompt completo para RAG con guardrails
+        INCLUYE contexto de sesión para continuidad
         
         Args:
             query: Pregunta del usuario
             context: Contexto de documentos
-            user_context: Contexto adicional del usuario
+            user_context: Contexto adicional del usuario (puede incluir session_context)
             
         Returns:
             Prompt formateado con guardrails
         """
+        # 🔧 FIX: Incluir contexto de sesión si está disponible
+        session_context = ""
+        if user_context and "session_context" in user_context:
+            session_context = user_context["session_context"]
+            logger.debug(f"Contexto de sesión incluido en prompt: {len(session_context)} chars")
+        
         # 🛡️ FASE 5: Usar PromptBuilder con guardrails
         if self.enable_guardrails:
             # Detectar automáticamente el tipo de prompt
@@ -496,19 +503,36 @@ Eres un asistente virtual para una campaña política. Tu objetivo es proporcion
         self, 
         query: str, 
         tenant_id: str,
-        user_context: Dict[str, Any] = None
+        user_context: Dict[str, Any] = None,
+        session_id: str = None
     ) -> str:
         """
         Versión simplificada que solo retorna la respuesta con citas
+        INCLUYE contexto de sesión para mantener continuidad
         
         Args:
             query: Pregunta del usuario
             tenant_id: ID del tenant
             user_context: Contexto del usuario
+            session_id: ID de sesión para contexto persistente
             
         Returns:
             Respuesta con citas (string)
         """
+        # 🔧 FIX: Incluir contexto de sesión si está disponible
+        if session_id:
+            try:
+                from chatbot_ai_service.services.session_context_service import session_context_service
+                session_context = session_context_service.build_context_for_ai(session_id)
+                if session_context:
+                    # Agregar contexto de sesión al user_context
+                    if not user_context:
+                        user_context = {}
+                    user_context["session_context"] = session_context
+                    logger.info(f"✅ Contexto de sesión incluido en RAG: {len(session_context)} chars")
+            except Exception as e:
+                logger.warning(f"⚠️ Error obteniendo contexto de sesión: {str(e)}")
+        
         rag_response = await self.process_query(query, tenant_id, user_context)
         
         if self.enable_citations:
