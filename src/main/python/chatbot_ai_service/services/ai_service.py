@@ -67,6 +67,11 @@ class AIService:
         self.use_rag_orchestrator = os.getenv("USE_RAG_ORCHESTRATOR", "false").lower() == "true"
         self.rag_orchestrator = None
         
+        # 🛡️ FASE 5: Feature flag para guardrails estrictos
+        # Habilita prompts especializados y verificación estricta de respuestas
+        self.use_guardrails = os.getenv("USE_GUARDRAILS", "true").lower() == "true"
+        self.strict_guardrails = os.getenv("STRICT_GUARDRAILS", "true").lower() == "true"
+        
         if self.use_rag_orchestrator:
             if not self.use_gemini_client:
                 logger.warning("⚠️ USE_RAG_ORCHESTRATOR=true pero USE_GEMINI_CLIENT=false. RAG requiere GeminiClient.")
@@ -78,9 +83,14 @@ class AIService:
                         gemini_client=self.gemini_client,
                         document_service=document_context_service,
                         enable_verification=True,
-                        enable_citations=True
+                        enable_citations=True,
+                        enable_guardrails=self.use_guardrails,
+                        strict_guardrails=self.strict_guardrails
                     )
-                    logger.info("✅ RAGOrchestrator habilitado (USE_RAG_ORCHESTRATOR=true)")
+                    logger.info(
+                        f"✅ RAGOrchestrator habilitado (USE_RAG_ORCHESTRATOR=true) "
+                        f"con guardrails={'ON' if self.use_guardrails else 'OFF'}"
+                    )
                 except Exception as e:
                     logger.error(f"❌ Error inicializando RAGOrchestrator: {e}")
                     logger.warning("⚠️ Usando lógica original sin RAG")

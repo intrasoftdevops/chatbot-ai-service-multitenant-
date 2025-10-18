@@ -19,6 +19,9 @@ from dataclasses import dataclass
 
 from chatbot_ai_service.retrievers.hybrid_retriever import HybridRetriever, RetrievedDocument
 from chatbot_ai_service.verifiers.source_verifier import SourceVerifier, VerificationResult
+from chatbot_ai_service.prompts.system_prompts import PromptBuilder, PromptType
+from chatbot_ai_service.guardrails.guardrail_verifier import GuardrailVerifier, GuardrailVerificationResult
+from chatbot_ai_service.guardrails.response_sanitizer import ResponseSanitizer
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +34,8 @@ class RAGResponse:
     verification: VerificationResult
     retrieved_documents: List[RetrievedDocument]
     metadata: Dict[str, Any]
+    guardrail_result: Optional[GuardrailVerificationResult] = None
+    sanitization_applied: bool = False
 
 
 class RAGOrchestrator:
@@ -54,7 +59,9 @@ class RAGOrchestrator:
         gemini_client=None,
         document_service=None,
         enable_verification: bool = True,
-        enable_citations: bool = True
+        enable_citations: bool = True,
+        enable_guardrails: bool = True,
+        strict_guardrails: bool = True
     ):
         """
         Inicializa el RAGOrchestrator
@@ -64,19 +71,29 @@ class RAGOrchestrator:
             document_service: Servicio de documentos
             enable_verification: Si True, verifica respuestas
             enable_citations: Si True, agrega citas
+            enable_guardrails: Si True, aplica guardrails estrictos
+            strict_guardrails: Si True, fallos críticos invalidan respuesta
         """
         self.gemini_client = gemini_client
         self.document_service = document_service
         self.enable_verification = enable_verification
         self.enable_citations = enable_citations
+        self.enable_guardrails = enable_guardrails
+        self.strict_guardrails = strict_guardrails
         
         # Inicializar componentes
         self.retriever = HybridRetriever(document_service)
         self.verifier = SourceVerifier()
         
+        # 🛡️ FASE 5: Guardrails
+        self.prompt_builder = PromptBuilder()
+        self.guardrail_verifier = GuardrailVerifier(strict_mode=strict_guardrails)
+        self.response_sanitizer = ResponseSanitizer(aggressive_mode=strict_guardrails)
+        
         logger.info(
             f"🚀 RAGOrchestrator inicializado "
-            f"(verification={enable_verification}, citations={enable_citations})"
+            f"(verification={enable_verification}, citations={enable_citations}, "
+            f"guardrails={enable_guardrails}, strict={strict_guardrails})"
         )
     
     async def _rewrite_query(self, query: str) -> List[str]:
@@ -202,7 +219,7 @@ class RAGOrchestrator:
         user_context: Dict[str, Any] = None
     ) -> str:
         """
-        Construye el prompt completo para RAG
+        Construye el prompt completo para RAG con guardrails
         
         Args:
             query: Pregunta del usuario
@@ -210,8 +227,26 @@ class RAGOrchestrator:
             user_context: Contexto adicional del usuario
             
         Returns:
-            Prompt formateado
+            Prompt formateado con guardrails
         """
+        # 🛡️ FASE 5: Usar PromptBuilder con guardrails
+        if self.enable_guardrails:
+            # Detectar automáticamente el tipo de prompt
+            prompt_type = self.prompt_builder.detect_prompt_type(query)
+            
+            logger.debug(f"🎯 Tipo de prompt detectado: {prompt_type.value}")
+            
+            # Construir prompt con guardrails
+            prompt = self.prompt_builder.build_prompt(
+                query=query,
+                documents=context,
+                prompt_type=prompt_type,
+                user_context=user_context
+            )
+            
+            return prompt
+        
+        # Fallback: Prompt original (sin guardrails)
         user_info = ""
         if user_context and user_context.get("user_name"):
             user_info = f"El usuario se llama {user_context['user_name']}. "
@@ -337,7 +372,9 @@ Eres un asistente virtual para una campaña política. Tu objetivo es proporcion
                     recommendation="No hay documentos disponibles"
                 ),
                 retrieved_documents=[],
-                metadata={"query": query, "tenant_id": tenant_id}
+                metadata={"query": query, "tenant_id": tenant_id},
+                guardrail_result=None,
+                sanitization_applied=False
             )
         
         # 3. Build Context
@@ -352,10 +389,42 @@ Eres un asistente virtual para una campaña política. Tu objetivo es proporcion
         logger.info("5️⃣ Generando respuesta...")
         response = await self._generate_response(prompt)
         
-        # 6. Verify Response
+        # 🛡️ FASE 5: Verificación con Guardrails
+        guardrail_result = None
+        sanitization_applied = False
+        
+        if self.enable_guardrails:
+            logger.info("6️⃣ Verificando guardrails...")
+            guardrail_result = self.guardrail_verifier.verify(
+                response=response,
+                documents=documents,
+                query=query
+            )
+            
+            logger.info(
+                f"   └─ Score: {guardrail_result.score:.0%}, "
+                f"Critical: {guardrail_result.critical_failures}, "
+                f"Warnings: {guardrail_result.warnings}"
+            )
+            
+            # Si falla guardrails, sanitizar
+            if not guardrail_result.all_passed:
+                logger.warning(f"⚠️ Guardrails no pasados: {guardrail_result.recommendation}")
+                
+                if self.strict_guardrails and guardrail_result.critical_failures > 0:
+                    logger.info("7️⃣ Sanitizando respuesta...")
+                    response, changes = self.response_sanitizer.sanitize(
+                        response=response,
+                        documents=documents,
+                        guardrail_result=guardrail_result
+                    )
+                    sanitization_applied = True
+                    logger.info(f"   └─ Cambios aplicados: {len(changes)}")
+        
+        # 8. Verify Response (SourceVerifier)
         verification = None
         if self.enable_verification:
-            logger.info("6️⃣ Verificando respuesta...")
+            logger.info("8️⃣ Verificando fuentes...")
             verification = self.verifier.verify_response(response, documents)
         else:
             verification = VerificationResult(
@@ -367,10 +436,10 @@ Eres un asistente virtual para una campaña política. Tu objetivo es proporcion
                 recommendation="Verificación deshabilitada"
             )
         
-        # 7. Add Citations
+        # 9. Add Citations
         response_with_citations = response
         if self.enable_citations:
-            logger.info("7️⃣ Agregando citas...")
+            logger.info("9️⃣ Agregando citas...")
             response_with_citations = self.verifier.add_citations(response, documents)
         
         # Calculate processing time
@@ -389,8 +458,17 @@ Eres un asistente virtual para una campaña política. Tu objetivo es proporcion
             "num_queries_generated": len(queries),
             "verification_enabled": self.enable_verification,
             "citations_enabled": self.enable_citations,
+            "guardrails_enabled": self.enable_guardrails,
             "processing_time_seconds": processing_time
         }
+        
+        # Agregar metadata de guardrails si está habilitado
+        if guardrail_result:
+            metadata["guardrail_score"] = guardrail_result.score
+            metadata["guardrail_passed"] = guardrail_result.all_passed
+            metadata["critical_failures"] = guardrail_result.critical_failures
+            metadata["warnings"] = guardrail_result.warnings
+            metadata["sanitization_applied"] = sanitization_applied
         
         logger.info(
             f"✅ Query RAG procesado exitosamente "
@@ -402,7 +480,9 @@ Eres un asistente virtual para una campaña política. Tu objetivo es proporcion
             response_with_citations=response_with_citations,
             verification=verification,
             retrieved_documents=documents,
-            metadata=metadata
+            metadata=metadata,
+            guardrail_result=guardrail_result,
+            sanitization_applied=sanitization_applied
         )
     
     async def process_query_simple(
