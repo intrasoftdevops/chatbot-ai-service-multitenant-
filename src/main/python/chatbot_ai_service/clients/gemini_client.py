@@ -72,22 +72,22 @@ class GeminiClient:
                 
                 # 🔧 FIX: Configurar safety settings para evitar bloqueos
                 safety_settings = [
-                    {
-                        "category": "HARM_CATEGORY_HARASSMENT",
-                        "threshold": "BLOCK_NONE"
-                    },
-                    {
-                        "category": "HARM_CATEGORY_HATE_SPEECH", 
-                        "threshold": "BLOCK_NONE"
-                    },
-                    {
-                        "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                        "threshold": "BLOCK_NONE"
-                    },
-                    {
-                        "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-                        "threshold": "BLOCK_NONE"
-                    }
+                    genai.types.SafetySetting(
+                        category=genai.types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                        threshold=genai.types.HarmBlockThreshold.BLOCK_NONE
+                    ),
+                    genai.types.SafetySetting(
+                        category=genai.types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                        threshold=genai.types.HarmBlockThreshold.BLOCK_NONE
+                    ),
+                    genai.types.SafetySetting(
+                        category=genai.types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                        threshold=genai.types.HarmBlockThreshold.BLOCK_NONE
+                    ),
+                    genai.types.SafetySetting(
+                        category=genai.types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                        threshold=genai.types.HarmBlockThreshold.BLOCK_NONE
+                    )
                 ]
                 
                 self.model = genai.GenerativeModel(
@@ -133,11 +133,13 @@ class GeminiClient:
                     # Chequear si fue bloqueado por safety
                     if hasattr(candidate, 'finish_reason'):
                         logger.debug(f"🔍 Finish reason: {candidate.finish_reason}")
-                        if str(candidate.finish_reason) in ['SAFETY', '3']:  # 3 = SAFETY enum value
+                        # finish_reason=2 corresponde a SAFETY
+                        if str(candidate.finish_reason) in ['SAFETY', '3', '2']:  # 2 = SAFETY enum value
                             logger.error(f"❌ Respuesta bloqueada por safety filters. Finish reason: {candidate.finish_reason}")
                             if hasattr(candidate, 'safety_ratings'):
                                 logger.error(f"   Safety ratings: {candidate.safety_ratings}")
-                            return "Lo siento, no puedo proporcionar esa respuesta debido a las políticas de seguridad."
+                            # Intentar una respuesta más específica basada en el contexto
+                            return "Lo siento, no puedo procesar esa consulta en este momento. Por favor, intenta reformular tu pregunta de manera más específica."
                     
                     if hasattr(candidate, 'content') and candidate.content:
                         content = candidate.content
@@ -163,8 +165,20 @@ class GeminiClient:
                         else:
                             logger.error(f"❌ Content no tiene atributo 'parts'. Content: {content}")
                 
-                # Si nada funciona, retornar mensaje de error
+                # Si nada funciona, retornar mensaje de error más específico
                 logger.error(f"❌ No se pudo extraer texto de la respuesta de Gemini")
+                # Verificar si hay finish_reason disponible para dar mejor feedback
+                if hasattr(response, 'candidates') and response.candidates and len(response.candidates) > 0:
+                    candidate = response.candidates[0]
+                    if hasattr(candidate, 'finish_reason'):
+                        finish_reason = str(candidate.finish_reason)
+                        if finish_reason in ['2', '3']:  # SAFETY
+                            return "Lo siento, no puedo procesar esa consulta en este momento. Por favor, intenta reformular tu pregunta."
+                        elif finish_reason == '1':  # STOP (normal)
+                            return "Lo siento, no pude generar una respuesta completa. Por favor, intenta de nuevo."
+                        else:
+                            logger.warning(f"⚠️ Finish reason inesperado: {finish_reason}")
+                
                 return "Lo siento, no pude procesar la respuesta correctamente."
                 
             except Exception as ex:
@@ -292,22 +306,22 @@ class GeminiClient:
             
             # 🔧 FIX: Configurar safety settings para evitar bloqueos
             safety_settings = [
-                {
-                    "category": "HARM_CATEGORY_HARASSMENT",
-                    "threshold": "BLOCK_NONE"
-                },
-                {
-                    "category": "HARM_CATEGORY_HATE_SPEECH", 
-                    "threshold": "BLOCK_NONE"
-                },
-                {
-                    "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                    "threshold": "BLOCK_NONE"
-                },
-                {
-                    "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-                    "threshold": "BLOCK_NONE"
-                }
+                genai.types.SafetySetting(
+                    category=genai.types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                    threshold=genai.types.HarmBlockThreshold.BLOCK_NONE
+                ),
+                genai.types.SafetySetting(
+                    category=genai.types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                    threshold=genai.types.HarmBlockThreshold.BLOCK_NONE
+                ),
+                genai.types.SafetySetting(
+                    category=genai.types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                    threshold=genai.types.HarmBlockThreshold.BLOCK_NONE
+                ),
+                genai.types.SafetySetting(
+                    category=genai.types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                    threshold=genai.types.HarmBlockThreshold.BLOCK_NONE
+                )
             ]
             
             # Crear modelo con safety settings

@@ -635,38 +635,69 @@ class DocumentContextService:
             return None
     
     def _simple_search(self, documents: List[Dict[str, Any]], query: str, max_results: int) -> str:
-        """Búsqueda simple por palabras clave en documentos"""
+        """Búsqueda optimizada usando SmartRetriever"""
         try:
-            query_words = query.lower().split()
+            from chatbot_ai_service.retrievers.smart_retriever import smart_retriever
+            
+            # Usar el nuevo SmartRetriever
+            results = smart_retriever.search_documents(documents, query, max_results)
+            
+            if not results:
+                logger.info("🔍 No se encontraron documentos relevantes")
+                return ""
+            
+            # Construir contexto usando el SmartRetriever
+            context = smart_retriever.get_context_from_results(results, max_context_length=2000)
+            
+            logger.info(f"🔍 Búsqueda optimizada: {len(results)} documentos encontrados")
+            return context
+            
+        except Exception as e:
+            logger.error(f"Error en búsqueda optimizada: {str(e)}")
+            # Fallback a búsqueda básica si hay error
+            return self._basic_search_fallback(documents, query, max_results)
+    
+    def _basic_search_fallback(self, documents: List[Dict[str, Any]], query: str, max_results: int) -> str:
+        """Búsqueda básica de fallback en caso de error"""
+        try:
+            query_lower = query.lower()
             scored_documents = []
             
             for doc in documents:
                 content = doc["content"].lower()
+                filename = doc.get("filename", "").lower()
                 score = 0
                 
-                # Contar coincidencias de palabras clave
-                for word in query_words:
-                    if len(word) > 2:  # Ignorar palabras muy cortas
+                # Búsqueda simple por palabras
+                if query_lower in content:
+                    score += 100
+                if query_lower in filename:
+                    score += 150
+                
+                # Búsqueda por palabras individuales
+                for word in query_lower.split():
+                    if len(word) > 2:
                         score += content.count(word)
+                        if word in filename:
+                            score += 20
                 
                 if score > 0:
                     scored_documents.append((score, doc))
             
-            # Ordenar por score y tomar los mejores
+            # Ordenar y tomar los mejores
             scored_documents.sort(key=lambda x: x[0], reverse=True)
             top_documents = scored_documents[:max_results]
             
-            # Construir contexto
+            # Construir contexto básico
             context_parts = []
             for score, doc in top_documents:
-                # Tomar un fragmento del documento (primeros 500 caracteres)
                 content_preview = doc["content"][:500] + "..." if len(doc["content"]) > 500 else doc["content"]
                 context_parts.append(f"**{doc['filename']}**:\n{content_preview}")
             
             return "\n\n".join(context_parts)
             
         except Exception as e:
-            logger.error(f"Error en búsqueda simple: {str(e)}")
+            logger.error(f"Error en búsqueda de fallback: {str(e)}")
             return ""
 
 

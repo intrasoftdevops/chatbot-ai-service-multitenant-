@@ -643,87 +643,86 @@ Respuesta:
             return []
     
     async def _get_document_content_for_query(self, query: str, documentation_bucket_url: str) -> tuple[Optional[str], Optional[str]]:
-        """Obtiene contenido real de documentos relevantes para la consulta"""
+        """Obtiene contenido real de documentos relevantes usando SmartRetriever optimizado"""
         try:
             import httpx
             import pypdf
             import io
-            
-            # Mapear consultas a documentos específicos de manera genérica
-            query_lower = query.lower()
+            from chatbot_ai_service.retrievers.smart_retriever import SmartRetriever
             
             # Obtener todos los documentos disponibles
             all_documents = await self._get_available_documents(documentation_bucket_url)
             
-            # Filtrar documentos relevantes basándose en palabras clave genéricas
-            relevant_docs = []
-            query_words = query_lower.split()
+            if not all_documents:
+                logger.warning("[ADVERTENCIA] No hay documentos disponibles")
+                return None, None
             
-            # Palabras clave que indican consultas sobre el candidato
-            candidate_keywords = ['quien', 'es', 'candidato', 'quintero', 'daniel', 'presidente', 'alcalde', 'biografia', 'perfil']
+            # Crear instancia del SmartRetriever
+            smart_retriever = SmartRetriever()
             
-            # Si la consulta parece ser sobre el candidato, usar todos los documentos disponibles
-            if any(keyword in query_lower for keyword in candidate_keywords):
-                relevant_docs = all_documents[:3]  # Usar los primeros 3 documentos
-                logger.info(f"[LIBROS] Consulta sobre candidato detectada, usando {len(relevant_docs)} documentos")
-            else:
-                # Búsqueda normal por palabras clave en el nombre del archivo
-                for doc_name in all_documents:
-                    doc_lower = doc_name.lower()
-                    # Buscar coincidencias entre palabras de la consulta y el nombre del documento
-                    if any(word in doc_lower for word in query_words if len(word) > 3):  # Solo palabras de más de 3 caracteres
-                        relevant_docs.append(doc_name)
-                
-                # Si no se encontraron documentos específicos, usar los primeros 2 documentos disponibles
-                if not relevant_docs and all_documents:
-                    relevant_docs = all_documents[:2]
-            
-            logger.info(f"[LIBROS] Buscando documentos relevantes: {relevant_docs}")
-            print(f"📚 DOCUMENTOS SELECCIONADOS: {relevant_docs}")
-            
-            # Descargar y procesar documentos
-            content_parts = []
-            document_name = None  # Para almacenar el nombre del primer documento procesado
-            for doc_name in relevant_docs[:2]:  # Limitar a 2 documentos para evitar timeout
+            # Descargar y procesar todos los documentos para crear la lista de documentos con contenido
+            documents_with_content = []
+            for doc_name in all_documents:
                 try:
-                    # Construir URL del documento
                     doc_url = f"{documentation_bucket_url}/{doc_name}"
-                    
-                    # Guardar el nombre del primer documento procesado
-                    if document_name is None:
-                        document_name = doc_name
                     
                     async with httpx.AsyncClient(timeout=30.0) as client:
                         response = await client.get(doc_url)
                         if response.status_code == 200:
+                            text = ""
+                            
                             # Procesar PDF
                             if doc_name.endswith('.pdf'):
                                 pdf_content = io.BytesIO(response.content)
                                 pdf_reader = pypdf.PdfReader(pdf_content)
-                                text = ""
-                                for page in pdf_reader.pages[:3]:  # Solo primeras 3 páginas
+                                for page in pdf_reader.pages[:5]:  # Primeras 5 páginas
                                     text += page.extract_text() + "\n"
-                                if text.strip():
-                                    content_parts.append(f"=== {doc_name} ===\n{text[:2000]}...")  # Limitar a 2000 chars
-                                    logger.info(f"[OK] Documento {doc_name} procesado: {len(text)} caracteres")
                             
                             # Procesar DOCX
                             elif doc_name.endswith('.docx'):
                                 from docx import Document as DocxDocument
                                 doc_content = io.BytesIO(response.content)
                                 doc = DocxDocument(doc_content)
-                                text = ""
-                                for paragraph in doc.paragraphs[:20]:  # Solo primeras 20 líneas
+                                for paragraph in doc.paragraphs[:50]:  # Primeras 50 líneas
                                     text += paragraph.text + "\n"
-                                if text.strip():
-                                    content_parts.append(f"=== {doc_name} ===\n{text[:2000]}...")  # Limitar a 2000 chars
-                                    logger.info(f"[OK] Documento {doc_name} procesado: {len(text)} caracteres")
-                        else:
-                            logger.warning(f"[ADVERTENCIA] No se pudo descargar {doc_name}: {response.status_code}")
+                            
+                            if text.strip():
+                                documents_with_content.append({
+                                    "id": doc_name,
+                                    "filename": doc_name,
+                                    "content": text.strip()
+                                })
+                                logger.info(f"[OK] Documento {doc_name} cargado: {len(text)} caracteres")
                             
                 except Exception as e:
                     logger.warning(f"[ADVERTENCIA] Error procesando {doc_name}: {e}")
                     continue
+            
+            if not documents_with_content:
+                logger.warning("[ADVERTENCIA] No se pudo cargar contenido de ningún documento")
+                return None, None
+            
+            # Usar SmartRetriever para encontrar documentos relevantes
+            search_results = smart_retriever.search_documents(documents_with_content, query, max_results=3)
+            
+            if not search_results:
+                logger.warning("[ADVERTENCIA] No se encontraron documentos relevantes")
+                return None, None
+            
+            # Log de documentos seleccionados
+            selected_docs = [result.filename for result in search_results]
+            logger.info(f"[LIBROS] Buscando documentos relevantes: {selected_docs}")
+            print(f"📚 DOCUMENTOS SELECCIONADOS: {selected_docs}")
+            
+            # Construir contenido usando los resultados del SmartRetriever
+            content_parts = []
+            document_name = search_results[0].filename  # Primer documento
+            
+            for result in search_results:
+                # Limitar contenido a 2000 caracteres por documento
+                content_preview = result.content[:2000] + "..." if len(result.content) > 2000 else result.content
+                content_parts.append(f"=== {result.filename} ===\n{content_preview}")
+                logger.info(f"[OK] Documento {result.filename} incluido (score: {result.score:.1f})")
             
             if content_parts:
                 full_content = "\n\n".join(content_parts)

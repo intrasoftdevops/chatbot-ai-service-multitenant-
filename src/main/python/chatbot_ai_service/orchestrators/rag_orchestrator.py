@@ -17,7 +17,7 @@ import logging
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
 
-from chatbot_ai_service.retrievers.hybrid_retriever import HybridRetriever, RetrievedDocument
+from chatbot_ai_service.retrievers.smart_retriever import SmartRetriever, SearchResult
 from chatbot_ai_service.verifiers.source_verifier import SourceVerifier, VerificationResult
 from chatbot_ai_service.prompts.system_prompts import PromptBuilder, PromptType
 from chatbot_ai_service.guardrails.guardrail_verifier import GuardrailVerifier, GuardrailVerificationResult
@@ -32,7 +32,7 @@ class RAGResponse:
     response: str
     response_with_citations: str
     verification: VerificationResult
-    retrieved_documents: List[RetrievedDocument]
+    retrieved_documents: List[SearchResult]
     metadata: Dict[str, Any]
     guardrail_result: Optional[GuardrailVerificationResult] = None
     sanitization_applied: bool = False
@@ -82,7 +82,7 @@ class RAGOrchestrator:
         self.strict_guardrails = strict_guardrails
         
         # Inicializar componentes
-        self.retriever = HybridRetriever(document_service)
+        self.retriever = SmartRetriever()
         self.verifier = SourceVerifier()
         
         # 🛡️ FASE 5: Guardrails
