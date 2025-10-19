@@ -47,9 +47,11 @@ class SessionContextService:
     
     def __init__(self):
         self._sessions: Dict[str, SessionContext] = {}
-        self._session_ttl = 3600  # 1 hora en segundos
+        self._session_ttl = 1200  # 20 minutos en segundos
+        self._session_warning_ttl = 900  # 15 minutos para enviar advertencia
         self._max_messages_per_session = 50
         self._max_context_length = 4000  # caracteres
+        self._warning_sent: Dict[str, bool] = {}  # Para evitar enviar múltiples advertencias
     
     def create_session(self, session_id: str, tenant_id: str, user_id: Optional[str] = None, 
                       user_context: Dict[str, Any] = None) -> SessionContext:
@@ -94,6 +96,10 @@ class SessionContextService:
         
         session.messages.append(message)
         session.last_activity = time.time()
+        
+        # Si es un mensaje del usuario, resetear la advertencia de timeout
+        if role == "user":
+            self.reset_session_warning(session_id)
         
         # Limitar número de mensajes
         if len(session.messages) > self._max_messages_per_session:
@@ -253,6 +259,58 @@ class SessionContextService:
             "sessions_with_context": sessions_with_context,
             "average_messages_per_session": total_messages / len(active_sessions) if active_sessions else 0,
             "tenant_id": tenant_id
+        }
+    
+    def check_session_timeout(self, session_id: str) -> Dict[str, Any]:
+        """Verifica si una sesión necesita advertencia o cierre por timeout"""
+        session = self.get_session(session_id)
+        if not session:
+            return {"status": "not_found", "action": None}
+        
+        current_time = time.time()
+        time_since_activity = current_time - session.last_activity
+        
+        # Si han pasado más de 20 minutos, cerrar sesión
+        if time_since_activity > self._session_ttl:
+            self.clear_session(session_id)
+            return {
+                "status": "expired", 
+                "action": "close_session",
+                "message": "Tu sesión ha expirado por inactividad. Para continuar nuestra conversación, envía un nuevo mensaje."
+            }
+        
+        # Si han pasado más de 15 minutos, enviar advertencia
+        elif time_since_activity > self._session_warning_ttl:
+            if not self._warning_sent.get(session_id, False):
+                self._warning_sent[session_id] = True
+                return {
+                    "status": "warning", 
+                    "action": "send_warning",
+                    "message": "Tu sesión se cerrará en 5 minutos por inactividad. Si quieres continuar nuestra conversación, envía un mensaje ahora."
+                }
+        
+        return {"status": "active", "action": None}
+    
+    def reset_session_warning(self, session_id: str):
+        """Resetea la advertencia de sesión cuando el usuario envía un mensaje"""
+        self._warning_sent[session_id] = False
+    
+    def get_session_timeout_info(self, session_id: str) -> Dict[str, Any]:
+        """Obtiene información sobre el timeout de la sesión"""
+        session = self.get_session(session_id)
+        if not session:
+            return {"time_remaining": 0, "status": "not_found"}
+        
+        current_time = time.time()
+        time_since_activity = current_time - session.last_activity
+        time_remaining = max(0, self._session_ttl - time_since_activity)
+        
+        return {
+            "time_remaining": time_remaining,
+            "time_remaining_minutes": int(time_remaining / 60),
+            "status": "active" if time_remaining > 0 else "expired",
+            "last_activity": session.last_activity,
+            "session_created": session.created_at
         }
 
 

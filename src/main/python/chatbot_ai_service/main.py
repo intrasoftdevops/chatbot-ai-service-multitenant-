@@ -23,8 +23,8 @@ env_path = project_root / ".env"
 load_dotenv(env_path)
 
 # Configurar logging global para que se vean logs de controllers/servicios
-log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
-log_level = getattr(logging, log_level_str, logging.INFO)
+log_level_str = os.getenv("LOG_LEVEL", "DEBUG").upper()
+log_level = getattr(logging, log_level_str, logging.DEBUG)
 logging.basicConfig(
     level=log_level,
     format="%(asctime)s [%(levelname)s] %(name)s - %(message)s"
