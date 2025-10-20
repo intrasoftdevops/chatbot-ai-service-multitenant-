@@ -190,3 +190,6 @@ class UserBlockingService:
                 "success": False,
                 "error": str(e)
             }
+
+# Crear instancia global del servicio
+user_blocking_service = UserBlockingService()

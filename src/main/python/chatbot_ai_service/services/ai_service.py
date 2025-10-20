@@ -30,6 +30,7 @@ from chatbot_ai_service.services.document_context_service import document_contex
 from chatbot_ai_service.services.session_context_service import session_context_service
 from chatbot_ai_service.services.blocking_notification_service import BlockingNotificationService
 from chatbot_ai_service.services.cache_service import cache_service
+from chatbot_ai_service.services.user_blocking_service import user_blocking_service
 
 logger = logging.getLogger(__name__)
 
@@ -400,6 +401,29 @@ class AIService:
             # Agregar mensaje del usuario a la sesion
             session_context_service.add_message(session_id, "user", query)
             
+            # 🔧 PRIORIDAD 1: DETECCIÓN DE MENSAJES MALICIOSOS (incluso durante registro)
+            malicious_detection = self._detect_malicious_intent(query)
+            if malicious_detection and malicious_detection.get("is_malicious", False):
+                logger.warning(f"🚫 Mensaje malicioso detectado durante registro: {malicious_detection}")
+                # Manejar comportamiento malicioso inmediatamente
+                return await self._handle_malicious_message(tenant_id, query, user_context, malicious_detection, session_id)
+            
+            # 🔧 PRIORIDAD 2: REGISTRO - Verificar si el usuario está en proceso de registro
+            user_state = user_context.get("user_state", "")
+            registration_states = ["WAITING_NAME", "WAITING_LASTNAME", "WAITING_CITY", "WAITING_CODE", "IN_PROGRESS"]
+            
+            if user_state in registration_states:
+                logger.info(f"🔄 Usuario en proceso de registro (estado: {user_state}), priorizando análisis de registro")
+                # Analizar como respuesta de registro en lugar de clasificar intención
+                registration_analysis = await self.analyze_registration(tenant_id, query, user_context, session_id, user_state)
+                
+                if registration_analysis and registration_analysis.get("type") != "other":
+                    logger.info(f"✅ Datos de registro extraídos: {registration_analysis}")
+                    # Procesar como respuesta de registro
+                    return await self._handle_registration_response(tenant_id, query, user_context, registration_analysis, branding_config, session_id)
+                else:
+                    logger.info(f"⚠️ No se pudieron extraer datos de registro, continuando con clasificación normal")
+            
             # Clasificar la intencion del mensaje usando IA
             classification_result = await self.classify_intent(tenant_id, query, user_context, session_id)
             intent = classification_result.get("category", "saludo_apoyo").strip()
@@ -444,7 +468,7 @@ class AIService:
             )
             
             if cached_response:
-                processing_time = time.time() - start_time
+                processing_time = time.time() - start_time if 'start_time' in locals() else 0.0
                 logger.info(f"Respuesta servida desde caché (latencia: {processing_time:.2f}s)")
                 
                 # Agregar respuesta del bot a la sesión
@@ -541,7 +565,7 @@ class AIService:
             # Agregar respuesta del asistente a la sesión
             session_context_service.add_message(session_id, "assistant", filtered_response, metadata={"intent": intent, "confidence": confidence})
             
-            processing_time = time.time() - start_time
+            processing_time = time.time() - start_time if 'start_time' in locals() else 0.0
             
             # NUEVO: Guardar en caché si es cacheable
             response_data = {
@@ -2834,10 +2858,13 @@ INSTRUCCIONES ESPECÍFICAS:
 - Considera el contexto de la conversación anterior
 - Sé inteligente para entender frases naturales como "listo, mi nombre es Pepito Perez"
 - PRIORIDAD: Si el estado es WAITING_CITY y el mensaje contiene información de ubicación, clasifica como "city"
+- PRIORIDAD: Si el estado es WAITING_LASTNAME y el mensaje contiene apellidos, clasifica como "lastname"
 
 EJEMPLOS:
-- "listo, mi nombre es Pepito Perez Mora" -> type: "name", value: Pepito Perez Mora"
+- "listo, mi nombre es Pepito Perez Mora" -> type: "name", value: "Pepito Perez Mora"
 - "ok, es Pepito Perez" -> type: "name", value: "Pepito Perez"
+- "Te lo escribi antes Campos P" -> type: "lastname", value: "Campos P"
+- "Si ese es mi apellido" -> type: "lastname", value: "Campos P" (si se mencionó antes)
 - "vivo en Bogotá" -> type: "city", value: "Bogotá"
 - "vivo en la capital" -> type: "city", value: "Bogotá" (si es Colombia)
 - "soy de Medellín" -> type: "city", value: "Medellín"
@@ -3463,6 +3490,196 @@ Responde ÚNICAMENTE "VALIDO" o "INVALIDO" seguido de la razón si es inválido.
         Analiza un mensaje durante el proceso de registro
         """
         return await self.analyze_registration(tenant_id, message, user_context, current_state)
+
+    async def _handle_malicious_message(self, tenant_id: str, query: str, user_context: Dict[str, Any], 
+                                       malicious_detection: Dict[str, Any], session_id: str) -> Dict[str, Any]:
+        """
+        Maneja mensajes maliciosos detectados durante el proceso de registro
+        
+        Args:
+            tenant_id: ID del tenant
+            query: Mensaje malicioso del usuario
+            user_context: Contexto del usuario
+            malicious_detection: Resultado de la detección de comportamiento malicioso
+            session_id: ID de la sesión
+            
+        Returns:
+            Respuesta de bloqueo o advertencia
+        """
+        try:
+            confidence = malicious_detection.get("confidence", 0.0)
+            reason = malicious_detection.get("reason", "Comportamiento inapropiado")
+            
+            logger.warning(f"🚫 Comportamiento malicioso detectado: confianza={confidence}, razón={reason}")
+            
+            # Obtener información del usuario para logging
+            user_id = user_context.get("user_id", "unknown")
+            user_name = user_context.get("user_name", "Usuario")
+            user_state = user_context.get("user_state", "unknown")
+            
+            # Log del incidente malicioso
+            await user_blocking_service.log_malicious_incident(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                phone_number=user_context.get("phone_number", ""),
+                malicious_message=query,
+                classification_confidence=confidence
+            )
+            
+            # Determinar respuesta según el nivel de malicia
+            if confidence >= 0.8:
+                # Comportamiento muy malicioso - bloquear usuario
+                await user_blocking_service.block_user(tenant_id, user_id, reason="Comportamiento malicioso durante registro")
+                user_context["user_state"] = "BLOCKED"
+                session_context_service.update_user_context(session_id, user_context)
+                
+                response = "Tu mensaje contiene contenido inapropiado. Has sido bloqueado del sistema."
+                logger.warning(f"🚫 Usuario {user_id} bloqueado por comportamiento malicioso durante registro")
+                
+            elif confidence >= 0.6:
+                # Comportamiento moderadamente malicioso - advertencia
+                response = "Por favor, mantén un tono respetuoso. Este es un espacio para el diálogo constructivo sobre la campaña política."
+                
+            else:
+                # Comportamiento ligeramente inapropiado - redirección suave
+                response = "Entiendo que quieres participar. Por favor, comparte información constructiva sobre la campaña."
+            
+            # Agregar respuesta del bot a la sesión
+            session_context_service.add_message(session_id, "assistant", response)
+            
+            processing_time = time.time() - start_time if 'start_time' in locals() else 0.0
+            
+            return {
+                "response": response,
+                "followup_message": "",
+                "from_cache": False,
+                "processing_time": processing_time,
+                "tenant_id": tenant_id,
+                "session_id": session_id,
+                "intent": "malicioso",
+                "confidence": confidence,
+                "malicious_detection": malicious_detection,
+                "user_blocked": confidence >= 0.8
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error manejando mensaje malicioso: {str(e)}")
+            # Fallback a respuesta genérica de bloqueo
+            return {
+                "response": "Por favor, mantén un tono respetuoso en nuestras conversaciones.",
+                "followup_message": "",
+                "from_cache": False,
+                "processing_time": time.time() - start_time,
+                "tenant_id": tenant_id,
+                "session_id": session_id,
+                "intent": "malicioso",
+                "confidence": 0.0,
+                "error": str(e)
+            }
+
+    async def _handle_registration_response(self, tenant_id: str, query: str, user_context: Dict[str, Any], 
+                                           registration_analysis: Dict[str, Any], branding_config: Dict[str, Any], 
+                                           session_id: str) -> Dict[str, Any]:
+        """
+        Maneja respuestas de registro cuando el usuario está en proceso de registro
+        
+        Args:
+            tenant_id: ID del tenant
+            query: Mensaje del usuario
+            user_context: Contexto del usuario
+            registration_analysis: Análisis de la respuesta de registro
+            branding_config: Configuración de branding
+            session_id: ID de la sesión
+            
+        Returns:
+            Respuesta procesada para el usuario
+        """
+        try:
+            contact_name = branding_config.get("contactName", "el candidato")
+            data_type = registration_analysis.get("type", "other")
+            data_value = registration_analysis.get("value", "")
+            confidence = registration_analysis.get("confidence", 0.0)
+            
+            logger.info(f"🔄 Procesando respuesta de registro: tipo={data_type}, valor='{data_value}', confianza={confidence}")
+            
+            # Construir respuesta específica según el tipo de datos extraídos
+            if data_type == "name" and data_value:
+                response = f"¡Perfecto! Nombre anotado: {data_value}. Ahora necesito tu apellido:"
+                # Actualizar contexto del usuario
+                user_context["user_name"] = data_value
+                session_context_service.update_user_context(session_id, user_context)
+                
+            elif data_type == "lastname" and data_value:
+                user_name = user_context.get("user_name", "Usuario")
+                response = f"¡Perfecto, {user_name}! Apellido anotado: {data_value}. Ahora dime, ¿en qué ciudad vives?"
+                # Actualizar contexto del usuario
+                user_context["user_lastname"] = data_value
+                session_context_service.update_user_context(session_id, user_context)
+                
+            elif data_type == "city" and data_value:
+                user_name = user_context.get("user_name", "Usuario")
+                response = f"¡Excelente, {user_name}! Ciudad anotada: {data_value}. Ahora dime, ¿en qué te puedo asistir hoy desde la oficina de {contact_name}?"
+                # Actualizar contexto del usuario
+                user_context["user_city"] = data_value
+                user_context["user_state"] = "COMPLETED"  # Marcar como completado
+                session_context_service.update_user_context(session_id, user_context)
+                
+            elif data_type == "code" and data_value:
+                user_name = user_context.get("user_name", "Usuario")
+                response = f"¡Perfecto, {user_name}! Código de referido anotado: {data_value}. Ahora dime, ¿en qué te puedo asistir hoy desde la oficina de {contact_name}?"
+                # Actualizar contexto del usuario
+                user_context["referral_code"] = data_value
+                user_context["user_state"] = "COMPLETED"  # Marcar como completado
+                session_context_service.update_user_context(session_id, user_context)
+                
+            else:
+                # Si no se pudo extraer datos específicos, pedir aclaración
+                user_state = user_context.get("user_state", "")
+                if user_state == "WAITING_NAME":
+                    response = "Por favor, comparte tu nombre completo para continuar con el registro."
+                elif user_state == "WAITING_LASTNAME":
+                    response = "Perfecto, ahora necesito tu apellido para completar tu información."
+                elif user_state == "WAITING_CITY":
+                    response = "¿En qué ciudad vives? Esto nos ayuda a conectar con promotores de tu región."
+                elif user_state == "WAITING_CODE":
+                    response = "Si tienes un código de referido, compártelo. Si no, escribe 'no' para continuar."
+                else:
+                    response = "Por favor, comparte la información solicitada para continuar."
+            
+            # Agregar respuesta del bot a la sesión
+            session_context_service.add_message(session_id, "assistant", response)
+            
+            processing_time = time.time() - start_time if 'start_time' in locals() else 0.0
+            
+            return {
+                "response": response,
+                "followup_message": "",
+                "from_cache": False,
+                "processing_time": processing_time,
+                "tenant_id": tenant_id,
+                "session_id": session_id,
+                "intent": "registration_response",
+                "confidence": confidence,
+                "extracted_data": {
+                    "type": data_type,
+                    "value": data_value
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error manejando respuesta de registro: {str(e)}")
+            # Fallback a respuesta genérica
+            return {
+                "response": "Por favor, comparte la información solicitada para continuar con el registro.",
+                "followup_message": "",
+                "from_cache": False,
+                "processing_time": time.time() - start_time,
+                "tenant_id": tenant_id,
+                "session_id": session_id,
+                "intent": "registration_response",
+                "confidence": 0.0,
+                "error": str(e)
+            }
 
     async def extract_user_name_from_referral_message(self, tenant_id: str, message: str) -> Dict[str, Any]:
         """
