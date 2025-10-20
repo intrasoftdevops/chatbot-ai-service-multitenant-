@@ -20,7 +20,16 @@ from chatbot_ai_service.controllers.city_normalization_controller import router 
 import pathlib
 project_root = pathlib.Path(__file__).parent.parent.parent.parent.parent
 env_path = project_root / ".env"
+print(f"🔍 Buscando archivo .env en: {env_path}")
+print(f"📁 Archivo .env existe: {env_path.exists()}")
 load_dotenv(env_path)
+
+# Verificar que POLITICAL_REFERRALS_SERVICE_URL se cargó
+political_url = os.getenv("POLITICAL_REFERRALS_SERVICE_URL")
+if political_url:
+    print(f"✅ POLITICAL_REFERRALS_SERVICE_URL cargada: {political_url}")
+else:
+    print("❌ POLITICAL_REFERRALS_SERVICE_URL no encontrada")
 
 # Configurar logging global para que se vean logs de controllers/servicios
 log_level_str = os.getenv("LOG_LEVEL", "DEBUG").upper()
@@ -58,8 +67,12 @@ app.add_middleware(
 )
 
 # Incluir routers
-app.include_router(chat_router, prefix="/api/v1")
+app.include_router(chat_router)
 app.include_router(city_router)
+
+# Importar y agregar el nuevo controlador de clasificación de intenciones
+from chatbot_ai_service.controllers.intent_classification_controller import router as intent_classification_router
+app.include_router(intent_classification_router)
 
 @app.get("/")
 async def root():

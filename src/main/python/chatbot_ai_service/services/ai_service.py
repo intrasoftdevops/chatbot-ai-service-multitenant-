@@ -1,3 +1,18 @@
+# Cargar variables de entorno ANTES de cualquier otra cosa
+from dotenv import load_dotenv
+import pathlib
+import os
+project_root = pathlib.Path(__file__).parent.parent.parent.parent.parent
+env_path = project_root / ".env"
+load_dotenv(env_path)
+
+# Verificar que se cargó correctamente
+political_url = os.getenv("POLITICAL_REFERRALS_SERVICE_URL")
+if political_url:
+    print(f"✅ ai_service.py - POLITICAL_REFERRALS_SERVICE_URL cargada: {political_url}")
+else:
+    print("❌ ai_service.py - POLITICAL_REFERRALS_SERVICE_URL no encontrada")
+
 """
 Servicio de IA simplificado para el Chatbot AI Service
 
@@ -6,7 +21,6 @@ la configuración del proyecto Political Referrals via HTTP.
 """
 import logging
 import time
-import os
 from typing import Dict, Any, Optional, List
 
 import google.generativeai as genai
@@ -317,6 +331,9 @@ class AIService:
         print(f"INICIANDO PROCESAMIENTO: '{query}' para tenant {tenant_id}")
         start_time = time.time()
         
+        # Inicializar followup_message para evitar errores de None
+        followup_message = ""
+        
         try:
             logger.info(f"Procesando mensaje para tenant {tenant_id}, sesión: {session_id}")
             
@@ -326,6 +343,7 @@ class AIService:
                 logger.warn(f"🚫 Usuario bloqueado intentando enviar mensaje: {user_context.get('user_id', 'unknown')}")
                 return {
                     "response": "",  # No responder nada a usuarios bloqueados
+                    "followup_message": "",
                     "processing_time": time.time() - start_time,
                     "tenant_id": tenant_id,
                     "session_id": session_id,
@@ -338,6 +356,7 @@ class AIService:
             if not tenant_config:
                 return {
                     "response": "Lo siento, no puedo procesar tu mensaje en este momento.",
+                    "followup_message": "",
                     "error": "Tenant no encontrado"
                 }
             
@@ -354,6 +373,7 @@ class AIService:
             if timeout_check["status"] == "expired":
                 return {
                     "response": timeout_check["message"],
+                    "followup_message": "",
                     "intent": "session_expired",
                     "confidence": 1.0,
                     "processing_time": time.time() - start_time,
@@ -382,20 +402,29 @@ class AIService:
             
             # Clasificar la intencion del mensaje usando IA
             classification_result = await self.classify_intent(tenant_id, query, user_context, session_id)
-            intent = classification_result.get("category", "saludo_apoyo")
+            intent = classification_result.get("category", "saludo_apoyo").strip()
             confidence = classification_result.get("confidence", 0.0)
             
             # Mostrar solo la clasificacion
             print(f"🎯 INTENCIÓN: {intent}")
+            logger.info(f"🔍 DESPUÉS DE CLASIFICACIÓN - intent: '{intent}'")
+            logger.info(f"🔍 JUSTO DESPUÉS DEL PRINT - intent: '{intent}'")
+            logger.info(f"🔍 INICIANDO BLOQUE RAG")
             
             # RAG con orden correcto: primero documentos, luego fallback
             document_context = None
-            if intent == "conocer_candidato":
+            logger.info(f"🔍 ANTES DEL BLOQUE RAG - intent: '{intent}'")
+            
+            # Consultar documentos para intenciones que requieren información específica
+            intents_requiring_docs = ["conocer_candidato", "solicitud_funcional", "pregunta_especifica", "consulta_propuesta"]
+            
+            if intent in intents_requiring_docs:
                 # PRIMERO: Intentar obtener información de documentos
                 try:
                     document_context = await self._fast_rag_search(tenant_id, query, ai_config, branding_config)
                     if not document_context:
                         document_context = "gemini_direct"
+                    logger.info(f"📚 Documentos consultados para intención '{intent}'")
                 except Exception as e:
                     logger.error(f"[ERROR] Error en RAG: {e}")
                     # Solo usar fallback si hay error
@@ -403,9 +432,11 @@ class AIService:
             else:
                 logger.info(f"[OBJETIVO] Intención '{intent}' no requiere documentos, saltando carga")
             
+            logger.info(f"🔍 DESPUÉS DEL BLOQUE RAG - intent: '{intent}'")
             logger.info(f"🧠 Intención extraída: {intent} (confianza: {confidence:.2f})")
             
             # 1.5 NUEVO: Intentar obtener respuesta del caché
+            logger.info(f"🔍 ANTES DE cache_service.get_cached_response")
             cached_response = cache_service.get_cached_response(
                 tenant_id=tenant_id,
                 query=query,
@@ -421,6 +452,7 @@ class AIService:
                 
                 return {
                     **cached_response,
+                    "followup_message": "",
                     "from_cache": True,
                     "processing_time": processing_time,
                     "tenant_id": tenant_id,
@@ -431,8 +463,11 @@ class AIService:
             logger.debug(f"[LUP] VERIFICANDO INTENT: {intent}")
             
             # Obtener contexto de sesión para todas las respuestas
+            logger.info(f"🔍 ANTES DE session_context_service.build_context_for_ai")
             session_context = session_context_service.build_context_for_ai(session_id)
+            logger.info(f"🔍 DESPUÉS DE session_context_service.build_context_for_ai")
             
+            logger.info(f"🔍 EVALUANDO INTENT: '{intent}' - Tipo: {type(intent)}")
             if intent == "conocer_candidato":
                 # Generar respuesta especializada para consultas sobre el candidato
                 if document_context and document_context != "gemini_direct":
@@ -452,22 +487,41 @@ class AIService:
             elif intent == "colaboracion_voluntariado":
                 logger.info(f"[OBJETIVO] RESPUESTA RÁPIDA: colaboracion_voluntariado")
                 response = self._get_volunteer_response_with_context(branding_config, session_context)
+            elif intent == "solicitud_funcional":
+                logger.info(f"🔍 LLEGANDO AL BLOQUE solicitud_funcional - intent: '{intent}'")
+                # Respuesta específica para consultas funcionales con contexto de sesión
+                logger.info(f"🎯 PROCESANDO solicitud_funcional - llamando _handle_functional_request_with_session")
+                result = await self._handle_functional_request_with_session(
+                    query, user_context, ai_config, branding_config, tenant_id, session_id
+                )
+                
+                # Manejar el nuevo formato de respuesta (puede ser string o tupla)
+                if isinstance(result, tuple):
+                    response, followup_message = result
+                    logger.info(f"🎯 RESPUESTA GENERADA para solicitud_funcional: {len(response)} caracteres")
+                    logger.info(f"🎯 FOLLOWUP_MESSAGE generado: {len(followup_message) if followup_message else 0} caracteres")
+                else:
+                    response = result
+                    followup_message = ""
+                    logger.info(f"🎯 RESPUESTA GENERADA para solicitud_funcional: {len(response)} caracteres")
             else:
                 # Procesar según la intención clasificada con IA
+                logger.info(f"🔍 INTENT DETECTADO: '{intent}' - Iniciando procesamiento")
+                
                 if intent == "conocer_candidato":
+                    logger.info(f"🎯 PROCESANDO conocer_candidato")
                     # Respuesta específica sobre el candidato
                     response = await self._generate_ai_response_with_session(
                         query, user_context, ai_config, branding_config, tenant_id, session_id
                     )
-                elif intent == "solicitud_funcional":
-                    # Respuesta específica para consultas funcionales
-                    response = self._handle_functional_request(query, branding_config)
                 elif intent == "malicioso":
+                    logger.info(f"🎯 PROCESANDO malicioso")
                     # Manejo específico para comportamiento malicioso
                     response = await self._handle_malicious_behavior(
                         query, user_context, tenant_id, confidence
                     )
                 else:
+                    logger.info(f"🎯 PROCESANDO respuesta general para intent: '{intent}'")
                     # Respuesta general con contexto de sesión
                     response = await self._generate_ai_response_with_session(
                         query, user_context, ai_config, branding_config, tenant_id, session_id
@@ -505,6 +559,7 @@ class AIService:
             
             return {
                 "response": filtered_response,
+                "followup_message": followup_message,
                 "processing_time": processing_time,
                 "tenant_id": tenant_id,
                 "session_id": session_id,
@@ -517,6 +572,7 @@ class AIService:
             logger.error(f"Error procesando mensaje para tenant {tenant_id}: {str(e)}")
             return {
                 "response": "Lo siento, hubo un error procesando tu mensaje.",
+                "followup_message": "",
                 "error": str(e)
             }
     
@@ -1135,6 +1191,21 @@ Cada persona que se registre con tu código te suma 50 puntos al ranking. !Es un
         filtered_response = re.sub(r':\s*\.', '.', filtered_response)  # :. mal formado
         filtered_response = re.sub(r'\*\s*\.', '.', filtered_response)  # *. mal formado
         
+        # 🔧 FIX: Eliminar placeholders de enlaces que puedan aparecer
+        placeholder_patterns = [
+            r'\[ENLACE DE WHATSAPP PARA COMPARTIR\]',
+            r'\[ENLACE DE WHATSAPP\]',
+            r'\[ENLACE PARA COMPARTIR\]',
+            r'\[ENLACE\]',
+            r'\[LINK DE WHATSAPP\]',
+            r'\[LINK PARA COMPARTIR\]',
+            r'\[LINK\]',
+            r'\[URL\]',
+        ]
+        
+        for pattern in placeholder_patterns:
+            filtered_response = re.sub(pattern, '', filtered_response, flags=re.IGNORECASE)
+        
         return filtered_response.strip()
     
     def _handle_appointment_request(self, branding_config: Dict[str, Any], tenant_config: Dict[str, Any] = None) -> str:
@@ -1176,13 +1247,574 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
         
         return response
     
-    def _handle_functional_request(self, query: str, branding_config: Dict[str, Any]) -> str:
+    async def _handle_functional_request_with_session(self, query: str, user_context: Dict[str, Any], 
+                                                    ai_config: Dict[str, Any], branding_config: Dict[str, Any], 
+                                                    tenant_id: str, session_id: str) -> str:
+        """Maneja solicitudes funcionales con contexto de sesión para respuestas más naturales"""
+        try:
+            logger.info(f"🔧 INICIANDO _handle_functional_request_with_session para query: '{query}'")
+            logger.info(f"🔧 Parámetros recibidos:")
+            logger.info(f"🔧   - query: {query}")
+            logger.info(f"🔧   - tenant_id: {tenant_id}")
+            logger.info(f"🔧   - session_id: {session_id}")
+            logger.info(f"🔧   - user_context: {user_context}")
+            
+            # Obtener contexto de sesión
+            session_context = session_context_service.build_context_for_ai(session_id)
+            logger.info(f"📝 Contexto de sesión obtenido: {len(session_context) if session_context else 0} elementos")
+            
+            # Obtener nombre del contacto desde branding_config
+            contact_name = branding_config.get("contact_name", branding_config.get("contactName", "el candidato"))
+            logger.info(f"👤 Nombre del contacto: {contact_name}")
+            
+            # Intentar obtener datos reales del usuario
+            logger.info(f"🔍 Obteniendo datos del usuario para tenant: {tenant_id}")
+            logger.info(f"🔍 user_context recibido: {user_context}")
+            user_data = self._get_user_progress_data(tenant_id, user_context)
+            logger.info(f"📊 Datos del usuario obtenidos: {bool(user_data)}")
+            logger.info(f"📊 Tipo de user_data: {type(user_data)}")
+            
+            # Si no se pudieron obtener datos del servicio Java, usar datos del user_context
+            if not user_data and user_context:
+                logger.warning(f"⚠️ user_data es None, usando datos del user_context")
+                # Construir user_data desde user_context
+                user_data = {
+                    "user": {
+                        "name": user_context.get("name", "Usuario"),
+                        "city": user_context.get("city"),
+                        "state": user_context.get("state")
+                    },
+                    "points": user_context.get("points", 0),
+                    "total_referrals": user_context.get("total_referrals", 0),
+                    "completed_referrals": user_context.get("completed_referrals", []),
+                    "referral_code": user_context.get("referral_code")
+                }
+                logger.info(f"📊 user_data construido desde user_context: {user_data}")
+            elif user_data:
+                logger.info(f"📊 Detalles de user_data: {user_data}")
+            
+            if user_data:
+                # Si tenemos datos reales, crear un prompt contextualizado
+                user_name = user_data.get("user", {}).get("name", "Usuario")
+                points = user_data.get("points", 0)
+                total_referrals = user_data.get("total_referrals", 0)
+                completed_referrals = user_data.get("completed_referrals", [])
+                referral_code = user_data.get("referral_code")
+                
+                logger.info(f"🔍 Datos del usuario procesados:")
+                logger.info(f"🔍   - user_name: {user_name}")
+                logger.info(f"🔍   - points: {points}")
+                logger.info(f"🔍   - total_referrals: {total_referrals}")
+                logger.info(f"🔍   - referral_code: {referral_code}")
+                
+                # Verificar si es solicitud de enlace y generar respuesta directa
+                query_lower = query.lower().strip()
+                link_keywords = ["link", "código", "codigo", "referido", "mandame", "dame", "enlace", "compartir", "comparte", "envia", "envía", "link", "url", "mi enlace", "mi código", "mi codigo"]
+                
+                logger.info(f"🔍 Verificando palabras clave de enlace en: '{query_lower}'")
+                logger.info(f"🔍 Palabras clave: {link_keywords}")
+                logger.info(f"🔍 referral_code: {referral_code}")
+                
+                found_keywords = [word for word in link_keywords if word in query_lower]
+                logger.info(f"🔍 Palabras encontradas: {found_keywords}")
+                
+                # Verificación más robusta
+                is_link_request = (
+                    referral_code and 
+                    any(word in query_lower for word in link_keywords)
+                ) or (
+                    referral_code and 
+                    ("mi" in query_lower and ("enlace" in query_lower or "código" in query_lower or "codigo" in query_lower))
+                )
+                
+                logger.info(f"🔍 Es solicitud de enlace: {is_link_request}")
+                
+                if is_link_request:
+                    logger.info(f"🔗 NUEVO ENFOQUE: Detectada solicitud de enlace - generando respuesta con followup_message")
+                    
+                    # Generar enlace de WhatsApp
+                    whatsapp_link = self._generate_whatsapp_referral_link(user_name, referral_code, contact_name, tenant_id)
+                    
+                    if whatsapp_link:
+                        # Generar respuesta principal sin enlace
+                        points = user_data.get("points", 0)
+                        total_referrals = user_data.get("total_referrals", 0)
+                        completed_referrals = user_data.get("completed_referrals", [])
+                        
+                        response = f"""¡Claro que sí, {user_name}! 🚀 Aquí tienes la información para que sigas sumando más personas a la campaña de {contact_name}:
+
+📊 **Tu progreso actual:**
+- Puntos: {points}
+- Referidos completados: {len(completed_referrals)}
+- Total de referidos: {total_referrals}
+- Tu código: {referral_code}
+
+¡Vamos con toda, {user_name}! Con tu ayuda, llegaremos a más rincones de Colombia. 💪🇨🇴
+
+En el siguiente mensaje te envío tu enlace para compartir."""
+                        
+                        logger.info(f"✅ NUEVO ENFOQUE: Respuesta generada, enlace en followup_message")
+                        # Devolver la respuesta con el enlace en el campo followup_message
+                        return response, whatsapp_link
+                    else:
+                        logger.warning(f"⚠️ NUEVO ENFOQUE: No se pudo generar enlace de WhatsApp")
+                        response = await self._generate_content(contextual_prompt, task_type="functional_with_data")
+                        return response, None
+                else:
+                    logger.info(f"⚠️ No se detectaron palabras clave de enlace o no hay código de referido")
+                    logger.info(f"⚠️ Condición: referral_code={bool(referral_code)}, keywords_detected={any(word in query_lower for word in link_keywords)}")
+                    logger.info(f"⚠️ Query procesado: '{query_lower}'")
+                    logger.info(f"⚠️ Palabras clave disponibles: {link_keywords}")
+                    logger.info(f"⚠️ Palabras encontradas: {found_keywords}")
+                
+                # Crear prompt contextualizado con datos reales
+                contextual_prompt = self._build_functional_prompt_with_data(
+                    query, user_context, branding_config, session_context, user_data, tenant_id
+                )
+                
+                # Generar respuesta con IA usando el contexto
+                response_text = await self._generate_content(contextual_prompt, task_type="functional_with_data")
+                
+                logger.info(f"🔧 RETORNANDO respuesta desde _handle_functional_request_with_session (fallback)")
+                return response_text
+            else:
+                # Fallback: usar respuesta genérica pero con contexto de sesión
+                contextual_prompt = self._build_functional_prompt_generic(
+                    query, user_context, branding_config, session_context
+                )
+                
+                response_text = await self._generate_content(contextual_prompt, task_type="functional_generic")
+                logger.info(f"🔧 RETORNANDO respuesta desde _handle_functional_request_with_session (genérico)")
+                return response_text
+                
+        except Exception as e:
+            logger.error(f"Error manejando solicitud funcional con sesión: {str(e)}")
+            # Fallback a respuesta básica
+            return self._handle_functional_request(query, branding_config, tenant_id, user_context)
+    
+    def _build_functional_prompt_with_data(self, query: str, user_context: Dict[str, Any], 
+                                         branding_config: Dict[str, Any], session_context: str, 
+                                         user_data: Dict[str, Any], tenant_id: str = None) -> str:
+        """Construye un prompt contextualizado con datos reales del usuario"""
+        contact_name = branding_config.get("contactName", "el candidato")
+        user = user_data.get("user", {})
+        points = user_data.get("points", 0)
+        total_referrals = user_data.get("total_referrals", 0)
+        completed_referrals = user_data.get("completed_referrals", [])
+        referral_code = user_data.get("referral_code")
+        
+        user_name = user.get("name", "Usuario")
+        user_city = user.get("city", "tu ciudad")
+        user_state = user.get("state", "tu departamento")
+        
+        # Construir información de referidos
+        referrals_info = ""
+        if completed_referrals:
+            referrals_info = f"\nReferidos completados:\n"
+            for i, ref in enumerate(completed_referrals[:3], 1):  # Mostrar solo los primeros 3
+                ref_name = ref.get("name", "Usuario")
+                ref_city = ref.get("city", "ciudad")
+                referrals_info += f"- {ref_name} de {ref_city}\n"
+            if len(completed_referrals) > 3:
+                referrals_info += f"- ... y {len(completed_referrals) - 3} más\n"
+        
+        # 🔧 FIX: NO generar enlace aquí - debe manejarse en la lógica principal
+        # para evitar que aparezca en la respuesta principal
+        whatsapp_link = ""
+        query_lower = query.lower().strip()
+        link_keywords = ["link", "código", "codigo", "referido", "mandame", "dame", "enlace", "compartir", "comparte", "envia", "envía", "link", "url", "mi enlace", "mi código", "mi codigo"]
+        
+        logger.info(f"🔍 Verificando si es solicitud de enlace - Query: '{query}' - Keywords detectadas: {[kw for kw in link_keywords if kw in query_lower]}")
+        
+        # Verificación más robusta (igual que en la lógica principal)
+        is_link_request = (
+            referral_code and 
+            any(word in query_lower for word in link_keywords)
+        ) or (
+            referral_code and 
+            ("mi" in query_lower and ("enlace" in query_lower or "código" in query_lower or "codigo" in query_lower))
+        )
+        
+        if is_link_request:
+            logger.info(f"🔗 SOLICITUD DE ENLACE DETECTADA - NO incluir en prompt para evitar duplicación")
+            # NO generar enlace aquí - se manejará en la lógica principal
+        else:
+            logger.info(f"❌ No es solicitud de enlace - referral_code: {referral_code}, keywords encontradas: {[kw for kw in link_keywords if kw in query_lower]}")
+        
+        prompt = f"""Eres el asistente virtual de la campaña de {contact_name}. 
+
+CONTEXTO DE LA CONVERSACIÓN:
+{session_context}
+
+DATOS REALES DEL USUARIO:
+- Nombre: {user_name}
+- Ciudad: {user_city}
+- Departamento: {user_state}
+- Puntos actuales: {points}
+- Total de referidos: {total_referrals}
+- Referidos completados: {len(completed_referrals)}
+- Código de referido: {referral_code}
+{referrals_info}
+
+CONSULTA DEL USUARIO: "{query}"
+
+INSTRUCCIONES IMPORTANTES:
+- Responde de manera natural y conversacional, considerando el contexto de la conversación
+- Usa los datos reales del usuario para personalizar la respuesta
+- Mantén un tono motivacional y positivo
+- Si el usuario pregunta sobre puntos, muestra sus puntos reales
+- Si pregunta sobre referidos, menciona sus referidos reales
+- Incluye su código de referido si es relevante
+- Usa emojis apropiados para WhatsApp
+- Mantén la respuesta concisa pero informativa
+- **IMPORTANTE**: Si el usuario pide enlace/código/compartir, menciona que recibirá su enlace en un mensaje separado
+
+Responde de manera natural y personalizada:"""
+
+        return prompt
+    
+    def _build_functional_prompt_generic(self, query: str, user_context: Dict[str, Any], 
+                                       branding_config: Dict[str, Any], session_context: str) -> str:
+        """Construye un prompt genérico para solicitudes funcionales cuando no hay datos específicos"""
+        contact_name = branding_config.get("contactName", "el candidato")
+        
+        prompt = f"""Eres el asistente virtual de la campaña de {contact_name}.
+
+CONTEXTO DE LA CONVERSACIÓN:
+{session_context}
+
+CONSULTA DEL USUARIO: "{query}"
+
+INSTRUCCIONES:
+- Responde de manera natural y conversacional, considerando el contexto de la conversación
+- Si el usuario pregunta sobre puntos o progreso, explica cómo funciona el sistema
+- Mantén un tono motivacional y positivo
+- Usa emojis apropiados para WhatsApp
+- Mantén la respuesta concisa pero informativa
+- Si es relevante, menciona que pueden consultar su progreso específico
+
+Responde de manera natural:"""
+
+        return prompt
+    
+    def _generate_direct_link_response_with_followup(self, user_name: str, referral_code: str, contact_name: str, tenant_id: str, user_data: Dict[str, Any]) -> str:
+        """Genera una respuesta directa con información de seguimiento para segundo mensaje"""
+        try:
+            logger.info(f"🚀 INICIANDO _generate_direct_link_response_with_followup")
+            logger.info(f"🚀 Parámetros: user_name={user_name}, referral_code={referral_code}, contact_name={contact_name}, tenant_id={tenant_id}")
+            
+            # Generar enlace de WhatsApp
+            logger.info(f"🔗 Generando enlace de WhatsApp para {user_name} con código {referral_code}")
+            whatsapp_link = self._generate_whatsapp_referral_link(user_name, referral_code, contact_name, tenant_id)
+            logger.info(f"🔗 Enlace generado: {whatsapp_link}")
+            logger.info(f"🔗 Longitud del enlace: {len(whatsapp_link) if whatsapp_link else 0}")
+            
+            has_followup_link = bool(whatsapp_link and whatsapp_link.strip())
+            logger.info(f"🔗 ¿Tiene enlace válido?: {has_followup_link}")
+            logger.info(f"🔗 whatsapp_link.strip(): '{whatsapp_link.strip() if whatsapp_link else ''}'")
+            
+            # Obtener datos adicionales
+            points = user_data.get("points", 0)
+            total_referrals = user_data.get("total_referrals", 0)
+            completed_referrals = user_data.get("completed_referrals", [])
+            
+            # Generar respuesta principal (sin enlace)
+            response = f"""¡Claro que sí, {user_name}! 🚀 Aquí tienes la información para que sigas sumando más personas a la campaña de {contact_name}:
+
+📊 **Tu progreso actual:**
+- Puntos: {points}
+- Referidos completados: {len(completed_referrals)}
+- Total de referidos: {total_referrals}
+- Tu código: {referral_code}
+
+¡Vamos con toda, {user_name}! Con tu ayuda, llegaremos a más rincones de Colombia. 💪🇨🇴"""
+
+            if has_followup_link:
+                logger.info(f"🔁 Se enviará segundo mensaje con enlace (len={len(whatsapp_link)})")
+                response += "\n\nEn el siguiente mensaje te envío tu enlace para compartir."
+            
+            # Agregar información especial para el segundo mensaje solo si hay enlace
+            if has_followup_link and whatsapp_link.strip():
+                response += f"\n\n<<<FOLLOWUP_MESSAGE_START>>>{whatsapp_link}<<<FOLLOWUP_MESSAGE_END>>>"
+                logger.info(f"✅ Marcador FOLLOWUP_MESSAGE agregado con enlace válido")
+                logger.info(f"🔗 Enlace completo en marcador: {whatsapp_link}")
+            else:
+                logger.warning(f"⚠️ No se agregó marcador FOLLOWUP_MESSAGE - enlace vacío o inválido")
+                logger.warning(f"⚠️ has_followup_link: {has_followup_link}, whatsapp_link: '{whatsapp_link}'")
+            
+            logger.info(f"✅ Respuesta directa generada con seguimiento para {user_name}")
+            return response
+            
+        except Exception as e:
+            logger.error(f"❌ Error generando respuesta directa con seguimiento: {str(e)}")
+            return f"¡Hola {user_name}! Tu código de referido es: {referral_code}"
+    
+    def _generate_direct_link_response(self, user_name: str, referral_code: str, contact_name: str, tenant_id: str, user_data: Dict[str, Any]) -> str:
+        """Genera una respuesta directa con el enlace de WhatsApp cuando se solicita"""
+        try:
+            # Generar enlace de WhatsApp
+            whatsapp_link = self._generate_whatsapp_referral_link(user_name, referral_code, contact_name, tenant_id)
+            
+            if not whatsapp_link:
+                logger.error("❌ No se pudo generar enlace de WhatsApp")
+                return f"¡Hola {user_name}! Tu código de referido es: {referral_code}"
+            
+            # Obtener datos adicionales
+            points = user_data.get("points", 0)
+            total_referrals = user_data.get("total_referrals", 0)
+            completed_referrals = user_data.get("completed_referrals", [])
+            
+            # Generar respuesta directa con enlace
+            response = f"""¡Claro que sí, {user_name}! 🚀 Aquí tienes tu enlace de WhatsApp personalizado para que sigas sumando más personas a la campaña de {contact_name}:
+
+📊 **Tu progreso actual:**
+- Puntos: {points}
+- Referidos completados: {len(completed_referrals)}
+- Total de referidos: {total_referrals}
+- Tu código: {referral_code}
+
+¡Vamos con toda, {user_name}! Con tu ayuda, llegaremos a más rincones de Colombia. 💪🇨🇴
+
+En el siguiente mensaje te envío tu enlace para compartir."""
+            
+            logger.info(f"✅ Respuesta directa generada con enlace para {user_name}")
+            return response
+            
+        except Exception as e:
+            logger.error(f"❌ Error generando respuesta directa: {str(e)}")
+            return f"¡Hola {user_name}! Tu código de referido es: {referral_code}"
+    
+    def _generate_whatsapp_referral_link(self, user_name: str, referral_code: str, contact_name: str, tenant_id: str = None) -> str:
+        """Genera un enlace de WhatsApp personalizado para referidos"""
+        try:
+            # Obtener número de WhatsApp del tenant (configurable)
+            whatsapp_number = self._get_tenant_whatsapp_number(tenant_id)
+            # Validar número
+            if not whatsapp_number or not str(whatsapp_number).strip():
+                logger.warning("⚠️ No hay numero_whatsapp configurado para el tenant; no se generará enlace")
+                return ""
+            
+            logger.info(f"📱 Generando enlace con número: {whatsapp_number}")
+            
+            # Generar el texto del mensaje que el usuario compartirá
+            import urllib.parse
+            
+            # Mensaje más claro y reenviable
+            referral_text = f"Hola, vengo referido por {user_name}, codigo: {referral_code}"
+            encoded_referral_text = urllib.parse.quote(referral_text)
+            
+            # Generar el enlace de registro con parámetros para facilitar reenvío
+            registration_link = f"https://wa.me/{whatsapp_number}?text={encoded_referral_text}&context=forward&type=link"
+            
+            # Mensaje completo optimizado para reenvío (manteniendo formato original)
+            message_text = f"Amigos, soy {user_name} y quiero invitarte a unirte a la campaña de {contact_name}: {registration_link}"
+            
+            # Este es el mensaje final que se enviará (sin encoding adicional)
+            whatsapp_link = message_text
+            
+            logger.info(f"✅ Enlace de WhatsApp generado para {user_name} con código {referral_code}")
+            logger.info(f"🔗 Enlace completo: {whatsapp_link}")
+            
+            return whatsapp_link
+            
+        except Exception as e:
+            logger.error(f"❌ Error generando enlace de WhatsApp: {str(e)}")
+            return ""
+    
+    def _get_tenant_whatsapp_number(self, tenant_id: str) -> str:
+        """Obtiene el número de WhatsApp configurado para el tenant"""
+        try:
+            logger.info(f"🔍 INICIANDO _get_tenant_whatsapp_number para tenant: {tenant_id}")
+            if tenant_id:
+                logger.info(f"🌐 URL del servicio Java: {configuration_service.java_service_url}")
+                tenant_config = configuration_service.get_tenant_config(tenant_id)
+                logger.info(f"📋 Configuración del tenant {tenant_id}: {tenant_config}")
+                if tenant_config:
+                    # Aceptar claves alternativas por compatibilidad
+                    whatsapp_number = None
+                    if "numero_whatsapp" in tenant_config:
+                        whatsapp_number = tenant_config.get("numero_whatsapp")
+                        logger.info(f"📱 Encontrado numero_whatsapp: {whatsapp_number}")
+                    elif "whatsapp_number" in tenant_config:
+                        whatsapp_number = tenant_config.get("whatsapp_number")
+                        logger.info(f"📱 Encontrado whatsapp_number: {whatsapp_number}")
+
+                    if whatsapp_number and str(whatsapp_number).strip():
+                        logger.info(f"✅ Número de WhatsApp del tenant {tenant_id}: {whatsapp_number}")
+                        return str(whatsapp_number).strip()
+
+                    logger.warning(
+                        f"⚠️ No se encontró numero_whatsapp/whatsapp_number en configuración del tenant {tenant_id}. Keys disponibles: {list(tenant_config.keys())}"
+                    )
+                else:
+                    logger.warning(f"⚠️ No se pudo obtener configuración del tenant {tenant_id}")
+            else:
+                logger.warning("⚠️ tenant_id es None o vacío")
+            # Sin número configurado
+            logger.info(f"🔍 RETORNANDO cadena vacía desde _get_tenant_whatsapp_number")
+            return ""
+            
+        except Exception as e:
+            logger.warning(f"❌ Error obteniendo número de WhatsApp del tenant: {e}")
+            return ""
+    
+    def _get_user_progress_data(self, tenant_id: str, user_context: Dict[str, Any]) -> Dict[str, Any]:
+        """Obtiene los datos de progreso del usuario desde el servicio Java"""
+        try:
+            logger.info(f"🔍 _get_user_progress_data llamado con tenant_id: {tenant_id}, user_context: {user_context}")
+            
+            if not tenant_id or not user_context:
+                logger.warning("Faltan parámetros para consultar datos del usuario")
+                return None
+                
+            phone = user_context.get("phone")
+            logger.info(f"🔍 Teléfono obtenido del contexto: {phone}")
+            
+            if not phone:
+                logger.warning("No se encontró teléfono en el contexto del usuario")
+                return None
+            
+            # Obtener configuración del tenant para el client_project_id
+            tenant_config = configuration_service.get_tenant_config(tenant_id)
+            if not tenant_config:
+                logger.warning(f"No se encontró configuración para tenant {tenant_id}")
+                return None
+                
+            client_project_id = tenant_config.get("client_project_id")
+            if not client_project_id:
+                logger.warning(f"No se encontró client_project_id para tenant {tenant_id}")
+                return None
+            
+            # Consultar datos del usuario desde el servicio Java
+            import requests
+            import os
+            
+            java_service_url = os.getenv("POLITICAL_REFERRALS_SERVICE_URL")
+            logger.info(f"🔍 Java service URL: {java_service_url}")
+            if not java_service_url:
+                logger.warning("POLITICAL_REFERRALS_SERVICE_URL no configurado")
+                return None
+            
+            # Consultar usuario por teléfono
+            user_url = f"{java_service_url}/api/users/by-phone"
+            user_payload = {
+                "clientProjectId": client_project_id,
+                "phone": phone
+            }
+            
+            logger.info(f"🔍 Consultando usuario: {user_url} con payload: {user_payload}")
+            
+            user_response = requests.post(user_url, json=user_payload, timeout=10)
+            logger.info(f"🔍 Respuesta del usuario: status={user_response.status_code}")
+            if user_response.status_code != 200:
+                logger.warning(f"❌ Error consultando usuario: {user_response.status_code}")
+                logger.warning(f"❌ Response text: {user_response.text}")
+                return None
+                
+            user_data = user_response.json()
+            logger.info(f"🔍 Datos del usuario obtenidos: {user_data}")
+            if not user_data:
+                logger.warning("❌ Usuario no encontrado")
+                return None
+            
+            # Consultar referidos del usuario
+            referral_code = user_data.get("referralCode")
+            if not referral_code:
+                logger.warning("Usuario no tiene código de referido")
+                return {
+                    "user": user_data,
+                    "referrals": [],
+                    "points": 0,
+                    "referral_code": None
+                }
+            
+            # Consultar usuarios referidos por este código
+            referrals_url = f"{java_service_url}/api/users/by-referral-code"
+            referrals_payload = {
+                "clientProjectId": client_project_id,
+                "referralCode": referral_code
+            }
+            
+            logger.info(f"Consultando referidos: {referrals_url} con payload: {referrals_payload}")
+            
+            referrals_response = requests.post(referrals_url, json=referrals_payload, timeout=10)
+            referrals = []
+            
+            if referrals_response.status_code == 200:
+                referrals_data = referrals_response.json()
+                if isinstance(referrals_data, list):
+                    referrals = referrals_data
+                elif isinstance(referrals_data, dict) and referrals_data:
+                    referrals = [referrals_data]
+            
+            # Calcular puntos (50 por referido completado)
+            completed_referrals = [r for r in referrals if r.get("completed", False)]
+            points = len(completed_referrals) * 50
+            
+            return {
+                "user": user_data,
+                "referrals": referrals,
+                "completed_referrals": completed_referrals,
+                "points": points,
+                "referral_code": referral_code,
+                "total_referrals": len(referrals)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error obteniendo datos del usuario: {str(e)}")
+            return None
+    
+    def _format_user_progress_response(self, user_data: Dict[str, Any], contact_name: str) -> str:
+        """Formatea la respuesta con los datos reales del usuario"""
+        try:
+            user = user_data.get("user", {})
+            points = user_data.get("points", 0)
+            total_referrals = user_data.get("total_referrals", 0)
+            completed_referrals = user_data.get("completed_referrals", [])
+            referral_code = user_data.get("referral_code")
+            
+            user_name = user.get("name", "Usuario")
+            user_city = user.get("city", "tu ciudad")
+            
+            response = f"""🎯 **¡Hola {user_name}! Aquí está tu progreso:**
+
+[TROFEO] **Tus Puntos Actuales: {points}**
+- Referidos completados: {len(completed_referrals)}
+- Total de referidos: {total_referrals}
+- Puntos por referido: 50 puntos
+
+[GRAFICO] **Tu Ranking:**
+- Ciudad: {user_city}
+- Departamento: {user.get('state', 'N/A')}
+- País: Colombia
+
+[ENLACE] **Tu Código de Referido: {referral_code}**
+
+[OBJETIVO] **¡Sigue invitando!**
+Cada persona que se registre con tu código te suma 50 puntos más.
+
+¿Quieres que te envíe tu link personalizado para compartir?"""
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error formateando respuesta de progreso: {str(e)}")
+            return f"Error obteniendo tu progreso. Por favor intenta de nuevo."
+    
+    def _handle_functional_request(self, query: str, branding_config: Dict[str, Any], tenant_id: str = None, user_context: Dict[str, Any] = None) -> str:
         """Maneja solicitudes funcionales como '?Cómo voy?' o pedir link"""
         query_lower = query.lower()
         contact_name = branding_config.get("contactName", "el candidato")
         
         if any(word in query_lower for word in ["como voy", "cómo voy", "progreso", "puntos", "ranking"]):
-            return f"""!Excelente pregunta! Te explico cómo funciona el sistema de puntos de la campaña de {contact_name}:
+            # Intentar obtener datos reales del usuario
+            user_data = self._get_user_progress_data(tenant_id, user_context)
+            
+            if user_data:
+                return self._format_user_progress_response(user_data, contact_name)
+            else:
+                # Fallback a respuesta genérica si no se pueden obtener datos
+                return f"""!Excelente pregunta! Te explico cómo funciona el sistema de puntos de la campaña de {contact_name}:
 
 [TROFEO] **Sistema de Puntos:**
 - Cada referido registrado con tu código: **50 puntos**
@@ -1862,7 +2494,9 @@ Responde solo el JSON estricto sin comentarios:
               [ADVERTENCIA] CRÍTICO: Cualquier pregunta que contenga palabras como "propuestas", "propone", "políticas", "planes", "información", "detalles" debe clasificarse como "conocer_candidato"
             
             - actualizacion_datos: Correcciones o actualizaciones de información personal
-            - solicitud_funcional: Preguntas técnicas sobre la plataforma o sistema
+            - solicitud_funcional: [PRIORIDAD ALTA] Preguntas sobre el estado personal del usuario, progreso, puntos, enlaces, funcionalidades del sistema, o consultas sobre su cuenta/registro
+              Ejemplos: "como voy?", "dame mi enlace", "cuantos puntos tengo", "mi progreso", "mi estado", "mi cuenta", "mi registro", "como estoy?", "que tengo?", "mi información personal"
+              [ADVERTENCIA] IMPORTANTE: Si el mensaje pregunta sobre el estado personal del usuario, su progreso, puntos, enlaces o información de su cuenta -> SIEMPRE clasificar como "solicitud_funcional"
             - colaboracion_voluntariado: Ofrecimientos de apoyo activo o voluntariado
             - quejas: Reclamos constructivos sobre gestión o procesos
             - lider: Mensajes de líderes comunitarios buscando coordinación
@@ -1872,10 +2506,11 @@ Responde solo el JSON estricto sin comentarios:
             INSTRUCCIONES:
             1. Analiza la INTENCIÓN y TONO del mensaje, no solo palabras específicas
             2. Considera el CONTEXTO y PROPÓSITO del mensaje
-            3. PRIORIZA "conocer_candidato" para preguntas sobre propuestas, políticas, planes o información del candidato
-            4. Solo clasifica como "malicioso" si hay INTENCIÓN CLARA de atacar, insultar o dañar
-            5. Sé inteligente: un mensaje puede contener palabras fuertes pero tener intención constructiva
-            6. CONSIDERA EL CONTEXTO DE LA CONVERSACIÓN ANTERIOR para una clasificación más precisa
+            3. PRIORIZA "solicitud_funcional" para preguntas sobre el estado personal del usuario (progreso, puntos, enlaces, cuenta)
+            4. PRIORIZA "conocer_candidato" para preguntas sobre propuestas, políticas, planes o información del candidato
+            5. Solo clasifica como "malicioso" si hay INTENCIÓN CLARA de atacar, insultar o dañar
+            6. Sé inteligente: un mensaje puede contener palabras fuertes pero tener intención constructiva
+            7. CONSIDERA EL CONTEXTO DE LA CONVERSACIÓN ANTERIOR para una clasificación más precisa
             
             CONTEXTO DE LA CONVERSACIÓN ANTERIOR:
             {session_context if session_context else "No hay contexto de conversación anterior"}
@@ -1884,6 +2519,8 @@ Responde solo el JSON estricto sin comentarios:
             - "Donde esta la plata de?" → conocer_candidato (pregunta sobre propuestas)
             - "Que propone sobre educación?" → conocer_candidato (pregunta sobre propuestas)
             - "Cuales son sus planes?" → conocer_candidato (pregunta sobre planes)
+            - "como voy?" → solicitud_funcional (pregunta sobre estado personal del usuario)
+            - "dame mi enlace" → solicitud_funcional (solicitud de información personal)
             - "Hola, como estas?" → saludo_apoyo (saludo amigable)
             - "Eres un ladrón" → malicioso (ataque directo)
             
@@ -1918,9 +2555,19 @@ Responde solo el JSON estricto sin comentarios:
             
             category = response_text.strip().lower()
             
-            # 🔧 DEBUG: Log de la intención final
-            logger.info(f"[OK] INTENCIÓN CLASIFICADA: '{category}'")
-            print(f"🎯 INTENCIÓN DETECTADA: '{category}'")
+            # 🔧 FIX: Detectar si Gemini fue bloqueado por safety filters
+            if category in ["hola, ¿en qué puedo ayudarte hoy?", "lo siento, no puedo procesar esa consulta en este momento. por favor, intenta reformular tu pregunta de manera más específica."]:
+                logger.warning(f"[ADVERTENCIA] Gemini bloqueado por safety filters, usando clasificación de fallback para mensaje original")
+                print(f"⚠️ GEMINI BLOQUEADO - Usando clasificación de fallback para: '{message}'")
+                
+                # Usar clasificación de fallback basada en el mensaje original
+                category = self._fallback_intent_classification(message)
+                logger.info(f"[FALLBACK] Categoría detectada por fallback: '{category}'")
+                print(f"🎯 INTENCIÓN DETECTADA (FALLBACK): '{category}'")
+            else:
+                # 🔧 DEBUG: Log de la intención final
+                logger.info(f"[OK] INTENCIÓN CLASIFICADA: '{category}'")
+                print(f"🎯 INTENCIÓN DETECTADA: '{category}'")
             
             # Validar categoría
             valid_categories = [
@@ -1952,6 +2599,95 @@ Responde solo el JSON estricto sin comentarios:
                 "confidence": 0.0,
                 "original_message": message
             }
+    
+    def _fallback_intent_classification(self, message: str) -> str:
+        """
+        Clasificación de fallback cuando Gemini está bloqueado por safety filters
+        Basada en análisis de palabras clave del mensaje original
+        """
+        message_lower = message.lower().strip()
+        
+        # Detectar solicitudes funcionales (alta prioridad)
+        functional_keywords = [
+            "como voy", "como estoy", "mi progreso", "mi estado", "mi cuenta", 
+            "mi registro", "mi información", "dame mi", "quiero mi", "necesito mi",
+            "mi enlace", "mi código", "mi codigo", "cuantos puntos", "mis puntos",
+            "mi ranking", "mi posición", "mi lugar"
+        ]
+        
+        if any(keyword in message_lower for keyword in functional_keywords):
+            return "solicitud_funcional"
+        
+        # Detectar preguntas sobre el candidato
+        candidate_keywords = [
+            "que propone", "cuales son sus", "que planes", "que opina", 
+            "cual es su", "información sobre", "detalles sobre", "propuestas",
+            "políticas", "planes", "experiencia", "trayectoria", "biografia"
+        ]
+        
+        if any(keyword in message_lower for keyword in candidate_keywords):
+            return "conocer_candidato"
+        
+        # Detectar solicitudes de cita
+        appointment_keywords = [
+            "cita", "reunión", "agendar", "coordinar", "hablar con", 
+            "encontrarme", "reunirme", "encuentro"
+        ]
+        
+        if any(keyword in message_lower for keyword in appointment_keywords):
+            return "cita_campaña"
+        
+        # Detectar saludos
+        greeting_keywords = [
+            "hola", "buenos días", "buenas tardes", "buenas noches", 
+            "saludos", "como estas", "como estas?", "que tal"
+        ]
+        
+        if any(keyword in message_lower for keyword in greeting_keywords):
+            return "saludo_apoyo"
+        
+        # Detectar atención humana
+        human_keywords = [
+            "persona real", "humano", "asesor", "agente humano", 
+            "hablar con alguien", "atencion humana"
+        ]
+        
+        if any(keyword in message_lower for keyword in human_keywords):
+            return "atencion_humano"
+        
+        # Detectar colaboración/voluntariado
+        volunteer_keywords = [
+            "ayudar", "colaborar", "voluntario", "apoyar", "trabajar",
+            "participar", "sumarme", "unirme"
+        ]
+        
+        if any(keyword in message_lower for keyword in volunteer_keywords):
+            return "colaboracion_voluntariado"
+        
+        # Detectar quejas
+        complaint_keywords = [
+            "queja", "reclamo", "problema", "mal servicio", "no funciona",
+            "error", "falla", "defecto"
+        ]
+        
+        if any(keyword in message_lower for keyword in complaint_keywords):
+            return "quejas"
+        
+        # Detectar publicidad/información
+        info_keywords = [
+            "publicidad", "materiales", "folletos", "información", 
+            "difusión", "promoción", "marketing"
+        ]
+        
+        if any(keyword in message_lower for keyword in info_keywords):
+            return "publicidad_info"
+        
+        # Por defecto, clasificar como solicitud funcional si contiene preguntas
+        if "?" in message or any(word in message_lower for word in ["como", "que", "cual", "donde", "cuando", "por que"]):
+            return "solicitud_funcional"
+        
+        # Por defecto, saludo de apoyo
+        return "saludo_apoyo"
     
     async def _extract_with_ai(self, message: str, data_type: str) -> Dict[str, Any]:
         """Extrae datos usando IA"""
@@ -2538,22 +3274,27 @@ Si tienes alguna pregunta específica sobre la reunión o necesitas ayuda con el
                     4. Si es la primera interacción, da la bienvenida
                     5. Mantén un tono amigable y profesional
                     6. Responde en máximo 200 caracteres
+                    7. **PROHIBIDO**: NUNCA uses placeholders como [TU_ENLACE_PERSONAL_AQUÍ], [ENLACE], [LINK], etc.
+                    8. **IMPORTANTE**: Responde solo con texto natural, sin enlaces ni placeholders
                     
                     Responde de manera natural y contextual:
                     """
                     
                     response = self.model.generate_content(prompt)
-                    return response.text.strip()
+                    filtered_response = self._filter_links_from_response(response.text.strip())
+                    return filtered_response
             except Exception as e:
                 logger.warning(f"Error generando saludo contextual: {e}")
         
         # Fallback: respuesta genérica
         if session_context:
-            return f"""¡Hola! Me da mucho gusto verte de nuevo. ¿En qué más puedo ayudarte hoy con información sobre {contact_name} y sus propuestas?"""
+            fallback_response = f"""¡Hola! Me da mucho gusto verte de nuevo. ¿En qué más puedo ayudarte hoy con información sobre {contact_name} y sus propuestas?"""
+            return self._filter_links_from_response(fallback_response)
         else:
-            return f"""¡Hola! Te doy la bienvenida a nuestra campaña: {contact_name}!!! 
+            fallback_response = f"""¡Hola! Te doy la bienvenida a nuestra campaña: {contact_name}!!! 
             
 ¿En qué puedo ayudarte hoy? Puedo responder tus preguntas sobre nuestras propuestas, ayudarte a agendar una cita, o conectarte con nuestro equipo."""
+            return self._filter_links_from_response(fallback_response)
     
     def _get_volunteer_response_with_context(self, branding_config: Dict[str, Any], session_context: str = "") -> str:
         """Genera respuesta de voluntariado con contexto de sesión"""
@@ -2568,6 +3309,249 @@ Tu apoyo es fundamental para el cambio que queremos lograr. Te puedo ayudar a co
             return f"""¡Excelente! {contact_name} valora mucho el apoyo de personas como tú. 
             
 Te puedo ayudar a conectarte con nuestro equipo de voluntarios. ¿Te gustaría que te ayude a agendar una reunión o tienes alguna pregunta específica sobre cómo participar?"""
+
+
+    async def validate_user_data(self, tenant_id: str, data: str, data_type: str) -> Dict[str, Any]:
+        """
+        Valida datos de usuario usando IA
+        
+        Args:
+            tenant_id: ID del tenant
+            data: Datos a validar
+            data_type: Tipo de dato (name, lastname, city, etc.)
+            
+        Returns:
+            Dict con resultado de validación
+        """
+        self._ensure_model_initialized()
+        
+        if not self.model:
+            return {
+                "is_valid": False,
+                "confidence": 0.0,
+                "reason": "Servicio de IA no disponible",
+                "suggestions": []
+            }
+        
+        try:
+            # Crear prompt específico según el tipo de dato
+            if data_type == "name":
+                prompt = f"""
+Analiza si el siguiente texto es un nombre válido de persona:
+
+Texto: "{data}"
+
+Un nombre válido debe:
+- Contener solo letras, espacios, guiones, apostrofes y puntos
+- Tener entre 2 y 50 caracteres
+- NO contener números (excepto en casos especiales como "María José")
+- NO ser una palabra común del español como "referido", "gracias", "hola", etc.
+- NO ser un código alfanumérico
+
+Responde ÚNICAMENTE "VALIDO" o "INVALIDO" seguido de la razón si es inválido.
+
+Ejemplos:
+- "Juan" -> VALIDO
+- "María José" -> VALIDO
+- "José María" -> VALIDO
+- "SANTIAGO" -> VALIDO
+- "K351ERXL" -> INVALIDO (es un código, no un nombre)
+- "referido" -> INVALIDO (palabra común)
+- "12345678" -> INVALIDO (solo números)
+"""
+            elif data_type == "lastname":
+                prompt = f"""
+Analiza si el siguiente texto es un apellido válido de persona:
+
+Texto: "{data}"
+
+Un apellido válido debe:
+- Contener solo letras, espacios, guiones, apostrofes y puntos
+- Tener entre 2 y 50 caracteres
+- NO contener números (excepto en casos especiales)
+- NO ser una palabra común del español como "referido", "gracias", "hola", etc.
+- NO ser un código alfanumérico
+
+Responde ÚNICAMENTE "VALIDO" o "INVALIDO" seguido de la razón si es inválido.
+
+Ejemplos:
+- "García" -> VALIDO
+- "García López" -> VALIDO
+- "Pérez" -> VALIDO
+- "K351ERXL" -> INVALIDO (es un código, no un apellido)
+- "referido" -> INVALIDO (palabra común)
+"""
+            elif data_type == "city":
+                prompt = f"""
+Analiza si el siguiente texto es una ciudad válida de Colombia:
+
+Texto: "{data}"
+
+Una ciudad válida debe:
+- Contener solo letras, espacios, guiones, apostrofes y puntos
+- Tener entre 2 y 100 caracteres
+- NO contener números (excepto en casos especiales como "San José del Guaviare")
+- NO ser una palabra común del español como "referido", "gracias", "hola", etc.
+- NO ser un código alfanumérico
+- Ser una ciudad real de Colombia
+
+Responde ÚNICAMENTE "VALIDO" o "INVALIDO" seguido de la razón si es inválido.
+
+Ejemplos:
+- "Bogotá" -> VALIDO
+- "Medellín" -> VALIDO
+- "Cali" -> VALIDO
+- "Soacha" -> VALIDO
+- "K351ERXL" -> INVALIDO (es un código, no una ciudad)
+- "referido" -> INVALIDO (palabra común)
+"""
+            else:
+                # Validación genérica
+                prompt = f"""
+Analiza si el siguiente texto es válido para el tipo de dato "{data_type}":
+
+Texto: "{data}"
+
+El texto debe:
+- Contener solo letras, espacios, guiones, apostrofes y puntos
+- Tener entre 2 y 100 caracteres
+- NO ser una palabra común del español como "referido", "gracias", "hola", etc.
+- NO ser un código alfanumérico
+
+Responde ÚNICAMENTE "VALIDO" o "INVALIDO" seguido de la razón si es inválido.
+"""
+            
+            response_text = await self._generate_content(prompt)
+            
+            if not response_text:
+                return {
+                    "is_valid": False,
+                    "confidence": 0.0,
+                    "reason": "No se pudo obtener respuesta de la IA",
+                    "suggestions": []
+                }
+            
+            response_upper = response_text.strip().upper()
+            
+            if "VALIDO" in response_upper:
+                return {
+                    "is_valid": True,
+                    "confidence": 0.9,
+                    "reason": "Datos válidos según IA",
+                    "suggestions": []
+                }
+            else:
+                reason = response_text.strip()
+                return {
+                    "is_valid": False,
+                    "confidence": 0.8,
+                    "reason": reason,
+                    "suggestions": []
+                }
+                
+        except Exception as e:
+            logger.error(f"Error validando datos con IA: {str(e)}")
+            return {
+                "is_valid": False,
+                "confidence": 0.0,
+                "reason": f"Error en validación: {str(e)}",
+                "suggestions": []
+            }
+
+    async def analyze_registration_message(self, tenant_id: str, message: str, user_context: Dict[str, Any], current_state: str) -> Dict[str, Any]:
+        """
+        Analiza un mensaje durante el proceso de registro
+        """
+        return await self.analyze_registration(tenant_id, message, user_context, current_state)
+
+    async def extract_user_name_from_referral_message(self, tenant_id: str, message: str) -> Dict[str, Any]:
+        """
+        Extrae el nombre del usuario de un mensaje que contiene un código de referido
+        
+        Args:
+            tenant_id: ID del tenant
+            message: Mensaje que contiene código de referido
+            
+        Returns:
+            Dict con el nombre extraído y validación
+        """
+        self._ensure_model_initialized()
+        
+        if not self.model:
+            return {
+                "name": None,
+                "is_valid": False,
+                "confidence": 0.0,
+                "reason": "Servicio de IA no disponible"
+            }
+        
+        try:
+            prompt = f"""
+Analiza el siguiente mensaje y extrae SOLO el nombre de la persona que se está registrando:
+
+Mensaje: "{message}"
+
+IMPORTANTE:
+- El mensaje puede contener un código de referido
+- El mensaje puede mencionar a la persona que refiere
+- Debes extraer SOLO el nombre de quien se está registrando, NO de quien refiere
+- Si el mensaje no contiene un nombre claro del usuario, responde "NO_NAME"
+
+Ejemplos:
+- "Hola, vengo referido por Juan, codigo: ABC123" -> El usuario NO menciona su nombre, debe responder "NO_NAME"
+- "Soy María, vengo referido por Juan, codigo: ABC123" -> El nombre es "María"
+- "Me llamo Carlos, codigo: DEF456" -> El nombre es "Carlos"
+- "Hola, soy Ana García, vengo referido por Pedro, codigo: GHI789" -> El nombre es "Ana García"
+
+Responde ÚNICAMENTE el nombre extraído o "NO_NAME" si no se puede determinar.
+"""
+
+            response_text = await self._generate_content(prompt)
+            
+            if not response_text:
+                return {
+                    "name": None,
+                    "is_valid": False,
+                    "confidence": 0.0,
+                    "reason": "No se pudo obtener respuesta de la IA"
+                }
+            
+            response_clean = response_text.strip()
+            
+            if response_clean.upper() == "NO_NAME":
+                return {
+                    "name": None,
+                    "is_valid": False,
+                    "confidence": 0.9,
+                    "reason": "El mensaje no contiene el nombre del usuario"
+                }
+            
+            # Validar que el nombre extraído es válido
+            validation_result = await self.validate_user_data(tenant_id, response_clean, "name")
+            
+            if validation_result.get("is_valid", False):
+                return {
+                    "name": response_clean,
+                    "is_valid": True,
+                    "confidence": validation_result.get("confidence", 0.8),
+                    "reason": "Nombre extraído y validado correctamente"
+                }
+            else:
+                return {
+                    "name": response_clean,
+                    "is_valid": False,
+                    "confidence": validation_result.get("confidence", 0.5),
+                    "reason": f"Nombre extraído pero no válido: {validation_result.get('reason', '')}"
+                }
+                
+        except Exception as e:
+            logger.error(f"Error extrayendo nombre del mensaje con IA: {str(e)}")
+            return {
+                "name": None,
+                "is_valid": False,
+                "confidence": 0.0,
+                "reason": f"Error en extracción: {str(e)}"
+            }
 
 
 # Instancia global para compatibilidad

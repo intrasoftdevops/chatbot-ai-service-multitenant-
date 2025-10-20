@@ -70,31 +70,48 @@ class GeminiClient:
                 # Configuración básica para Gemini AI
                 genai.configure(api_key=self.api_key)
                 
-                # 🔧 FIX: Configurar safety settings para evitar bloqueos
-                safety_settings = [
-                    genai.types.SafetySetting(
-                        category=genai.types.HarmCategory.HARM_CATEGORY_HARASSMENT,
-                        threshold=genai.types.HarmBlockThreshold.BLOCK_NONE
-                    ),
-                    genai.types.SafetySetting(
-                        category=genai.types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-                        threshold=genai.types.HarmBlockThreshold.BLOCK_NONE
-                    ),
-                    genai.types.SafetySetting(
-                        category=genai.types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-                        threshold=genai.types.HarmBlockThreshold.BLOCK_NONE
-                    ),
-                    genai.types.SafetySetting(
-                        category=genai.types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-                        threshold=genai.types.HarmBlockThreshold.BLOCK_NONE
-                    )
-                ]
+                # 🔧 FIX: Configurar safety settings más permisivos para evitar bloqueos
+                try:
+                    # Usar configuración muy permisiva para evitar bloqueos excesivos
+                    safety_settings = [
+                        {
+                            "category": "HARM_CATEGORY_HARASSMENT",
+                            "threshold": "BLOCK_ONLY_HIGH"
+                        },
+                        {
+                            "category": "HARM_CATEGORY_HATE_SPEECH", 
+                            "threshold": "BLOCK_ONLY_HIGH"
+                        },
+                        {
+                            "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                            "threshold": "BLOCK_ONLY_HIGH"
+                        },
+                        {
+                            "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                            "threshold": "BLOCK_ONLY_HIGH"
+                        }
+                    ]
+                    logger.info("✅ Safety settings configurados con BLOCK_ONLY_HIGH")
+                except Exception as e:
+                    logger.warning(f"⚠️ No se pudieron configurar safety settings: {str(e)}")
+                    safety_settings = None
                 
-                self.model = genai.GenerativeModel(
-                    'gemini-2.0-flash',
-                    safety_settings=safety_settings
-                )
-                logger.info("✅ Modelo Gemini inicializado correctamente en GeminiClient con safety settings")
+                # Probar modelos desde el más moderno hacia atrás
+                models_to_try = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro']
+                
+                for model_name in models_to_try:
+                    try:
+                        self.model = genai.GenerativeModel(
+                            model_name,
+                            safety_settings=safety_settings
+                        )
+                        logger.info(f"✅ Modelo {model_name} inicializado correctamente en GeminiClient con safety settings")
+                        break
+                    except Exception as model_error:
+                        logger.warning(f"⚠️ Modelo {model_name} no disponible: {str(model_error)}")
+                        if model_name == models_to_try[-1]:  # Si es el último modelo
+                            logger.error(f"❌ Ningún modelo de Gemini está disponible")
+                            self.model = None
             except Exception as e:
                 logger.error(f"❌ Error inicializando modelo Gemini: {str(e)}")
                 self.model = None
@@ -135,11 +152,11 @@ class GeminiClient:
                         logger.debug(f"🔍 Finish reason: {candidate.finish_reason}")
                         # finish_reason=2 corresponde a SAFETY
                         if str(candidate.finish_reason) in ['SAFETY', '3', '2']:  # 2 = SAFETY enum value
-                            logger.error(f"❌ Respuesta bloqueada por safety filters. Finish reason: {candidate.finish_reason}")
+                            logger.warning(f"⚠️ Respuesta bloqueada por safety filters. Finish reason: {candidate.finish_reason}")
                             if hasattr(candidate, 'safety_ratings'):
-                                logger.error(f"   Safety ratings: {candidate.safety_ratings}")
-                            # Intentar una respuesta más específica basada en el contexto
-                            return "Lo siento, no puedo procesar esa consulta en este momento. Por favor, intenta reformular tu pregunta de manera más específica."
+                                logger.warning(f"   Safety ratings: {candidate.safety_ratings}")
+                            # Retornar respuesta más genérica y menos específica
+                            return "Hola, ¿en qué puedo ayudarte hoy?"
                     
                     if hasattr(candidate, 'content') and candidate.content:
                         content = candidate.content
@@ -173,9 +190,9 @@ class GeminiClient:
                     if hasattr(candidate, 'finish_reason'):
                         finish_reason = str(candidate.finish_reason)
                         if finish_reason in ['2', '3']:  # SAFETY
-                            return "Lo siento, no puedo procesar esa consulta en este momento. Por favor, intenta reformular tu pregunta."
+                            return "Hola, ¿en qué puedo ayudarte hoy?"
                         elif finish_reason == '1':  # STOP (normal)
-                            return "Lo siento, no pude generar una respuesta completa. Por favor, intenta de nuevo."
+                            return "Hola, ¿en qué puedo ayudarte hoy?"
                         else:
                             logger.warning(f"⚠️ Finish reason inesperado: {finish_reason}")
                 
@@ -302,33 +319,53 @@ class GeminiClient:
             
             # Crear modelo SIN generation_config (siguiendo recomendación de comunidad)
             # Los configs se pasarán directamente en generate_content()
-            model_name = config.get("model_name", "gemini-2.0-flash")
+            model_name = config.get("model_name", "gemini-2.5-flash")
             
-            # 🔧 FIX: Configurar safety settings para evitar bloqueos
-            safety_settings = [
-                genai.types.SafetySetting(
-                    category=genai.types.HarmCategory.HARM_CATEGORY_HARASSMENT,
-                    threshold=genai.types.HarmBlockThreshold.BLOCK_NONE
-                ),
-                genai.types.SafetySetting(
-                    category=genai.types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-                    threshold=genai.types.HarmBlockThreshold.BLOCK_NONE
-                ),
-                genai.types.SafetySetting(
-                    category=genai.types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-                    threshold=genai.types.HarmBlockThreshold.BLOCK_NONE
-                ),
-                genai.types.SafetySetting(
-                    category=genai.types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-                    threshold=genai.types.HarmBlockThreshold.BLOCK_NONE
-                )
-            ]
+            # 🔧 FIX: Configurar safety settings más permisivos para evitar bloqueos
+            try:
+                # Usar configuración más permisiva para evitar bloqueos excesivos
+                safety_settings = [
+                    {
+                        "category": "HARM_CATEGORY_HARASSMENT",
+                        "threshold": "BLOCK_ONLY_HIGH"
+                    },
+                    {
+                        "category": "HARM_CATEGORY_HATE_SPEECH", 
+                        "threshold": "BLOCK_ONLY_HIGH"
+                    },
+                    {
+                        "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                        "threshold": "BLOCK_ONLY_HIGH"
+                    },
+                    {
+                        "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                        "threshold": "BLOCK_ONLY_HIGH"
+                    }
+                ]
+                logger.info("✅ Safety settings configurados con BLOCK_ONLY_HIGH (más permisivo)")
+            except Exception as e:
+                logger.warning(f"⚠️ No se pudieron configurar safety settings: {str(e)}")
+                safety_settings = None
             
-            # Crear modelo con safety settings
-            model = genai.GenerativeModel(
-                model_name=model_name,
-                safety_settings=safety_settings
-            )
+            # Crear modelo con safety settings, probando desde el más moderno
+            models_to_try = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro']
+            if model_name in models_to_try:
+                models_to_try = [model_name] + [m for m in models_to_try if m != model_name]
+            
+            model = None
+            for try_model_name in models_to_try:
+                try:
+                    model = genai.GenerativeModel(
+                        model_name=try_model_name,
+                        safety_settings=safety_settings
+                    )
+                    logger.info(f"✅ Modelo {try_model_name} creado exitosamente")
+                    break
+                except Exception as model_error:
+                    logger.warning(f"⚠️ Modelo {try_model_name} no disponible: {str(model_error)}")
+                    if try_model_name == models_to_try[-1]:  # Si es el último modelo
+                        logger.error(f"❌ Ningún modelo de Gemini está disponible para la configuración")
+                        model = None
             
             # Guardar modelo Y configuración en cache (juntos)
             self.models_cache[config_hash] = {

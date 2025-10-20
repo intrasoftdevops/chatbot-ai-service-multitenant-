@@ -51,7 +51,7 @@ MODEL_CONFIGS: Dict[str, Dict[str, Any]] = {
     # EXTRACCIÓN DE DATOS
     # ──────────────────────────────────────────────────────────────────────────
     "data_extraction": {
-        "model_name": "gemini-2.0-flash",  # 🔧 FIX: Cambiar a modelo disponible
+        "model_name": "gemini-2.5-flash",  # 🔧 FIX: Probar modelo más moderno
         "temperature": 0.0,  # Determinístico
         "top_p": 0.1,
         "top_k": 1,
@@ -64,7 +64,7 @@ MODEL_CONFIGS: Dict[str, Dict[str, Any]] = {
     # VALIDACIÓN DE DATOS
     # ──────────────────────────────────────────────────────────────────────────
     "data_validation": {
-        "model_name": "gemini-2.0-flash",  # 🔧 FIX: Cambiar a modelo disponible
+        "model_name": "gemini-2.5-flash",  # 🔧 FIX: Probar modelo más moderno
         "temperature": 0.0,  # Determinístico
         "top_p": 0.1,
         "top_k": 1,
@@ -77,7 +77,7 @@ MODEL_CONFIGS: Dict[str, Dict[str, Any]] = {
     # ANÁLISIS DE DOCUMENTOS
     # ──────────────────────────────────────────────────────────────────────────
     "document_analysis": {
-        "model_name": "gemini-2.0-flash",  # 🔧 FIX: Cambiar a modelo disponible
+        "model_name": "gemini-2.5-flash",  # 🔧 FIX: Probar modelo más moderno
         "temperature": 0.1,  # Casi determinístico, pero con algo de creatividad
         "top_p": 0.9,
         "top_k": 40,
@@ -89,7 +89,7 @@ MODEL_CONFIGS: Dict[str, Dict[str, Any]] = {
     # DETECCIÓN DE COMPORTAMIENTO MALICIOSO
     # ──────────────────────────────────────────────────────────────────────────
     "malicious_detection": {
-        "model_name": "gemini-2.0-flash",  # 🔧 FIX: Cambiar a modelo disponible
+        "model_name": "gemini-2.5-flash",  # 🔧 FIX: Probar modelo más moderno
         "temperature": 0.0,  # Muy estricto
         "top_p": 0.1,
         "top_k": 1,
@@ -102,7 +102,7 @@ MODEL_CONFIGS: Dict[str, Dict[str, Any]] = {
     # ANÁLISIS DE REGISTRO
     # ──────────────────────────────────────────────────────────────────────────
     "registration_analysis": {
-        "model_name": "gemini-2.0-flash",  # 🔧 FIX: Cambiar a modelo disponible
+        "model_name": "gemini-2.5-flash",  # 🔧 FIX: Probar modelo más moderno
         "temperature": 0.1,  # Casi determinístico
         "top_p": 0.2,
         "top_k": 5,

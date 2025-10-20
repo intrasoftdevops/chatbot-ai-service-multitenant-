@@ -129,7 +129,7 @@ class RAGOrchestrator:
         queries: List[str], 
         tenant_id: str,
         max_results: int = 5
-    ) -> List[RetrievedDocument]:
+    ) -> List[SearchResult]:
         """
         Recupera documentos relevantes para los queries
         
@@ -158,13 +158,13 @@ class RAGOrchestrator:
                 unique_docs[doc.doc_id] = doc
             else:
                 # Si ya existe, mantener el de mayor score
-                if doc.combined_score > unique_docs[doc.doc_id].combined_score:
+                if doc.score > unique_docs[doc.doc_id].score:
                     unique_docs[doc.doc_id] = doc
         
         # Ordenar por score y retornar top N
         final_docs = sorted(
             unique_docs.values(), 
-            key=lambda x: x.combined_score, 
+            key=lambda x: x.score, 
             reverse=True
         )[:max_results]
         
@@ -173,7 +173,7 @@ class RAGOrchestrator:
     
     def _build_rag_context(
         self, 
-        documents: List[RetrievedDocument],
+        documents: List[SearchResult],
         max_context_length: int = 3000
     ) -> str:
         """
@@ -193,7 +193,7 @@ class RAGOrchestrator:
         current_length = 0
         
         for i, doc in enumerate(documents, 1):
-            doc_text = f"[Documento {i}] {doc.title}\n{doc.content}\n"
+            doc_text = f"[Documento {i}] {doc.filename}\n{doc.content}\n"
             
             # Verificar si agregar este documento excede el límite
             if current_length + len(doc_text) > max_context_length:
