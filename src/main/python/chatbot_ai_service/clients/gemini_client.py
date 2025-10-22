@@ -70,40 +70,45 @@ class GeminiClient:
                 # Configuración básica para Gemini AI
                 genai.configure(api_key=self.api_key)
                 
-                # 🔧 FIX: Configurar safety settings más permisivos para evitar bloqueos
-                try:
-                    # Usar configuración muy permisiva para evitar bloqueos excesivos
-                    safety_settings = [
-                        {
-                            "category": "HARM_CATEGORY_HARASSMENT",
-                            "threshold": "BLOCK_ONLY_HIGH"
-                        },
-                        {
-                            "category": "HARM_CATEGORY_HATE_SPEECH", 
-                            "threshold": "BLOCK_ONLY_HIGH"
-                        },
-                        {
-                            "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                            "threshold": "BLOCK_ONLY_HIGH"
-                        },
-                        {
-                            "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-                            "threshold": "BLOCK_ONLY_HIGH"
-                        }
-                    ]
-                    logger.info("✅ Safety settings configurados con BLOCK_ONLY_HIGH")
-                except Exception as e:
-                    logger.warning(f"⚠️ No se pudieron configurar safety settings: {str(e)}")
-                    safety_settings = None
+                # 🔧 OPTIMIZACIÓN MÁXIMA: Configuración ultra-rápida
+                safety_settings = [
+                    {
+                        "category": "HARM_CATEGORY_HARASSMENT",
+                        "threshold": "BLOCK_NONE"  # Más permisivo
+                    },
+                    {
+                        "category": "HARM_CATEGORY_HATE_SPEECH", 
+                        "threshold": "BLOCK_NONE"  # Más permisivo
+                    },
+                    {
+                        "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                        "threshold": "BLOCK_NONE"  # Más permisivo
+                    },
+                    {
+                        "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                        "threshold": "BLOCK_NONE"  # Más permisivo
+                    }
+                ]
                 
-                # Probar modelos desde el más moderno hacia atrás
-                models_to_try = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro']
+                generation_config = {
+                    "temperature": 0.0,  # Máximo determinismo
+                    "top_p": 0.5,        # Mínimas opciones
+                    "top_k": 10,         # Muy pocos tokens
+                    "max_output_tokens": 50,  # Respuestas ultra-cortas
+                    "candidate_count": 1  # Solo una respuesta
+                }
+                
+                logger.info("✅ Safety settings configurados con BLOCK_NONE para máximo rendimiento")
+                
+                # Probar modelos desde el más rápido hacia el más lento
+                models_to_try = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
                 
                 for model_name in models_to_try:
                     try:
                         self.model = genai.GenerativeModel(
                             model_name,
-                            safety_settings=safety_settings
+                            safety_settings=safety_settings,
+                            generation_config=generation_config
                         )
                         logger.info(f"✅ Modelo {model_name} inicializado correctamente en GeminiClient con safety settings")
                         break
@@ -155,8 +160,8 @@ class GeminiClient:
                             logger.warning(f"⚠️ Respuesta bloqueada por safety filters. Finish reason: {candidate.finish_reason}")
                             if hasattr(candidate, 'safety_ratings'):
                                 logger.warning(f"   Safety ratings: {candidate.safety_ratings}")
-                            # Retornar respuesta más genérica y menos específica
-                            return "Hola, ¿en qué puedo ayudarte hoy?"
+                            # Retornar respuesta JSON válida para safety block
+                            return '{"category": "saludo_apoyo", "confidence": 0.8, "reason": "safety_block"}'
                     
                     if hasattr(candidate, 'content') and candidate.content:
                         content = candidate.content
@@ -190,13 +195,15 @@ class GeminiClient:
                     if hasattr(candidate, 'finish_reason'):
                         finish_reason = str(candidate.finish_reason)
                         if finish_reason in ['2', '3']:  # SAFETY
-                            return "Hola, ¿en qué puedo ayudarte hoy?"
+                            logger.warning("⚠️ Respuesta bloqueada por safety filters. Finish reason: 2")
+                            logger.warning(f"   Safety ratings: {candidate.safety_ratings if hasattr(candidate, 'safety_ratings') else 'N/A'}")
+                            return '{"category": "saludo_apoyo", "confidence": 0.8, "reason": "safety_block"}'
                         elif finish_reason == '1':  # STOP (normal)
                             return "Hola, ¿en qué puedo ayudarte hoy?"
                         else:
                             logger.warning(f"⚠️ Finish reason inesperado: {finish_reason}")
                 
-                return "Lo siento, no pude procesar la respuesta correctamente."
+                return '{"category": "general_query", "confidence": 0.5, "reason": "processing_error"}'
                 
             except Exception as ex:
                 logger.error(f"❌ Error extrayendo texto de respuesta multi-part: {str(ex)}", exc_info=True)

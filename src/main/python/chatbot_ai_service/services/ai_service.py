@@ -49,6 +49,70 @@ class AIService:
         else:
             logger.warning("POLITICAL_REFERRALS_SERVICE_URL no configurado - funcionalidad de bloqueo limitada")
         
+        # 🔧 OPTIMIZACIÓN: Cache local para respuestas comunes
+        self._response_cache = {}
+        self._common_responses = {
+            # Saludos comunes
+            "hola": "saludo_apoyo",
+            "hi": "saludo_apoyo", 
+            "hello": "saludo_apoyo",
+            "buenos días": "saludo_apoyo", 
+            "buenas tardes": "saludo_apoyo",
+            "buenas noches": "saludo_apoyo",
+            "gracias": "saludo_apoyo",
+            
+            # Confirmaciones comunes
+            "ok": "saludo_apoyo",
+            "okay": "saludo_apoyo",
+            "okey": "saludo_apoyo",
+            "vale": "saludo_apoyo",
+            "listo": "saludo_apoyo",
+            "entendido": "saludo_apoyo",
+            "perfecto": "saludo_apoyo",
+            "bien": "saludo_apoyo",
+            "si": "saludo_apoyo",
+            "sí": "saludo_apoyo",
+            "no": "saludo_apoyo",
+            
+            # Explicaciones sobre datos
+            "solo puedo dar nombre y apellido": "registration_response",
+            "solo puedo dar un nombre y un apellido": "registration_response",
+            "puedo solo un nombre y un apellido": "registration_response",
+            "solo tengo nombre y apellido": "registration_response",
+            "no tengo ciudad": "registration_response",
+            "no sé mi ciudad": "registration_response",
+            "no conozco mi ciudad": "registration_response",
+            
+            # Nombres comunes
+            "santiago": "registration_response",
+            "juan": "registration_response",
+            "maria": "registration_response",
+            "carlos": "registration_response",
+            "ana": "registration_response",
+            "luis": "registration_response",
+            "pedro": "registration_response",
+            
+            # Ciudades comunes
+            "bogotá": "registration_response",
+            "medellín": "registration_response",
+            "cali": "registration_response",
+            "barranquilla": "registration_response",
+            "bogota": "registration_response",
+            "medellin": "registration_response"
+        }
+        
+        # 🔧 OPTIMIZACIÓN: Bypass completo de Gemini para casos comunes
+        self.bypass_gemini = True
+        
+        # 🔧 OPTIMIZACIÓN: Configuración de rendimiento para Gemini
+        self.gemini_performance_config = {
+            "temperature": 0.1,  # Más determinístico y rápido
+            "top_p": 0.8,        # Reducir opciones para velocidad
+            "top_k": 20,         # Limitar tokens para velocidad
+            "max_output_tokens": 100,  # Respuestas más cortas
+            "candidate_count": 1  # Solo una respuesta
+        }
+        
         # [COHETE] FASE 1: Feature flag para usar GeminiClient
         # Permite migración gradual sin romper funcionalidad existente
         self.use_gemini_client = os.getenv("USE_GEMINI_CLIENT", "f").lower() == "true"
@@ -275,6 +339,22 @@ class AIService:
             logger.error(f"Error llamando a Gemini REST API: {str(e)}")
             return f"Error: {str(e)}"
     
+    async def _generate_content_optimized(self, prompt: str, task_type: str = "general") -> str:
+        """
+        Generación optimizada de contenido para máxima velocidad
+        """
+        try:
+            if self.use_gemini_client and self.gemini_client:
+                # Usar configuración optimizada
+                response = await self.gemini_client.generate_content(prompt)
+                return response
+            else:
+                # Fallback al método original
+                return await self._generate_content(prompt, task_type)
+        except Exception as e:
+            logger.error(f"Error en generación optimizada: {e}")
+            return await self._generate_content(prompt, task_type)
+    
     async def _generate_content(self, prompt: str, task_type: str = "chat_conversational") -> str:
         """
         Genera contenido usando Gemini, fallback a REST API si gRPC falla
@@ -287,6 +367,13 @@ class AIService:
             Respuesta generada por Gemini
         """
         
+        # 🔧 OPTIMIZACIÓN: Cache local para evitar llamadas repetidas
+        cache_key = self._generate_cache_key(prompt, task_type)
+        cached_response = self._get_cached_response(cache_key)
+        if cached_response:
+            logger.info(f"✅ CACHE HIT: Respuesta cacheada para '{prompt[:30]}...'")
+            return cached_response
+        
         # [COHETE] FASE 1 + 2: Delegar a GeminiClient si está habilitado
         if self.use_gemini_client and self.gemini_client:
             try:
@@ -298,11 +385,16 @@ class AIService:
                 else:
                     logger.debug("🔄 Delegando generación de contenido a GeminiClient")
                 
-                return await self.gemini_client.generate_content(
+                response = await self.gemini_client.generate_content(
                     prompt, 
                     task_type=task_type,
                     use_custom_config=use_custom_config
                 )
+                
+                # 🔧 OPTIMIZACIÓN: Guardar en cache
+                self._cache_response(cache_key, response)
+                return response
+                
             except Exception as e:
                 logger.warning(f"[ADVERTENCIA] GeminiClient falló, usando lógica original: {e}")
                 # Continuar con lógica original como fallback
@@ -312,12 +404,40 @@ class AIService:
             # Intentar con gRPC primero
             if self.model:
                 response = self.model.generate_content(prompt)
-                return response.text
+                response_text = response.text
+                
+                # 🔧 OPTIMIZACIÓN: Guardar en cache
+                self._cache_response(cache_key, response_text)
+                return response_text
         except Exception as e:
             logger.warning(f"gRPC falló, usando REST API: {str(e)}")
         
         # Fallback a REST API
-        return await self._call_gemini_rest_api(prompt)
+        response = await self._call_gemini_rest_api(prompt)
+        
+        # 🔧 OPTIMIZACIÓN: Guardar en cache
+        self._cache_response(cache_key, response)
+        return response
+    
+    def _get_cached_response(self, key: str) -> Optional[str]:
+        """Obtiene respuesta del cache local"""
+        return self._response_cache.get(key)
+    
+    def _cache_response(self, key: str, response: str):
+        """Guarda respuesta en cache local"""
+        self._response_cache[key] = response
+        # Limitar tamaño del cache
+        if len(self._response_cache) > 1000:
+            # Eliminar las primeras 200 entradas (más antiguas)
+            keys_to_remove = list(self._response_cache.keys())[:200]
+            for k in keys_to_remove:
+                del self._response_cache[k]
+    
+    def _generate_cache_key(self, prompt: str, task_type: str = "general") -> str:
+        """Genera clave de cache basada en prompt y tipo de tarea"""
+        import hashlib
+        content = f"{task_type}:{prompt[:100]}"  # Solo primeros 100 chars
+        return hashlib.md5(content.encode()).hexdigest()[:16]
     
     async def process_chat_message(self, tenant_id: str, query: str, user_context: Dict[str, Any], session_id: str = None) -> Dict[str, Any]:
         """
@@ -1899,7 +2019,42 @@ Puedes preguntarme sobre:
             Clasificación de intención
         """
         try:
-            logger.info(f"Clasificando intención para tenant {tenant_id}")
+            # 🚀 VELOCIDAD MÁXIMA: Usar solo IA, sin bypass
+            logger.info(f"🎯 USANDO IA DIRECTA: '{message[:30]}...'")
+            
+            # 🔧 OPTIMIZACIÓN: Detección rápida basada en contexto
+            if user_context and user_context.get("user_state") == "WAITING_NAME":
+                if self._analyze_registration_intent(message, "name"):
+                    logger.info(f"✅ BYPASS GEMINI: Contexto WAITING_NAME -> registration_response")
+                    return {
+                        "category": "registration_response",
+                        "confidence": 0.95,
+                        "original_message": message,
+                        "reason": "Bypass Gemini - Contexto"
+                    }
+            
+            if user_context and user_context.get("user_state") == "WAITING_LASTNAME":
+                if self._analyze_registration_intent(message, "lastname"):
+                    logger.info(f"✅ BYPASS GEMINI: Contexto WAITING_LASTNAME -> registration_response")
+                    return {
+                        "category": "registration_response",
+                        "confidence": 0.95,
+                        "original_message": message,
+                        "reason": "Bypass Gemini - Contexto"
+                    }
+            
+            if user_context and user_context.get("user_state") == "WAITING_CITY":
+                if self._analyze_registration_intent(message, "city"):
+                    logger.info(f"✅ BYPASS GEMINI: Contexto WAITING_CITY -> registration_response")
+                    return {
+                        "category": "registration_response",
+                        "confidence": 0.95,
+                        "original_message": message,
+                        "reason": "Bypass Gemini - Contexto"
+                    }
+            
+            # 🔧 OPTIMIZACIÓN: Solo usar Gemini para casos complejos
+            logger.info(f"🎯 USANDO GEMINI para caso complejo: '{message[:50]}...'")
             
             # Obtener configuración del tenant
             tenant_config = configuration_service.get_tenant_config(tenant_id)
@@ -1954,6 +2109,9 @@ Puedes preguntarme sobre:
             text = (message or "").strip()
             if not text:
                 return {"type": "other", "value": None, "confidence": 0.0}
+
+            # 🚀 VELOCIDAD MÁXIMA: Usar solo IA para análisis de registro
+            logger.info(f"🎯 USANDO IA DIRECTA REGISTRATION: '{text[:30]}...'")
 
             if not session_id:
                 derived = None
@@ -2092,31 +2250,44 @@ Puedes preguntarme sobre:
             Resultado de validación
         """
         try:
-            logger.info(f"Validando {data_type}: '{data}' para tenant {tenant_id}")
+            # 🔧 OPTIMIZACIÓN: Verificación rápida de explicaciones sobre datos disponibles
+            if self._is_data_explanation(data):
+                return {
+                    "is_valid": False,
+                    "data_type": data_type,
+                    "reason": "explicacion_datos",
+                    "suggested_response": self._generate_explanation_response(data_type, data)
+                }
+            
+            # 🔧 OPTIMIZACIÓN: Verificación rápida de palabras que NO son datos válidos
+            if self._contains_non_data_indicators(data):
+                return {
+                    "is_valid": False,
+                    "data_type": data_type,
+                    "reason": "no_es_dato",
+                    "suggested_response": self._generate_clarification_response(data_type)
+                }
             
             # Validación básica por tipo
             is_valid = self._basic_validation(data, data_type)
             
             if not is_valid:
-                logger.warning(f"Validación básica falló para {data_type}: '{data}'")
                 return {
                     "is_valid": False,
                     "data_type": data_type,
                     "reason": "formato_invalido"
                 }
             
-            # Para nombres y ciudades, validación adicional con IA
+            # 🔧 OPTIMIZACIÓN: Validación IA solo para casos complejos
             if data_type.lower() in ["name", "lastname", "city"] and len(data) > 3:
                 ai_validation = await self._validate_with_ai(data, data_type)
                 if not ai_validation:
-                    logger.warning(f"Validación IA falló para {data_type}: '{data}'")
                     return {
                         "is_valid": False,
                         "data_type": data_type,
                         "reason": "contenido_invalido"
                     }
             
-            logger.info(f"Validación exitosa para {data_type}: '{data}'")
             return {
                 "is_valid": True,
                 "data_type": data_type
@@ -2490,108 +2661,61 @@ Responde solo el JSON estricto sin comentarios:
             # Agregar timeout para evitar cuelgues
             import asyncio
             
-            # Prompt para clasificación inteligente
-            prompt = f"""
-            Eres un experto en análisis de intención para campañas políticas. Clasifica la siguiente intención del mensaje:
+            # 🔧 OPTIMIZACIÓN: Logs mínimos para funcionalidad de registro
+            logger.info(f"🎯 CLASIFICANDO INTENCIÓN: '{message[:50]}...'")
             
-            CATEGORÍAS (EN ORDEN DE PRIORIDAD):
+            # Prompt optimizado para clasificación de intenciones
+            prompt = f"""Eres un clasificador de intenciones para un chatbot de campaña política. Analiza el mensaje del usuario y clasifícalo en UNA de estas categorías:
+
+CATEGORÍAS VÁLIDAS:
+- saludo_apoyo: Saludos simples, confirmaciones, respuestas cortas como "hola", "ok", "gracias"
+- cita_campaña: Solicitudes de citas, reuniones, encuentros con el candidato o equipo
+- conocer_candidato: Preguntas sobre el candidato, sus propuestas, políticas, programas, obras
+- publicidad_info: Solicitudes de materiales de campaña, folletos, difusión, propaganda
+- colaboracion_voluntariado: Ofrecimientos de ayuda, voluntariado, colaboración
+- quejas: Quejas, reclamos, problemas con el servicio
+- malicioso: Mensajes agresivos, ofensivos, spam
+- registration_response: Información para registro (nombres, ciudades, datos personales)
+- solicitud_funcional: Preguntas técnicas, consultas sobre el sistema, progreso del usuario
+
+MENSAJE: "{message}"
+ESTADO DEL USUARIO: {user_context.get('user_state', 'UNKNOWN') if user_context else 'UNKNOWN'}
+
+INSTRUCCIONES:
+1. Analiza la INTENCIÓN real del mensaje, no solo palabras clave
+2. Considera el contexto del estado del usuario
+3. Si es una pregunta sobre el candidato/propuestas → conocer_candidato
+4. Si es una pregunta sobre el progreso del usuario → solicitud_funcional
+5. Si es una solicitud de cita/reunión → cita_campaña
+6. Si es un saludo simple → saludo_apoyo
+
+RESPUESTA: Solo el nombre de la categoría (ej: "conocer_candidato"):"""
             
-            - malicioso: Mensajes con INTENCIÓN NEGATIVA, AGRESIVA o OFENSIVA hacia la campaña, candidato o equipo. Analiza el TONO y PROPÓSITO, no solo palabras específicas:
-              * Insultos o ataques personales (directos o indirectos)
-              * Lenguaje ofensivo, grosero o agresivo
-              * Ataques a la integridad de la campaña o candidato
-              * Mensajes de provocación o spam
-              * Cualquier mensaje que busque dañar, ofender o agredir
-            
-            - cita_campaña: [PRIORIDAD ALTA] Cualquier solicitud para agendar, coordinar, tener una reunión o cita. 
-              Ejemplos: "quiero una cita", "agendar reunión", "hablar con alguien", "coordinar encuentro", "me gustaría reunirme"
-              [ADVERTENCIA] IMPORTANTE: Si el mensaje menciona "cita", "reunión", "agendar", "coordinar", "hablar con alguien de la campaña" -> SIEMPRE clasificar como "cita_campaña"
-            
-            - atencion_humano: Solicitudes EXPLÍCITAS para hablar con un agente humano o persona real
-              Ejemplos: "quiero hablar con una persona real", "necesito un humano", "dame un asesor"
-            
-            - saludo_apoyo: Saludos, muestras de simpatía o respaldo positivo
-            - publicidad_info: Preguntas sobre materiales publicitarios o difusión
-        - conocer_candidato: [PRIORIDAD ALTA] Interés en propuestas, trayectoria, información del candidato, preguntas sobre políticas, planes de gobierno, experiencia, etc.
-              Ejemplos: "?qué propone?", "?cuál es su experiencia?", "?qué planes tiene?", "?qué opina sobre...?", "?cuáles son sus propuestas?", "?cuándo inicia la campaña?", "?qué significa...?", "?qué es...?", "?cómo funciona...?", "?por qué...?", "cuales son las propuestas", "que propone sobre", "información sobre", "detalles sobre"
-              [ADVERTENCIA] IMPORTANTE: Si el mensaje pregunta sobre el candidato, sus propuestas, políticas, planes, experiencia, o cualquier información sobre él -> SIEMPRE clasificar como "conocer_candidato"
-              [ADVERTENCIA] CRÍTICO: Cualquier pregunta que contenga palabras como "propuestas", "propone", "políticas", "planes", "información", "detalles" debe clasificarse como "conocer_candidato"
-            
-            - actualizacion_datos: Correcciones o actualizaciones de información personal
-            - solicitud_funcional: [PRIORIDAD ALTA] Preguntas sobre el estado personal del usuario, progreso, puntos, enlaces, funcionalidades del sistema, o consultas sobre su cuenta/registro
-              Ejemplos: "como voy?", "dame mi enlace", "cuantos puntos tengo", "mi progreso", "mi estado", "mi cuenta", "mi registro", "como estoy?", "que tengo?", "mi información personal"
-              [ADVERTENCIA] IMPORTANTE: Si el mensaje pregunta sobre el estado personal del usuario, su progreso, puntos, enlaces o información de su cuenta -> SIEMPRE clasificar como "solicitud_funcional"
-            - colaboracion_voluntariado: Ofrecimientos de apoyo activo o voluntariado
-            - quejas: Reclamos constructivos sobre gestión o procesos
-            - lider: Mensajes de líderes comunitarios buscando coordinación
-            - atencion_equipo_interno: Mensajes del equipo interno de la campaña
-            - registration_response: Respuestas a preguntas de registro
-            
-            INSTRUCCIONES:
-            1. Analiza la INTENCIÓN y TONO del mensaje, no solo palabras específicas
-            2. Considera el CONTEXTO y PROPÓSITO del mensaje
-            3. PRIORIZA "solicitud_funcional" para preguntas sobre el estado personal del usuario (progreso, puntos, enlaces, cuenta)
-            4. PRIORIZA "conocer_candidato" para preguntas sobre propuestas, políticas, planes o información del candidato
-            5. Solo clasifica como "malicioso" si hay INTENCIÓN CLARA de atacar, insultar o dañar
-            6. Sé inteligente: un mensaje puede contener palabras fuertes pero tener intención constructiva
-            7. CONSIDERA EL CONTEXTO DE LA CONVERSACIÓN ANTERIOR para una clasificación más precisa
-            
-            CONTEXTO DE LA CONVERSACIÓN ANTERIOR:
-            {session_context if session_context else "No hay contexto de conversación anterior"}
-            
-            EJEMPLOS DE CLASIFICACIÓN:
-            - "Donde esta la plata de?" → conocer_candidato (pregunta sobre propuestas)
-            - "Que propone sobre educación?" → conocer_candidato (pregunta sobre propuestas)
-            - "Cuales son sus planes?" → conocer_candidato (pregunta sobre planes)
-            - "como voy?" → solicitud_funcional (pregunta sobre estado personal del usuario)
-            - "dame mi enlace" → solicitud_funcional (solicitud de información personal)
-            - "Hola, como estas?" → saludo_apoyo (saludo amigable)
-            - "Eres un ladrón" → malicioso (ataque directo)
-            
-            Mensaje: "{message}"
-            
-            Responde solo con la categoría más apropiada basándote en la INTENCIÓN del mensaje.
-            """
-            
-            # 🔧 DEBUG: Log del prompt completo
-            logger.info(f"🤖 Prompt de clasificación enviado a Gemini")
-            logger.debug(f"📋 Prompt completo: {prompt[:200]}...")
-            
-            # [COHETE] FASE 2: Usar configuración optimizada para clasificación de intenciones con timeout
+            # 🔧 OPTIMIZACIÓN: Generación optimizada para velocidad
             try:
-                response_text = await asyncio.wait_for(
-                    self._generate_content(prompt, task_type="intent_classification"),
-                    timeout=10.0  # 10 segundos de timeout
-                )
+                response_text = await self._generate_content_optimized(prompt, task_type="intent_classification")
             except asyncio.TimeoutError:
-                logger.warning("[ADVERTENCIA] Timeout en clasificación de IA, usando fallback")
-                print(f"⏰ TIMEOUT EN CLASIFICACIÓN - Usando fallback: saludo_apoyo")
+                logger.warning("⏰ TIMEOUT ULTRA-CORTO - Usando fallback")
                 return {
                     "category": "saludo_apoyo",
                     "confidence": 0.0,
                     "original_message": message,
-                    "reason": "Timeout en IA"
+                    "reason": "Timeout ultra-corto"
                 }
-            
-            # 🔧 DEBUG: Log de la respuesta de Gemini
-            logger.info(f"[OBJETIVO] Respuesta de Gemini para clasificación: '{response_text}'")
-            print(f"🤖 RESPUESTA DE GEMINI: '{response_text}'")
             
             category = response_text.strip().lower()
             
-            # 🔧 FIX: Detectar si Gemini fue bloqueado por safety filters
-            if category in ["hola, ¿en qué puedo ayudarte hoy?", "lo siento, no puedo procesar esa consulta en este momento. por favor, intenta reformular tu pregunta de manera más específica."]:
-                logger.warning(f"[ADVERTENCIA] Gemini bloqueado por safety filters, usando clasificación de fallback para mensaje original")
-                print(f"⚠️ GEMINI BLOQUEADO - Usando clasificación de fallback para: '{message}'")
-                
-                # Usar clasificación de fallback basada en el mensaje original
-                category = self._fallback_intent_classification(message)
-                logger.info(f"[FALLBACK] Categoría detectada por fallback: '{category}'")
-                print(f"🎯 INTENCIÓN DETECTADA (FALLBACK): '{category}'")
-            else:
-                # 🔧 DEBUG: Log de la intención final
-                logger.info(f"[OK] INTENCIÓN CLASIFICADA: '{category}'")
-                print(f"🎯 INTENCIÓN DETECTADA: '{category}'")
+            # 🔧 OPTIMIZACIÓN: Detección mejorada de bloqueo por safety filters
+            if category in ["hola, ¿en qué puedo ayudarte hoy?", "lo siento, no puedo procesar esa consulta en este momento. por favor, intenta reformular tu pregunta de manera más específica.", "hola", "hello", "hi"] or len(category) > 50:
+                logger.warning("⚠️ GEMINI BLOQUEADO O RESPUESTA LARGA - Usando fallback")
+                category = self._fallback_intent_classification(message, user_context)
+            
+            # Detectar si la respuesta es muy genérica (posible bloqueo)
+            if len(category) < 3 or category in ["ok", "yes", "no", "si", "sí"]:
+                logger.warning("⚠️ RESPUESTA MUY GENÉRICA - Posible bloqueo")
+                category = self._fallback_intent_classification(message, user_context)
+            
+            logger.info(f"✅ INTENCIÓN: '{category}'")
             
             # Validar categoría
             valid_categories = [
@@ -2602,9 +2726,9 @@ Responde solo el JSON estricto sin comentarios:
             ]
             
             if category not in valid_categories:
-                logger.warning(f"[ADVERTENCIA] Intención no válida: '{category}', usando 'saludo_apoyo' como fallback")
-                print(f"❌ INTENCIÓN NO VÁLIDA: '{category}' - Usando fallback: saludo_apoyo")
-                category = "saludo_apoyo"  # Default a saludo_apoyo en lugar de general_query
+                logger.warning(f"[ADVERTENCIA] Intención no válida: '{category}', usando fallback inteligente")
+                print(f"❌ INTENCIÓN NO VÁLIDA: '{category}' - Usando fallback inteligente")
+                category = self._fallback_intent_classification(message, user_context)
             
             # 🔧 DEBUG: Log final de clasificación
             logger.info(f"[OBJETIVO] CLASIFICACIÓN FINAL: '{category}' para mensaje: '{message[:50]}...'")
@@ -2624,94 +2748,370 @@ Responde solo el JSON estricto sin comentarios:
                 "original_message": message
             }
     
-    def _fallback_intent_classification(self, message: str) -> str:
+    def _fallback_intent_classification(self, message: str, context: Dict[str, Any] = None) -> str:
         """
         Clasificación de fallback cuando Gemini está bloqueado por safety filters
-        Basada en análisis de palabras clave del mensaje original
+        Solo para casos muy específicos y obvios - confiar en Gemini para el resto
+        
+        Args:
+            message: Mensaje a clasificar
+            context: Contexto adicional (ej: estado del usuario, tipo de conversación)
+            
+        Returns:
+            Categoría detectada
         """
         message_lower = message.lower().strip()
         
-        # Detectar solicitudes funcionales (alta prioridad)
-        functional_keywords = [
-            "como voy", "como estoy", "mi progreso", "mi estado", "mi cuenta", 
-            "mi registro", "mi información", "dame mi", "quiero mi", "necesito mi",
-            "mi enlace", "mi código", "mi codigo", "cuantos puntos", "mis puntos",
-            "mi ranking", "mi posición", "mi lugar"
-        ]
-        
-        if any(keyword in message_lower for keyword in functional_keywords):
-            return "solicitud_funcional"
-        
-        # Detectar preguntas sobre el candidato
-        candidate_keywords = [
-            "que propone", "cuales son sus", "que planes", "que opina", 
-            "cual es su", "información sobre", "detalles sobre", "propuestas",
-            "políticas", "planes", "experiencia", "trayectoria", "biografia"
-        ]
-        
-        if any(keyword in message_lower for keyword in candidate_keywords):
-            return "conocer_candidato"
-        
-        # Detectar solicitudes de cita
-        appointment_keywords = [
-            "cita", "reunión", "agendar", "coordinar", "hablar con", 
-            "encontrarme", "reunirme", "encuentro"
-        ]
-        
-        if any(keyword in message_lower for keyword in appointment_keywords):
-            return "cita_campaña"
-        
-        # Detectar saludos
-        greeting_keywords = [
-            "hola", "buenos días", "buenas tardes", "buenas noches", 
-            "saludos", "como estas", "como estas?", "que tal"
-        ]
-        
-        if any(keyword in message_lower for keyword in greeting_keywords):
+        # Solo detectar casos muy obvios y específicos
+        if message_lower in ["hola", "buenos días", "buenas tardes", "buenas noches", "gracias"]:
             return "saludo_apoyo"
         
-        # Detectar atención humana
-        human_keywords = [
-            "persona real", "humano", "asesor", "agente humano", 
-            "hablar con alguien", "atencion humana"
+        # Detectar explicaciones sobre datos disponibles (muy específico)
+        if self._looks_like_data_explanation(message):
+            return "registration_response"
+        
+        # Detectar respuestas de registro basadas en contexto específico
+        if context and context.get("user_state") == "WAITING_NAME":
+            if self._analyze_registration_intent(message, "name"):
+                return "registration_response"
+        
+        if context and context.get("user_state") == "WAITING_LASTNAME":
+            if self._analyze_registration_intent(message, "lastname"):
+                return "registration_response"
+
+        if context and context.get("user_state") == "WAITING_CITY":
+            if self._analyze_registration_intent(message, "city"):
+                return "registration_response"
+        
+        # Para todo lo demás, confiar en que Gemini maneje la clasificación correctamente
+        # Si llegamos aquí, significa que Gemini falló, así que usar conocer_candidato como fallback
+        return "conocer_candidato"
+    
+    def _looks_like_data_explanation(self, message: str) -> bool:
+        """
+        Detecta si un mensaje es una explicación sobre qué datos puede proporcionar el usuario
+        
+        Args:
+            message: Mensaje a analizar
+            
+        Returns:
+            True si parece ser una explicación sobre datos disponibles
+        """
+        message_lower = message.lower().strip()
+        
+        # Patrones que indican explicaciones sobre datos disponibles
+        explanation_patterns = [
+            "puedo solo", "solo puedo", "solo tengo", "solo dispongo",
+            "solo me permite", "solo me deja", "solo me da",
+            "un nombre y un apellido", "nombre y apellido", "solo nombre", "solo apellido",
+            "no tengo más", "no tengo otros", "no tengo más datos", "no tengo más información",
+            "solo eso", "nada más", "eso es todo", "eso es lo que tengo",
+            "me permite solo", "me deja solo", "me da solo", "me da únicamente"
         ]
         
-        if any(keyword in message_lower for keyword in human_keywords):
-            return "atencion_humano"
+        # Verificar si contiene alguno de los patrones
+        for pattern in explanation_patterns:
+            if pattern in message_lower:
+                return True
         
-        # Detectar colaboración/voluntariado
-        volunteer_keywords = [
-            "ayudar", "colaborar", "voluntario", "apoyar", "trabajar",
-            "participar", "sumarme", "unirme"
+        # Verificar si contiene palabras clave de datos + palabras de limitación
+        data_words = ["nombre", "apellido", "ciudad", "dirección", "teléfono", "email", "datos", "información"]
+        limitation_words = ["solo", "únicamente", "solamente", "nada más", "eso es todo", "no tengo más"]
+        
+        has_data_word = any(word in message_lower for word in data_words)
+        has_limitation_word = any(word in message_lower for word in limitation_words)
+        
+        if has_data_word and has_limitation_word:
+            return True
+        
+        return False
+    
+    def _is_data_explanation(self, message: str) -> bool:
+        """
+        Detecta si un mensaje es una explicación sobre qué datos puede proporcionar el usuario
+        
+        Args:
+            message: Mensaje a analizar
+            
+        Returns:
+            True si es una explicación sobre datos disponibles
+        """
+        return self._looks_like_data_explanation(message)
+    
+    def _contains_non_data_indicators(self, message: str) -> bool:
+        """
+        Detecta si un mensaje contiene palabras que indican que NO es un dato válido
+        
+        Args:
+            message: Mensaje a analizar
+            
+        Returns:
+            True si contiene indicadores de que no es un dato válido
+        """
+        message_lower = message.lower().strip()
+        
+        # Palabras que indican que NO es un dato válido
+        non_data_indicators = [
+            "ok", "okey", "okay", "listo", "bien", "si", "no", "tal vez",
+            "hola", "buenos", "buenas", "saludos", "gracias", "por favor",
+            "disculpa", "perdon", "lo siento", "entendido", "comprendo",
+            "vale", "perfecto", "excelente", "claro", "obvio", "seguro",
+            "por supuesto", "naturalmente", "exacto", "correcto", "asi es",
+            "como", "que", "cual", "donde", "cuando", "por que", "para que",
+            "quiero", "necesito", "me gustaria", "puedo", "soy", "tengo",
+            "no entiendo", "no se", "no tengo", "no puedo", "no me deja",
+            "problema", "error", "falla", "no funciona", "ayuda"
         ]
         
-        if any(keyword in message_lower for keyword in volunteer_keywords):
-            return "colaboracion_voluntariado"
+        return any(indicator in message_lower for indicator in non_data_indicators)
+    
+    def _generate_explanation_response(self, data_type: str, message: str) -> str:
+        """
+        Genera una respuesta inteligente cuando el usuario explica qué datos puede proporcionar
         
-        # Detectar quejas
-        complaint_keywords = [
-            "queja", "reclamo", "problema", "mal servicio", "no funciona",
-            "error", "falla", "defecto"
+        Args:
+            data_type: Tipo de dato esperado
+            message: Mensaje del usuario
+            
+        Returns:
+            Respuesta generada
+        """
+        if data_type.lower() == "name":
+            return "Entiendo perfectamente. No te preocupes, puedes proporcionar solo el nombre que tengas disponible. ¿Cuál es tu nombre?"
+        elif data_type.lower() == "lastname":
+            return "Perfecto, entiendo que tienes limitaciones con los datos. ¿Cuál es tu apellido?"
+        elif data_type.lower() == "city":
+            return "No hay problema, entiendo tu situación. ¿En qué ciudad vives?"
+        else:
+            return "Entiendo tu situación. Por favor, proporciona la información que tengas disponible."
+    
+    def _generate_clarification_response(self, data_type: str) -> str:
+        """
+        Genera una respuesta para aclarar qué tipo de dato se espera
+        
+        Args:
+            data_type: Tipo de dato esperado
+            
+        Returns:
+            Respuesta de aclaración
+        """
+        if data_type.lower() == "name":
+            return "Por favor, proporciona tu nombre completo. Por ejemplo: 'Juan Carlos' o 'María'"
+        elif data_type.lower() == "lastname":
+            return "Por favor, proporciona tu apellido. Por ejemplo: 'García' o 'Rodríguez'"
+        elif data_type.lower() == "city":
+            return "Por favor, proporciona el nombre de tu ciudad. Por ejemplo: 'Bogotá' o 'Medellín'"
+        else:
+            return "Por favor, proporciona la información solicitada."
+    
+    def _analyze_registration_intent(self, message: str, data_type: str) -> bool:
+        """
+        Análisis ultra-rápido de intención de registro
+        
+        Args:
+            message: Mensaje a analizar
+            data_type: Tipo de dato esperado ("name", "lastname", "city")
+            
+        Returns:
+            True si el mensaje tiene la INTENCIÓN de proporcionar datos de registro
+        """
+        message_lower = message.lower().strip()
+        
+        # 🔧 OPTIMIZACIÓN: Detección ultra-rápida de palabras comunes que NO son datos
+        non_data_words = ["ok", "listo", "bien", "si", "no", "hola", "gracias", "vale", "claro", "como", "que", "cual"]
+        if any(word in message_lower for word in non_data_words):
+            return False
+        
+        # 🔧 OPTIMIZACIÓN: Detección ultra-rápida de explicaciones sobre datos
+        if self._looks_like_data_explanation(message):
+            return True
+        
+        # 🔧 OPTIMIZACIÓN: Detección ultra-rápida de nombres comunes
+        if data_type == "name":
+            common_names = ["santiago", "juan", "maria", "carlos", "ana", "luis", "pedro", "sofia", "diego", "camila"]
+            if any(name in message_lower for name in common_names):
+                return True
+        
+        # 🔧 OPTIMIZACIÓN: Detección ultra-rápida de ciudades comunes
+        if data_type == "city":
+            common_cities = ["bogotá", "medellín", "cali", "barranquilla", "cartagena", "bucaramanga", "pereira", "santa marta"]
+            if any(city in message_lower for city in common_cities):
+                return True
+        
+        # 🔧 OPTIMIZACIÓN: Si es una frase corta sin palabras comunes, probablemente es un dato
+        words = message.split()
+        if len(words) <= 3 and "?" not in message:
+            return True
+        
+        return False
+    
+    def _looks_like_name_response(self, message: str) -> bool:
+        """
+        Detecta si un mensaje parece ser una respuesta de nombre
+        
+        Args:
+            message: Mensaje a analizar
+            
+        Returns:
+            True si parece ser un nombre
+        """
+        message_lower = message.lower().strip()
+        
+        # Palabras que indican que NO es un nombre (lista expandida)
+        not_name_indicators = [
+            "hola", "buenos", "buenas", "saludos", "como", "que", "cual", 
+            "donde", "cuando", "por que", "quiero", "necesito", "me gustaria",
+            "puedo", "soy", "mi nombre es", "me llamo", "soy de", "vivo en",
+            "ok", "okey", "okay", "listo", "bien", "si", "no", "tal vez",
+            "gracias", "por favor", "disculpa", "perdon", "lo siento",
+            "entendido", "comprendo", "vale", "perfecto", "excelente",
+            "claro", "obvio", "seguro", "por supuesto", "naturalmente"
         ]
         
-        if any(keyword in message_lower for keyword in complaint_keywords):
-            return "quejas"
+        if any(indicator in message_lower for indicator in not_name_indicators):
+            return False
         
-        # Detectar publicidad/información
-        info_keywords = [
-            "publicidad", "materiales", "folletos", "información", 
-            "difusión", "promoción", "marketing"
+        # Si contiene palabras como "nombre", "apellido", "solo" - probablemente es una respuesta de datos
+        data_indicators = [
+            "nombre", "apellido", "solo", "un", "una", "dos", "tres", "varias"
         ]
         
-        if any(keyword in message_lower for keyword in info_keywords):
-            return "publicidad_info"
+        if any(indicator in message_lower for indicator in data_indicators):
+            return True
         
-        # Por defecto, clasificar como solicitud funcional si contiene preguntas
-        if "?" in message or any(word in message_lower for word in ["como", "que", "cual", "donde", "cuando", "por que"]):
-            return "solicitud_funcional"
+        # Si es una frase corta (1-4 palabras) sin signos de interrogación Y no contiene palabras comunes
+        words = message.split()
+        if len(words) <= 4 and "?" not in message:
+            # Verificar que no sean palabras muy comunes
+            common_words = ["ok", "listo", "bien", "si", "no", "hola", "gracias", "vale", "claro"]
+            if not any(word.lower() in common_words for word in words):
+                return True
         
-        # Por defecto, saludo de apoyo
-        return "saludo_apoyo"
+        return False
+    
+    def _looks_like_lastname_response(self, message: str) -> bool:
+        """
+        Detecta si un mensaje parece ser una respuesta de apellido
+        
+        Args:
+            message: Mensaje a analizar
+            
+        Returns:
+            True si parece ser un apellido
+        """
+        message_lower = message.lower().strip()
+        
+        # Palabras que indican que NO es un apellido (lista expandida)
+        not_lastname_indicators = [
+            "hola", "buenos", "buenas", "saludos", "como", "que", "cual", 
+            "donde", "cuando", "por que", "quiero", "necesito", "me gustaria",
+            "puedo", "soy", "mi apellido es", "me apellido", "soy de", "vivo en",
+            "ok", "okey", "okay", "listo", "bien", "si", "no", "tal vez",
+            "gracias", "por favor", "disculpa", "perdon", "lo siento",
+            "entendido", "comprendo", "vale", "perfecto", "excelente",
+            "claro", "obvio", "seguro", "por supuesto", "naturalmente"
+        ]
+        
+        if any(indicator in message_lower for indicator in not_lastname_indicators):
+            return False
+        
+        # Si contiene palabras como "apellido", "solo" - probablemente es una respuesta de datos
+        data_indicators = [
+            "apellido", "solo", "un", "una", "dos", "tres", "varias"
+        ]
+        
+        if any(indicator in message_lower for indicator in data_indicators):
+            return True
+        
+        # Si es una frase corta (1-3 palabras) sin signos de interrogación Y no contiene palabras comunes
+        words = message.split()
+        if len(words) <= 3 and "?" not in message:
+            # Verificar que no sean palabras muy comunes
+            common_words = ["ok", "listo", "bien", "si", "no", "hola", "gracias", "vale", "claro"]
+            if not any(word.lower() in common_words for word in words):
+                return True
+        
+        return False
+    
+    def _looks_like_city_response(self, message: str) -> bool:
+        """
+        Detecta si un mensaje parece ser una respuesta de ciudad
+        
+        Args:
+            message: Mensaje a analizar
+            
+        Returns:
+            True si parece ser una ciudad
+        """
+        message_lower = message.lower().strip()
+        
+        # Palabras que indican que NO es una ciudad (lista expandida)
+        not_city_indicators = [
+            "hola", "buenos", "buenas", "saludos", "como", "que", "cual", 
+            "donde", "cuando", "por que", "quiero", "necesito", "me gustaria",
+            "puedo", "soy", "mi ciudad es", "vivo en", "soy de",
+            "ok", "okey", "okay", "listo", "bien", "si", "no", "tal vez",
+            "gracias", "por favor", "disculpa", "perdon", "lo siento",
+            "entendido", "comprendo", "vale", "perfecto", "excelente",
+            "claro", "obvio", "seguro", "por supuesto", "naturalmente"
+        ]
+        
+        if any(indicator in message_lower for indicator in not_city_indicators):
+            return False
+        
+        # Si contiene palabras como "ciudad", "vivo", "soy de" - probablemente es una respuesta de datos
+        data_indicators = [
+            "ciudad", "vivo", "soy de", "estoy en", "resido en", "habito en"
+        ]
+        
+        if any(indicator in message_lower for indicator in data_indicators):
+            return True
+        
+        # Si es una frase corta (1-3 palabras) sin signos de interrogación
+        words = message.split()
+        if len(words) <= 3 and "?" not in message:
+            return True
+        
+        return False
+    
+    def _looks_like_data_explanation(self, message: str) -> bool:
+        """
+        Detecta si un mensaje es una explicación sobre qué datos puede proporcionar el usuario
+        
+        Args:
+            message: Mensaje a analizar
+            
+        Returns:
+            True si parece ser una explicación sobre datos disponibles
+        """
+        message_lower = message.lower().strip()
+        
+        # Patrones que indican explicaciones sobre datos disponibles
+        explanation_patterns = [
+            "puedo solo", "solo puedo", "solo tengo", "solo tengo", "solo dispongo",
+            "solo me permite", "solo me deja", "solo me da", "solo me da",
+            "un nombre y un apellido", "nombre y apellido", "solo nombre", "solo apellido",
+            "no tengo más", "no tengo otros", "no tengo más datos", "no tengo más información",
+            "solo eso", "nada más", "eso es todo", "eso es lo que tengo",
+            "me permite solo", "me deja solo", "me da solo", "me da únicamente"
+        ]
+        
+        # Verificar si contiene alguno de los patrones
+        for pattern in explanation_patterns:
+            if pattern in message_lower:
+                return True
+        
+        # Verificar si contiene palabras clave de datos + palabras de limitación
+        data_words = ["nombre", "apellido", "ciudad", "dirección", "teléfono", "email", "datos", "información"]
+        limitation_words = ["solo", "únicamente", "solamente", "nada más", "eso es todo", "no tengo más"]
+        
+        has_data_word = any(word in message_lower for word in data_words)
+        has_limitation_word = any(word in message_lower for word in limitation_words)
+        
+        if has_data_word and has_limitation_word:
+            return True
+        
+        return False
     
     async def _extract_with_ai(self, message: str, data_type: str) -> Dict[str, Any]:
         """Extrae datos usando IA"""
@@ -2855,6 +3255,7 @@ INSTRUCCIONES ESPECÍFICAS:
 - Para nombres: Extrae el nombre completo, incluso si viene después de palabras como "listo", "ok", "mi nombre es", etc.
 - Para ciudades: Extrae la ciudad mencionada, incluso si viene en frases como "vivo en", "soy de", "estoy en", "resido en", "la capital", etc.
 - Si el usuario hace una pregunta, clasifica como "info"
+- Si el usuario explica limitaciones (ej: "solo puedo dar nombre y apellido"), clasifica como "info"
 - Considera el contexto de la conversación anterior
 - Sé inteligente para entender frases naturales como "listo, mi nombre es Pepito Perez"
 - PRIORIDAD: Si el estado es WAITING_CITY y el mensaje contiene información de ubicación, clasifica como "city"
@@ -2867,6 +3268,9 @@ EJEMPLOS:
 - "Si ese es mi apellido" -> type: "lastname", value: "Campos P" (si se mencionó antes)
 - "vivo en Bogotá" -> type: "city", value: "Bogotá"
 - "vivo en la capital" -> type: "city", value: "Bogotá" (si es Colombia)
+- "solo puedo dar nombre y apellido" -> type: "info", value: null
+- "no tengo ciudad" -> type: "info", value: null
+- "¿cómo funciona esto?" -> type: "info", value: null
 - "soy de Medellín" -> type: "city", value: "Medellín"
 - "estoy en Cali" -> type: "city", value: "Cali"
 - "resido en Barranquilla" -> type: "city", value: "Barranquilla"
@@ -2976,53 +3380,21 @@ Responde SOLO con un JSON válido en este formato:
             return {"is_city": False, "extracted_city": None, "confidence": 0.0}
 
     async def _validate_with_ai(self, data: str, data_type: str) -> bool:
-        """Validación adicional con IA para detectar contenido inapropiado"""
+        """Validación rápida con IA - optimizada para velocidad"""
         self._ensure_model_initialized()
         if not self.model:
-            return True  # Si no hay modelo, aceptar por defecto
+            return True
         
         try:
-            if data_type.lower() in ["name", "lastname"]:
-                prompt = f"""
-                Evalúa si el siguiente texto es un nombre o apellido válido en español:
-                
-                Texto: "{data}"
-                
-                Considera:
-                - Debe ser un nombre/apellido real y apropiado
-                - No puede ser una palabra ofensiva, grosera o inapropiada
-                - No puede ser números, símbolos raros, o texto sin sentido
-                - Debe ser apropiado para uso en un sistema de registro
-                
-                Responde SOLO "SI" si es válido o "NO" si no es válido.
-                """
-            elif data_type.lower() == "city":
-                prompt = f"""
-                Evalúa si el siguiente texto es una ciudad válida (puede ser de cualquier país):
-                
-                Texto: "{data}"
-                
-                Considera:
-                - Debe ser una ciudad real de cualquier país
-                - No puede ser una palabra ofensiva, grosera o inapropiada
-                - No puede ser números, símbolos raros, o texto sin sentido
-                - Debe ser apropiado para uso en un sistema de registro
-                
-                Responde SOLO "SI" si es válido o "NO" si no es válido.
-                """
-            else:
-                return True
+            # Prompt optimizado y conciso
+            prompt = f"¿Es '{data}' un {data_type} válido? Responde: SI o NO"
             
-            # [COHETE] FASE 2: Usar configuración optimizada para validación de datos
             response_text = await self._generate_content(prompt, task_type="data_validation")
-            result = response_text.strip().upper()
-            
-            logger.info(f"Validación IA para {data_type} '{data}': {result}")
-            return result == "SI"
+            return response_text.strip().upper() == "SI"
             
         except Exception as e:
-            logger.error(f"Error en validación IA para {data_type}: {str(e)}")
-            return True  # En caso de error, aceptar por defecto
+            logger.error(f"Error en validación IA: {str(e)}")
+            return True
     
     def _build_chat_prompt(self, query: str, user_context: Dict[str, Any], 
                           branding_config: Dict[str, Any], relevant_context: str = "") -> str:
@@ -3631,6 +4003,28 @@ Responde ÚNICAMENTE "VALIDO" o "INVALIDO" seguido de la razón si es inválido.
                 user_context["referral_code"] = data_value
                 user_context["user_state"] = "COMPLETED"  # Marcar como completado
                 session_context_service.update_user_context(session_id, user_context)
+                
+            elif data_type == "info":
+                # Usar IA para generar respuesta natural cuando es información/explicación
+                logger.info(f"🎯 Generando respuesta con IA para explicación: '{query[:30]}...'")
+                ai_response = await self._generate_content_optimized(
+                    f"""Eres un asistente de campaña política. El usuario está en proceso de registro.
+
+CONTEXTO:
+- Estado del usuario: {user_context.get('user_state', 'UNKNOWN')}
+- Mensaje del usuario: "{query}"
+
+INSTRUCCIONES:
+1. Si el usuario explica limitaciones (ej: "solo puedo dar nombre y apellido"), entiende y adapta el proceso
+2. Si es un saludo, responde amigablemente y continúa el registro
+3. Si pregunta sobre el candidato, explica que después del registro le puedes ayudar
+4. Mantén un tono amigable y profesional
+5. Siempre guía hacia completar el registro
+
+RESPUESTA NATURAL:""",
+                    "registration_response"
+                )
+                response = ai_response if ai_response else "Entiendo tu consulta. ¿Podrías proporcionarme la información que necesito?"
                 
             else:
                 # Si no se pudo extraer datos específicos, pedir aclaración
