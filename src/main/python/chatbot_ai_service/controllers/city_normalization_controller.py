@@ -28,21 +28,32 @@ async def normalize_city(request: Dict[str, Any]):
         
         logger.info(f"🌍 Normalizando ciudad: '{city_input}'")
         
-        # Estrategia híbrida: IA + fuentes externas + validación cruzada
-        normalized_result = await normalize_city_hybrid_approach(city_input)
+        # 🚀 OPTIMIZACIÓN: Usar normalización rápida primero
+        normalized_result = await normalize_city_fast(city_input)
         
         result = {
             "city": normalized_result["city"],
             "state": normalized_result.get("state"),
             "country": normalized_result.get("country", "Colombia"),
             "confidence": normalized_result.get("confidence", 0.8),
-            "source": normalized_result.get("source", "hybrid")
+            "source": normalized_result.get("source", "hybrid"),
+            "needs_clarification": "false"
         }
         
         # Si necesita aclaración, incluir la pregunta y opciones
         if normalized_result.get("source") == "clarification_needed":
+            result["needs_clarification"] = "true"
             result["clarification_question"] = normalized_result.get("clarification_question")
-            result["options"] = normalized_result.get("options")
+            # Convertir opciones al formato que espera el Java
+            options = normalized_result.get("options", [])
+            if options:
+                options_string = "|".join([
+                    f"{opt.get('id', i+1)}:{opt.get('city', '')},{opt.get('state', '')},{opt.get('country', '')}"
+                    for i, opt in enumerate(options)
+                ])
+                result["options"] = options_string
+            else:
+                result["options"] = ""
         
         return result
         
@@ -82,20 +93,28 @@ async def resolve_city_ambiguity(request: Dict[str, Any]):
         logger.error(f"Error resolviendo ambigüedad de ciudad: {e}")
         raise HTTPException(status_code=500, detail=f"Error resolviendo ambigüedad: {str(e)}")
 
-@router.post("/interpret-city-selection")
-async def interpret_city_selection(request: Dict[str, Any]):
+@router.post("/tenants/{tenant_id}/interpret-city-selection")
+async def interpret_city_selection(tenant_id: str, request: Dict[str, Any]):
     """
     Interpreta la selección de ciudad del usuario en lenguaje natural
     """
     try:
         user_response = request.get("user_response", "").strip()
         options = request.get("options", [])
-        city_input = request.get("city", "").strip()
+        city_input = request.get("original_city", "").strip()
         
-        if not user_response or not options or not city_input:
-            raise HTTPException(status_code=400, detail="Parámetros requeridos: user_response, options, city")
+        if not user_response:
+            raise HTTPException(status_code=400, detail="Parámetro requerido: user_response")
         
         logger.info(f"🤖 Interpretando selección natural: '{user_response}' para ciudad '{city_input}'")
+        
+        # Si no hay opciones, crear opciones por defecto para Madrid
+        if not options:
+            options = [
+                {"id": 1, "city": "Madrid", "state": "Comunidad de Madrid", "country": "España", "full_location": "Madrid, Comunidad de Madrid, España"},
+                {"id": 2, "city": "Madrid", "state": "Iowa", "country": "United States of America", "full_location": "Madrid, Iowa, United States of America"},
+                {"id": 3, "city": "Madrid", "state": "Cundinamarca", "country": "Colombia", "full_location": "Madrid, Cundinamarca, Colombia"}
+            ]
         
         # Usar IA para interpretar la respuesta del usuario
         selected_option = await interpret_natural_selection(user_response, options, city_input)
@@ -122,12 +141,76 @@ async def interpret_city_selection(request: Dict[str, Any]):
         logger.error(f"Error interpretando selección de ciudad: {e}")
         raise HTTPException(status_code=500, detail=f"Error interpretando selección: {str(e)}")
 
+# 🚀 OPTIMIZACIÓN: Lista de ciudades colombianas comunes para normalización rápida
+COLOMBIAN_CITIES_FAST_LOOKUP = {
+    "soacha": {"city": "Soacha", "state": "Cundinamarca", "country": "Colombia"},
+    "bogota": {"city": "Bogotá", "state": "Cundinamarca", "country": "Colombia"},
+    "bogotá": {"city": "Bogotá", "state": "Cundinamarca", "country": "Colombia"},
+    "medellin": {"city": "Medellín", "state": "Antioquia", "country": "Colombia"},
+    "medellín": {"city": "Medellín", "state": "Antioquia", "country": "Colombia"},
+    "cali": {"city": "Cali", "state": "Valle del Cauca", "country": "Colombia"},
+    "barranquilla": {"city": "Barranquilla", "state": "Atlántico", "country": "Colombia"},
+    "cartagena": {"city": "Cartagena", "state": "Bolívar", "country": "Colombia"},
+    "bucaramanga": {"city": "Bucaramanga", "state": "Santander", "country": "Colombia"},
+    "pereira": {"city": "Pereira", "state": "Risaralda", "country": "Colombia"},
+    "santa marta": {"city": "Santa Marta", "state": "Magdalena", "country": "Colombia"},
+    "ibague": {"city": "Ibagué", "state": "Tolima", "country": "Colombia"},
+    "ibagué": {"city": "Ibagué", "state": "Tolima", "country": "Colombia"},
+    "manizales": {"city": "Manizales", "state": "Caldas", "country": "Colombia"},
+    "neiva": {"city": "Neiva", "state": "Huila", "country": "Colombia"},
+    "villavicencio": {"city": "Villavicencio", "state": "Meta", "country": "Colombia"},
+    "armenia": {"city": "Armenia", "state": "Quindío", "country": "Colombia"},
+    "pasto": {"city": "Pasto", "state": "Nariño", "country": "Colombia"},
+    "valledupar": {"city": "Valledupar", "state": "Cesar", "country": "Colombia"},
+    "monteria": {"city": "Montería", "state": "Córdoba", "country": "Colombia"},
+    "montería": {"city": "Montería", "state": "Córdoba", "country": "Colombia"},
+    "sincelejo": {"city": "Sincelejo", "state": "Sucre", "country": "Colombia"},
+    "popayan": {"city": "Popayán", "state": "Cauca", "country": "Colombia"},
+    "popayán": {"city": "Popayán", "state": "Cauca", "country": "Colombia"},
+    "tunja": {"city": "Tunja", "state": "Boyacá", "country": "Colombia"},
+    "florencia": {"city": "Florencia", "state": "Caquetá", "country": "Colombia"},
+    "arauca": {"city": "Arauca", "state": "Arauca", "country": "Colombia"},
+    "yopal": {"city": "Yopal", "state": "Casanare", "country": "Colombia"},
+    "mocoa": {"city": "Mocoa", "state": "Putumayo", "country": "Colombia"},
+    "san josé del guaviare": {"city": "San José del Guaviare", "state": "Guaviare", "country": "Colombia"},
+    "leticia": {"city": "Leticia", "state": "Amazonas", "country": "Colombia"},
+    "inirida": {"city": "Inírida", "state": "Guainía", "country": "Colombia"},
+    "puerto carreño": {"city": "Puerto Carreño", "state": "Vichada", "country": "Colombia"},
+    "quibdo": {"city": "Quibdó", "state": "Chocó", "country": "Colombia"},
+    "quibdó": {"city": "Quibdó", "state": "Chocó", "country": "Colombia"},
+    "riohacha": {"city": "Riohacha", "state": "La Guajira", "country": "Colombia"},
+}
+
+async def normalize_city_fast(city_input: str) -> Dict[str, Any]:
+    """
+    Normalización rápida para ciudades colombianas comunes
+    """
+    city_lower = city_input.lower().strip()
+    
+    # Buscar en lista de ciudades comunes
+    if city_lower in COLOMBIAN_CITIES_FAST_LOOKUP:
+        result = COLOMBIAN_CITIES_FAST_LOOKUP[city_lower].copy()
+        result["confidence"] = 0.95
+        result["source"] = "fast_lookup"
+        logger.info(f"✅ Fast lookup para ciudad: '{city_input}' -> {result['city']}, {result['state']}")
+        return result
+    
+    # Si no está en la lista rápida, usar el enfoque híbrido original
+    logger.info(f"🔍 Ciudad no encontrada en fast lookup: '{city_input}' - usando enfoque híbrido")
+    return await normalize_city_hybrid_approach(city_input)
+
 async def normalize_city_hybrid_approach(city_input: str) -> Dict[str, Any]:
     """
     Enfoque híbrido: usa IA para determinar estrategia de búsqueda, luego consulta fuentes externas
     """
     try:
-        # 0. PRIMERO: Verificar sobrenombres/apodos conocidos (más rápido y confiable)
+        # 0. PRIMERO: Extraer ciudad de frases como "vivo en madrid", "soy de bogotá", etc.
+        extracted_city = extract_city_from_phrase(city_input)
+        if extracted_city != city_input:
+            logger.info(f"🏙️ Ciudad extraída de frase: '{city_input}' -> '{extracted_city}'")
+            city_input = extracted_city
+        
+        # 1. Verificar sobrenombres/apodos conocidos (más rápido y confiable)
         nickname_result = check_city_nicknames(city_input)
         if nickname_result:
             logger.info(f"🏷️ Sobrenombre detectado: '{city_input}' -> {nickname_result}")
@@ -821,7 +904,13 @@ async def interpret_natural_selection(user_response: str, options: List[Dict], c
     Interpreta la respuesta del usuario en lenguaje natural para seleccionar una opción de ciudad
     """
     try:
-        # Importar el servicio de IA
+        # Primero intentar interpretación simple sin IA
+        simple_result = interpret_simple_selection(user_response, options)
+        if simple_result is not None:
+            logger.info(f"✅ Interpretación simple exitosa: '{user_response}' -> opción {simple_result}")
+            return simple_result
+        
+        # Si la interpretación simple falla, usar IA
         from chatbot_ai_service.services.ai_service import AIService
         ai_service = AIService()
         
@@ -874,14 +963,14 @@ async def interpret_natural_selection(user_response: str, options: List[Dict], c
         - "¿por qué me preguntas esto?" -> NO_ES_SELECCION
         - "1" -> 1
         - "la primera" -> 1
-        - "Colombia" -> 1 (si la opción 1 es de Colombia)
-        - "España" -> 2 (si la opción 2 es de España)
-        - "en españa" -> 2 (si la opción 2 es de España)
-        - "europa" -> 2 (si la opción 2 es de España/Europa)
-        - "Madrid" -> 2 (si la opción 2 es de Madrid)
-        - "Estados Unidos" -> 3 (si la opción 3 es de Estados Unidos)
-        - "américa" -> 3 (si la opción 3 es de América)
-        - "la más grande" -> 3 (si la opción 3 es la ciudad más grande)
+        - "Colombia" -> 3 (si la opción 3 es de Colombia)
+        - "España" -> 1 (si la opción 1 es de España)
+        - "en españa" -> 1 (si la opción 1 es de España)
+        - "europa" -> 1 (si la opción 1 es de España/Europa)
+        - "Madrid" -> 1 (si la opción 1 es de Madrid)
+        - "Estados Unidos" -> 2 (si la opción 2 es de Estados Unidos)
+        - "américa" -> 2 (si la opción 2 es de América)
+        - "la más grande" -> 1 (si la opción 1 es la ciudad más grande)
         - "no sé" -> NO_CLARO
         """
         
@@ -908,6 +997,79 @@ async def interpret_natural_selection(user_response: str, options: List[Dict], c
         
     except Exception as e:
         logger.error(f"Error interpretando selección natural: {e}")
+        return None
+
+def interpret_simple_selection(user_response: str, options: List[Dict]) -> int:
+    """
+    Interpretación simple sin IA para casos comunes
+    """
+    try:
+        response_lower = user_response.lower().strip()
+        
+        # 1. Números directos
+        if response_lower.isdigit():
+            num = int(response_lower)
+            if 1 <= num <= len(options):
+                return num
+        
+        # 2. Números en palabras
+        number_words = {
+            "uno": 1, "primero": 1, "primera": 1, "la primera": 1,
+            "dos": 2, "segundo": 2, "segunda": 2, "la segunda": 2,
+            "tres": 3, "tercero": 3, "tercera": 3, "la tercera": 3,
+            "último": len(options), "última": len(options), "la última": len(options)
+        }
+        
+        if response_lower in number_words:
+            num = number_words[response_lower]
+            if 1 <= num <= len(options):
+                return num
+        
+        # 3. Países específicos
+        country_mapping = {
+            "colombia": "Colombia",
+            "españa": "España", "spain": "España",
+            "estados unidos": "United States of America", "usa": "United States of America", "america": "United States of America"
+        }
+        
+        for country_key, country_value in country_mapping.items():
+            if country_key in response_lower:
+                for i, option in enumerate(options, 1):
+                    if option.get("country") == country_value:
+                        logger.info(f"✅ Interpretación simple por país: '{user_response}' -> opción {i} ({country_value})")
+                        return i
+        
+        # 4. Regiones/Estados específicos
+        region_mapping = {
+            "cundinamarca": "Cundinamarca",
+            "comunidad de madrid": "Comunidad de Madrid", "madrid": "Comunidad de Madrid",
+            "iowa": "Iowa"
+        }
+        
+        for region_key, region_value in region_mapping.items():
+            if region_key in response_lower:
+                for i, option in enumerate(options, 1):
+                    if option.get("state") == region_value:
+                        logger.info(f"✅ Interpretación simple por región: '{user_response}' -> opción {i} ({region_value})")
+                        return i
+        
+        # 5. Referencias geográficas
+        if any(word in response_lower for word in ["europa", "europe"]):
+            for i, option in enumerate(options, 1):
+                if option.get("country") in ["España", "France", "Germany", "Italy"]:
+                    logger.info(f"✅ Interpretación simple por Europa: '{user_response}' -> opción {i}")
+                    return i
+        
+        if any(word in response_lower for word in ["américa", "america", "latinoamérica", "latinoamerica"]):
+            for i, option in enumerate(options, 1):
+                if option.get("country") in ["Colombia", "United States of America", "México", "Argentina"]:
+                    logger.info(f"✅ Interpretación simple por América: '{user_response}' -> opción {i}")
+                    return i
+        
+        return None
+        
+    except Exception as e:
+        logger.error(f"Error en interpretación simple: {e}")
         return None
 
 def select_best_result(ai_analysis: Dict[str, Any], external_results: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -1068,3 +1230,48 @@ def check_city_nicknames(city_input: str) -> Dict[str, Any]:
                     return {"city": city, "state": state, "country": country}
     
     return None
+
+def extract_city_from_phrase(text: str) -> str:
+    """
+    Extrae el nombre de la ciudad de frases como "vivo en madrid", "soy de bogotá", etc.
+    """
+    if not text:
+        return text
+    
+    text = text.strip().lower()
+    
+    # Patrones comunes para extraer ciudades de frases
+    patterns = [
+        r"vivo en (.+)",
+        r"soy de (.+)",
+        r"vivo en la ciudad de (.+)",
+        r"soy de la ciudad de (.+)",
+        r"estoy en (.+)",
+        r"resido en (.+)",
+        r"habito en (.+)",
+        r"me encuentro en (.+)",
+        r"estoy ubicado en (.+)",
+        r"mi ciudad es (.+)",
+        r"mi ubicación es (.+)",
+        r"estoy en (.+)",
+        r"vivo en (.+)",
+        r"soy de (.+)",
+        r"de (.+)",
+        r"en (.+)",
+    ]
+    
+    import re
+    
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            city = match.group(1).strip()
+            # Limpiar la ciudad extraída
+            city = re.sub(r'[^\w\sáéíóúñü]', '', city)  # Quitar caracteres especiales
+            city = city.strip()
+            if city and len(city) > 1:  # Asegurar que no esté vacía y tenga al menos 2 caracteres
+                logger.info(f"🏙️ Ciudad extraída con patrón '{pattern}': '{text}' -> '{city}'")
+                return city
+    
+    # Si no se encuentra ningún patrón, devolver el texto original
+    return text

@@ -241,6 +241,9 @@ class DocumentContextService:
                 "total_chars": total_chars
             }
             
+            # Debug: Mostrar estado del cache después de guardar
+            logger.info(f"🔍 DEBUG: Cache actualizado - Tenants: {list(self._document_cache.keys())}")
+            
             logger.info(
                 f"✅ Índice creado exitosamente para tenant {tenant_id} | "
                 f"{len(llama_documents)} documentos | "
@@ -266,15 +269,33 @@ class DocumentContextService:
             Contexto relevante como string
         """
         try:
+            # Debug: Mostrar estado del cache
+            logger.info(f"🔍 DEBUG: Cache actual - Tenants: {list(self._document_cache.keys())}")
+            logger.info(f"🔍 DEBUG: Buscando tenant {tenant_id}")
+            
             # Verificar si tenemos documentos en cache
             if tenant_id not in self._document_cache:
                 logger.warning(f"No hay documentos cargados para tenant {tenant_id}")
+                logger.warning(f"🔍 DEBUG: Tenants disponibles en cache: {list(self._document_cache.keys())}")
                 return ""
             
             doc_info = self._document_cache[tenant_id]
             
+            # Debug: Mostrar información detallada de los documentos
+            logger.info(f"🔍 DEBUG: Documentos para tenant {tenant_id}:")
+            if "documents" in doc_info:
+                logger.info(f"   - Número de documentos: {len(doc_info['documents'])}")
+                for i, doc in enumerate(doc_info['documents'][:3]):  # Mostrar solo los primeros 3
+                    logger.info(f"   - Doc {i+1}: {doc.get('filename', 'Sin nombre')} ({len(doc.get('content', ''))} chars)")
+                    # Mostrar una muestra del contenido
+                    content_preview = doc.get('content', '')[:200] + "..." if len(doc.get('content', '')) > 200 else doc.get('content', '')
+                    logger.info(f"      Contenido: {content_preview}")
+            else:
+                logger.info("   - No hay documentos en doc_info")
+            
             # Si tenemos índice vectorial, usar RAG
             if tenant_id in self._index_cache and LLAMA_INDEX_SUPPORT and VectorStoreIndex is not None:
+                logger.info(f"🔍 DEBUG: Usando índice vectorial para tenant {tenant_id}")
                 index = self._index_cache[tenant_id]
                 query_engine = index.as_query_engine(
                     similarity_top_k=max_results,
@@ -282,6 +303,7 @@ class DocumentContextService:
                 )
                 
                 response = query_engine.query(query)
+                logger.info(f"🔍 DEBUG: Respuesta del índice vectorial: {response}")
                 
                 # Extraer contexto relevante de la respuesta
                 if hasattr(response, 'source_nodes'):
@@ -290,11 +312,36 @@ class DocumentContextService:
                         context_parts.append(f"**{node.metadata.get('filename', 'Documento')}**:\n{node.text}")
                     
                     context = "\n\n".join(context_parts)
-                    logger.info(f"Contexto relevante obtenido (RAG) para tenant {tenant_id}: {len(context)} caracteres")
+                    logger.info(f"🔍 DEBUG: Contexto vectorial generado: {len(context)} caracteres")
                     return context
+                else:
+                    logger.info(f"🔍 DEBUG: No hay source_nodes en la respuesta vectorial")
+                    return ""
+            else:
+                logger.info(f"🔍 DEBUG: No hay índice vectorial, usando SmartRetriever")
+                # Usar SmartRetriever como fallback
+                from chatbot_ai_service.retrievers.smart_retriever import SmartRetriever
+                retriever = SmartRetriever()
+                
+                logger.info(f"🔍 DEBUG: Buscando con SmartRetriever: '{query}'")
+                search_results = retriever.search_documents(doc_info['documents'], query, max_results)
+                logger.info(f"🔍 DEBUG: SmartRetriever encontró {len(search_results)} resultados")
+                
+                if search_results:
+                    context_parts = []
+                    for i, result in enumerate(search_results):
+                        logger.info(f"🔍 DEBUG: Resultado {i+1}: {result.filename} (score: {result.score}, tipo: {result.match_type})")
+                        context_parts.append(f"[Documento {i+1}] {result.content}")
+                    
+                    context = "\n\n".join(context_parts)
+                    logger.info(f"🔍 DEBUG: Contexto generado: {len(context)} caracteres")
+                    return context
+                else:
+                    logger.info(f"🔍 DEBUG: SmartRetriever no encontró resultados relevantes")
+                    return ""
             
             # Si no hay índice, usar búsqueda simple por palabras clave
-            elif "documents" in doc_info:
+            if "documents" in doc_info:
                 context = self._simple_search(doc_info["documents"], query, max_results)
                 logger.info(f"Contexto relevante obtenido (simple) para tenant {tenant_id}: {len(context)} caracteres")
                 return context

@@ -68,20 +68,38 @@ class SmartRetriever:
             return []
         
         query_clean = query.lower().strip()
+        
+        # Extraer palabras clave más inteligentemente
+        enhanced_queries = self._extract_enhanced_queries(query_clean)
+        logger.info(f"🔍 Consultas mejoradas: {enhanced_queries}")
+        
         results = []
         
         logger.info(f"🔍 Buscando en {len(documents)} documentos: '{query_clean}'")
         
         for doc in documents:
-            score, match_type = self._calculate_document_score(doc, query_clean)
+            # Validar que el documento no sea None
+            if doc is None:
+                logger.warning("⚠️ Documento None encontrado, saltando...")
+                continue
             
-            if score > 0:
+            # Buscar con todas las consultas mejoradas
+            best_score = 0
+            best_match_type = 'no_match'
+            
+            for enhanced_query in enhanced_queries:
+                score, match_type = self._calculate_document_score(doc, enhanced_query)
+                if score > best_score:
+                    best_score = score
+                    best_match_type = match_type
+            
+            if best_score > 0:
                 results.append(SearchResult(
                     doc_id=doc.get('id', doc.get('filename', 'unknown')),
                     filename=doc.get('filename', 'Sin título'),
                     content=doc.get('content', ''),
-                    score=score,
-                    match_type=match_type
+                    score=best_score,
+                    match_type=best_match_type
                 ))
         
         # Ordenar por score descendente
@@ -101,42 +119,62 @@ class SmartRetriever:
         Returns:
             Tupla (score, match_type)
         """
+        # Validar que el documento no sea None
+        if doc is None:
+            return 0.0, 'invalid_doc'
+            
         content = doc.get('content', '').lower()
         filename = doc.get('filename', '').lower()
         
+        # Debug: Mostrar qué estamos buscando
+        logger.info(f"🔍 Buscando '{query}' en documento '{filename}'")
+        
         # 1. Búsqueda de frase exacta (score 100-200)
         if query in content:
+            logger.info(f"✅ Frase exacta encontrada en contenido")
             return 200.0, 'exact_phrase'
         if query in filename:
+            logger.info(f"✅ Frase exacta encontrada en filename")
             return 150.0, 'filename_match'
         
         # 2. Búsqueda de frases parciales (score 50-100)
         query_words = [w for w in query.split() if len(w) > 2 and w not in self.stopwords]
+        
+        # Debug: Mostrar palabras clave extraídas
+        logger.info(f"🔍 Palabras clave extraídas: {query_words}")
         
         if len(query_words) >= 2:
             # Buscar frases de 2-3 palabras consecutivas
             for i in range(len(query_words) - 1):
                 phrase = f"{query_words[i]} {query_words[i+1]}"
                 if phrase in content:
+                    logger.info(f"✅ Frase parcial encontrada en contenido: '{phrase}'")
                     return 80.0, 'partial_phrase'
                 if phrase in filename:
+                    logger.info(f"✅ Frase parcial encontrada en filename: '{phrase}'")
                     return 100.0, 'filename_partial'
         
         # 3. Búsqueda por keywords individuales (score 10-50)
         keyword_score = 0
         matched_keywords = 0
+        matched_words = []
         
         for word in query_words:
             if word in content:
                 keyword_score += 10
                 matched_keywords += 1
+                matched_words.append(word)
+                logger.info(f"✅ Keyword encontrado en contenido: '{word}'")
             if word in filename:
                 keyword_score += 20
                 matched_keywords += 1
+                matched_words.append(f"{word}(filename)")
+                logger.info(f"✅ Keyword encontrado en filename: '{word}'")
         
         if matched_keywords > 0:
             # Bonus por múltiples keywords
             keyword_score *= (1 + matched_keywords * 0.2)
+            logger.info(f"✅ Keywords matched: {matched_words} (score: {keyword_score:.1f})")
             return keyword_score, 'keyword_match'
         
         # 4. Búsqueda fuzzy/partial (score 1-10)
@@ -192,6 +230,59 @@ class SmartRetriever:
             current_length += len(context_part)
         
         return "\n".join(context_parts)
+    
+    def _extract_enhanced_queries(self, query: str) -> List[str]:
+        """
+        Extrae consultas mejoradas de una consulta original
+        
+        Para "que es lo de aguas vivas?" extrae:
+        - "aguas vivas" (frase clave)
+        - "aguas" (palabra individual)
+        - "vivas" (palabra individual)
+        - "que es aguas vivas" (versión simplificada)
+        """
+        enhanced_queries = [query]  # Incluir consulta original
+        
+        # Patrones comunes de preguntas en español
+        patterns = [
+            r'que es lo de (.+)',  # "que es lo de aguas vivas?"
+            r'que es (.+)',        # "que es aguas vivas?"
+            r'qué es (.+)',        # "qué es aguas vivas?"
+            r'habla sobre (.+)',   # "habla sobre aguas vivas"
+            r'información sobre (.+)',  # "información sobre aguas vivas"
+            r'cuéntame sobre (.+)',     # "cuéntame sobre aguas vivas"
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, query)
+            if match:
+                extracted = match.group(1).strip()
+                if extracted and len(extracted) > 2:
+                    enhanced_queries.append(extracted)
+                    logger.info(f"🔍 Consulta extraída: '{extracted}'")
+        
+        # Extraer palabras clave individuales
+        words = [w for w in query.split() if len(w) > 2 and w not in self.stopwords]
+        for word in words:
+            if word not in enhanced_queries:
+                enhanced_queries.append(word)
+        
+        # Crear frases de 2 palabras consecutivas
+        if len(words) >= 2:
+            for i in range(len(words) - 1):
+                phrase = f"{words[i]} {words[i+1]}"
+                if phrase not in enhanced_queries:
+                    enhanced_queries.append(phrase)
+        
+        # Eliminar duplicados manteniendo orden
+        seen = set()
+        unique_queries = []
+        for q in enhanced_queries:
+            if q not in seen:
+                seen.add(q)
+                unique_queries.append(q)
+        
+        return unique_queries
 
 
 # Instancia global

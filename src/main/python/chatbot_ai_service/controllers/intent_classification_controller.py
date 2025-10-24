@@ -153,7 +153,7 @@ async def extract_user_name_endpoint(tenant_id: str, request: Dict[str, Any]) ->
         
         # Extraer nombre con el servicio de IA
         ai_service = AIService()
-        extraction_result = await ai_service.extract_user_name_from_referral_message(tenant_id, message)
+        extraction_result = await ai_service.extract_user_name_from_message(tenant_id, message)
         
         return {
             "name": extraction_result.get("name"),

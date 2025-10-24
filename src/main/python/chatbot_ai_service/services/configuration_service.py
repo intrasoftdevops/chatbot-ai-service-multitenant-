@@ -43,7 +43,7 @@ class ConfigurationService:
                 "Accept": "application/json",
                 "Content-Type": "application/json"
             }
-            url = f"{self.java_service_url}/api/v1/tenants/{tenant_id}"
+            url = f"{self.java_service_url}/api/tenants/{tenant_id}/config"
             logger.info(f"Llamando a URL: {url}")
             
             with httpx.Client(timeout=30.0, headers=headers) as client:

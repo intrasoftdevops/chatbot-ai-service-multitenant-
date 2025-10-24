@@ -27,6 +27,7 @@ async def process_chat_message(tenant_id: str, request: Dict[str, Any]) -> Dict[
         # Extraer datos del request
         query = request.get("query", "").strip()
         user_context = request.get("user_context", {})
+        tenant_config = request.get("tenant_config", {})
         session_id = request.get("session_id")
         
         if not query:
@@ -34,10 +35,27 @@ async def process_chat_message(tenant_id: str, request: Dict[str, Any]) -> Dict[
         
         logger.info(f"📝 Mensaje recibido: '{query[:50]}...'")
         logger.info(f"👤 Usuario: {user_context.get('user_id', 'unknown')}")
+        logger.info(f"🔧 Configuración del tenant recibida: {bool(tenant_config)}")
         
         # Procesar mensaje con el servicio de IA
+        logger.info(f"🔍 DEBUG: Llamando a ai_service.process_chat_message...")
+        logger.info(f"🔍 DEBUG: Parámetros enviados:")
+        logger.info(f"   - tenant_id: {tenant_id}")
+        logger.info(f"   - query: '{query}'")
+        logger.info(f"   - user_context: {user_context}")
+        logger.info(f"   - session_id: {session_id}")
+        logger.info(f"   - tenant_config keys: {list(tenant_config.keys()) if tenant_config else 'None'}")
+        
         ai_service = AIService()
-        ai_response = await ai_service.process_chat_message(tenant_id, query, user_context, session_id)
+        ai_response = await ai_service.process_chat_message(tenant_id, query, user_context, session_id, tenant_config)
+        
+        logger.info(f"🔍 DEBUG: Respuesta recibida del ai_service:")
+        logger.info(f"   - Tipo: {type(ai_response)}")
+        logger.info(f"   - Keys: {list(ai_response.keys()) if isinstance(ai_response, dict) else 'No es dict'}")
+        logger.info(f"   - Response length: {len(ai_response.get('response', '')) if isinstance(ai_response, dict) else 'N/A'}")
+        logger.info(f"   - Intent: {ai_response.get('intent', 'N/A') if isinstance(ai_response, dict) else 'N/A'}")
+        logger.info(f"   - Confidence: {ai_response.get('confidence', 'N/A') if isinstance(ai_response, dict) else 'N/A'}")
+        logger.info(f"🔍 DEBUG: Contenido completo de la respuesta: {ai_response}")
         
         # NUEVO ENFOQUE: Usar followup_message directamente del servicio de IA
         clean_response = ai_response.get("response", "")
@@ -67,6 +85,50 @@ async def process_chat_message(tenant_id: str, request: Dict[str, Any]) -> Dict[
     except Exception as e:
         logger.error(f"❌ Error procesando mensaje de chat: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error procesando mensaje: {str(e)}")
+
+@router.post("/tenants/{tenant_id}/preload-documents")
+async def preload_tenant_documents(tenant_id: str, request: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Precarga documentos del tenant para RAG
+    """
+    try:
+        logger.info(f"📚 Precargando documentos para tenant: {tenant_id}")
+        
+        # Extraer datos del request
+        documentation_bucket_url = request.get("documentation_bucket_url")
+        
+        if not documentation_bucket_url:
+            raise HTTPException(status_code=400, detail="documentation_bucket_url parameter is required")
+        
+        logger.info(f"📚 URL del bucket: {documentation_bucket_url}")
+        
+        # Usar el servicio de documentos para precargar
+        from chatbot_ai_service.services.document_context_service import document_context_service
+        
+        success = await document_context_service.load_tenant_documents(tenant_id, documentation_bucket_url)
+        
+        if success:
+            logger.info(f"✅ Documentos precargados exitosamente para tenant {tenant_id}")
+            return {
+                "success": True,
+                "message": f"Documentos precargados para tenant {tenant_id}",
+                "tenant_id": tenant_id,
+                "bucket_url": documentation_bucket_url
+            }
+        else:
+            logger.warning(f"⚠️ No se pudieron precargar documentos para tenant {tenant_id}")
+            return {
+                "success": False,
+                "message": f"No se pudieron precargar documentos para tenant {tenant_id}",
+                "tenant_id": tenant_id,
+                "bucket_url": documentation_bucket_url
+            }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error precargando documentos para tenant {tenant_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error precargando documentos: {str(e)}")
 
 def process_followup_markers(response_text: str) -> Dict[str, str]:
     """
@@ -169,3 +231,166 @@ async def get_conversation_stats(tenant_id: str) -> Dict[str, Any]:
         },
         "status": "placeholder"
     }
+
+@router.post("/tenants/{tenant_id}/generate-welcome-message")
+async def generate_welcome_message(tenant_id: str, request: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Genera un mensaje de bienvenida personalizado usando IA
+    """
+    try:
+        # Extraer configuración del tenant
+        tenant_config = request.get("tenant_config", {})
+        
+        # Generar mensaje con IA
+        ai_service = AIService()
+        message = await ai_service.generate_welcome_message(tenant_config)
+        
+        return {
+            "tenant_id": tenant_id,
+            "message": message,
+            "status": "success"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error generando mensaje de bienvenida: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error generando mensaje de bienvenida: {str(e)}")
+
+@router.post("/tenants/{tenant_id}/generate-contact-save-message")
+async def generate_contact_save_message(tenant_id: str, request: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Genera un mensaje para pedir guardar el contacto usando IA
+    """
+    try:
+        # Extraer configuración del tenant
+        tenant_config = request.get("tenant_config", {})
+        
+        # Generar mensaje con IA
+        ai_service = AIService()
+        message = await ai_service.generate_contact_save_message(tenant_config)
+        
+        return {
+            "tenant_id": tenant_id,
+            "message": message,
+            "status": "success"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error generando mensaje de guardar contacto: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error generando mensaje de guardar contacto: {str(e)}")
+
+@router.post("/tenants/{tenant_id}/generate-name-request-message")
+async def generate_name_request_message(tenant_id: str, request: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Genera un mensaje para pedir el nombre del usuario usando IA
+    """
+    try:
+        # Extraer configuración del tenant
+        tenant_config = request.get("tenant_config", {})
+        
+        # Generar mensaje con IA
+        ai_service = AIService()
+        message = await ai_service.generate_name_request_message(tenant_config)
+        
+        return {
+            "tenant_id": tenant_id,
+            "message": message,
+            "status": "success"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error generando mensaje de pedir nombre: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error generando mensaje de pedir nombre: {str(e)}")
+
+@router.post("/tenants/{tenant_id}/generate-all-initial-messages")
+async def generate_all_initial_messages(tenant_id: str, request: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Genera los 3 mensajes iniciales de una vez para optimizar el tiempo de respuesta
+    """
+    try:
+        # 🔧 FIX: Extraer configuración del tenant del campo correcto
+        tenant_config = request.get("tenant_config", {})
+        if not tenant_config and "branding" in request:
+            # Si no hay tenant_config pero sí branding, usar branding directamente
+            tenant_config = {"branding": request["branding"]}
+        
+        logger.info(f"🔍 Configuración recibida: {tenant_config}")
+        
+        # Generar los 3 mensajes con IA
+        ai_service = AIService()
+        messages = await ai_service.generate_all_initial_messages(tenant_config)
+        
+        return {
+            "tenant_id": tenant_id,
+            "messages": messages,
+            "status": "success"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error generando mensajes iniciales: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error generando mensajes iniciales: {str(e)}")
+
+@router.post("/tenants/{tenant_id}/process-optimized")
+async def process_message_optimized(tenant_id: str, request: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    🚀 ENDPOINT OPTIMIZADO: Procesa mensaje con análisis completo en una sola llamada
+    Combina: clasificación + análisis de registro + detección de malicia + respuesta
+    """
+    try:
+        logger.info(f"🚀 Procesando mensaje optimizado para tenant: {tenant_id}")
+        
+        # Extraer datos del request
+        message = request.get("message", "").strip()
+        user_context = request.get("user_context", {})
+        session_id = request.get("session_id")
+        current_state = request.get("current_state", "UNKNOWN")
+        
+        if not message:
+            raise HTTPException(status_code=400, detail="Message parameter is required")
+        
+        logger.info(f"📝 Mensaje: '{message[:50]}...' | Estado: {current_state}")
+        
+        # Procesar con el servicio de IA optimizado
+        ai_service = AIService()
+        
+        # 1. Clasificar intención
+        classification = await ai_service.classify_intent(tenant_id, message, user_context)
+        intent = classification.get("classification", {}).get("category", "general_query")
+        
+        # 2. Analizar para registro
+        analysis = await ai_service.analyze_registration_message(tenant_id, message, user_context, current_state)
+        analysis_type = analysis.get("type", "other")
+        analysis_value = analysis.get("value")
+        
+        # 3. Detectar malicia
+        is_malicious = intent in ["malicious", "spam", "inappropriate"]
+        
+        # 4. Generar respuesta
+        if is_malicious:
+            response = "Lo siento, no puedo ayudarte con ese tipo de consulta."
+        elif analysis_type == "name" and analysis_value:
+            response = f"¡Hola {analysis_value}! Es un placer conocerte. ¿En qué puedo ayudarte?"
+        elif analysis_type == "info":
+            response = await ai_service.process_chat_message(tenant_id, message, user_context, session_id)
+            response = response.get("response", "Gracias por tu consulta. ¿Hay algo más en lo que pueda ayudarte?")
+        else:
+            response = await ai_service.process_chat_message(tenant_id, message, user_context, session_id)
+            response = response.get("response", "Gracias por tu mensaje. ¿En qué puedo ayudarte?")
+        
+        return {
+            "response": response,
+            "intent": intent,
+            "analysis_type": analysis_type,
+            "analysis_value": analysis_value,
+            "is_malicious": is_malicious,
+            "confidence": classification.get("confidence", 0.8),
+            "processing_time": classification.get("processing_time", 0),
+            "tenant_id": tenant_id,
+            "session_id": session_id or f"session_{user_context.get('user_id', 'unknown')}",
+            "status": "success"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error procesando mensaje optimizado: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error procesando mensaje optimizado: {str(e)}")

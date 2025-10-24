@@ -40,6 +40,68 @@ class AIService:
     def __init__(self):
         self.model = None
         self._initialized = False
+        # 🔧 FIX: Inicializar api_key en el constructor para evitar AttributeError
+        self.api_key = os.getenv("GEMINI_API_KEY")
+        if self.api_key:
+            logger.info(f"[OK] GEMINI_API_KEY cargada en constructor: {self.api_key[:10]}...")
+        else:
+            logger.warning("⚠️ GEMINI_API_KEY no configurado en constructor")
+        
+        # 🚀 OPTIMIZACIÓN: Cache para validaciones comunes
+        self._validation_cache = {
+            "name": {
+                "santiago": {"is_valid": True, "confidence": 0.95, "reason": "Nombre común válido"},
+                "maria": {"is_valid": True, "confidence": 0.95, "reason": "Nombre común válido"},
+                "juan": {"is_valid": True, "confidence": 0.95, "reason": "Nombre común válido"},
+                "carlos": {"is_valid": True, "confidence": 0.95, "reason": "Nombre común válido"},
+                "ana": {"is_valid": True, "confidence": 0.95, "reason": "Nombre común válido"},
+                "luis": {"is_valid": True, "confidence": 0.95, "reason": "Nombre común válido"},
+                "sofia": {"is_valid": True, "confidence": 0.95, "reason": "Nombre común válido"},
+                "diego": {"is_valid": True, "confidence": 0.95, "reason": "Nombre común válido"},
+                "andrea": {"is_valid": True, "confidence": 0.95, "reason": "Nombre común válido"},
+                "cristian": {"is_valid": True, "confidence": 0.95, "reason": "Nombre común válido"},
+                "natalia": {"is_valid": True, "confidence": 0.95, "reason": "Nombre común válido"},
+                "sebastian": {"is_valid": True, "confidence": 0.95, "reason": "Nombre común válido"},
+                "daniel": {"is_valid": True, "confidence": 0.95, "reason": "Nombre común válido"},
+                "valentina": {"is_valid": True, "confidence": 0.95, "reason": "Nombre común válido"},
+                "alejandro": {"is_valid": True, "confidence": 0.95, "reason": "Nombre común válido"},
+            },
+            "lastname": {
+                "garcia": {"is_valid": True, "confidence": 0.95, "reason": "Apellido común válido"},
+                "lopez": {"is_valid": True, "confidence": 0.95, "reason": "Apellido común válido"},
+                "rodriguez": {"is_valid": True, "confidence": 0.95, "reason": "Apellido común válido"},
+                "martinez": {"is_valid": True, "confidence": 0.95, "reason": "Apellido común válido"},
+                "gonzalez": {"is_valid": True, "confidence": 0.95, "reason": "Apellido común válido"},
+                "perez": {"is_valid": True, "confidence": 0.95, "reason": "Apellido común válido"},
+                "sanchez": {"is_valid": True, "confidence": 0.95, "reason": "Apellido común válido"},
+                "ramirez": {"is_valid": True, "confidence": 0.95, "reason": "Apellido común válido"},
+                "flores": {"is_valid": True, "confidence": 0.95, "reason": "Apellido común válido"},
+                "torres": {"is_valid": True, "confidence": 0.95, "reason": "Apellido común válido"},
+                "buitrago": {"is_valid": True, "confidence": 0.95, "reason": "Apellido común válido"},
+                "rojas": {"is_valid": True, "confidence": 0.95, "reason": "Apellido común válido"},
+                "silva": {"is_valid": True, "confidence": 0.95, "reason": "Apellido común válido"},
+                "morales": {"is_valid": True, "confidence": 0.95, "reason": "Apellido común válido"},
+                "castro": {"is_valid": True, "confidence": 0.95, "reason": "Apellido común válido"},
+            },
+            "city": {
+                "bogota": {"is_valid": True, "confidence": 0.95, "reason": "Ciudad colombiana válida"},
+                "medellin": {"is_valid": True, "confidence": 0.95, "reason": "Ciudad colombiana válida"},
+                "cali": {"is_valid": True, "confidence": 0.95, "reason": "Ciudad colombiana válida"},
+                "soacha": {"is_valid": True, "confidence": 0.95, "reason": "Ciudad colombiana válida"},
+                "barranquilla": {"is_valid": True, "confidence": 0.95, "reason": "Ciudad colombiana válida"},
+                "cartagena": {"is_valid": True, "confidence": 0.95, "reason": "Ciudad colombiana válida"},
+                "bucaramanga": {"is_valid": True, "confidence": 0.95, "reason": "Ciudad colombiana válida"},
+                "pereira": {"is_valid": True, "confidence": 0.95, "reason": "Ciudad colombiana válida"},
+                "santa marta": {"is_valid": True, "confidence": 0.95, "reason": "Ciudad colombiana válida"},
+                "ibague": {"is_valid": True, "confidence": 0.95, "reason": "Ciudad colombiana válida"},
+                "manizales": {"is_valid": True, "confidence": 0.95, "reason": "Ciudad colombiana válida"},
+                "neiva": {"is_valid": True, "confidence": 0.95, "reason": "Ciudad colombiana válida"},
+                "villavicencio": {"is_valid": True, "confidence": 0.95, "reason": "Ciudad colombiana válida"},
+                "armenia": {"is_valid": True, "confidence": 0.95, "reason": "Ciudad colombiana válida"},
+                "pastata": {"is_valid": True, "confidence": 0.95, "reason": "Ciudad colombiana válida"},
+            }
+        }
+        
         # Servicio para notificar bloqueos
         self.blocking_notification_service = BlockingNotificationService()
         # Configurar URL del servicio Java desde variable de entorno
@@ -51,6 +113,19 @@ class AIService:
         
         # 🔧 OPTIMIZACIÓN: Cache local para respuestas comunes
         self._response_cache = {}
+        
+        # 🚀 OPTIMIZACIÓN: Caché de intenciones para respuestas ultra-rápidas
+        self._intent_cache = {}
+        self._intent_cache_max_size = 1000
+        
+        # 🚀 OPTIMIZACIÓN: Respuestas precomputadas genéricas para casos comunes
+        self._precomputed_initial_messages = {
+            "default": {
+                'welcome': "¡Bienvenido/a! Soy tu candidato. ¡Juntos construimos el futuro!",
+                'contact': "Por favor, guarda este número como 'Mi Candidato' para recibir actualizaciones importantes de la campaña.",
+                'name': "¿Me confirmas tu nombre para guardarte en mis contactos y personalizar tu experiencia?"
+            }
+        }
         self._common_responses = {
             # Saludos comunes
             "hola": "saludo_apoyo",
@@ -115,22 +190,20 @@ class AIService:
         
         # [COHETE] FASE 1: Feature flag para usar GeminiClient
         # Permite migración gradual sin romper funcionalidad existente
-        self.use_gemini_client = os.getenv("USE_GEMINI_CLIENT", "f").lower() == "true"
+        # 🚀 OPTIMIZACIÓN: Habilitado por defecto para usar pre-carga de modelos
+        self.use_gemini_client = os.getenv("USE_GEMINI_CLIENT", "true").lower() == "true"
         self.gemini_client = None
         
         if self.use_gemini_client:
-            try:
-                from chatbot_ai_service.clients.gemini_client import GeminiClient
-                self.gemini_client = GeminiClient()
-                logger.info("[OK] GeminiClient habilitado via feature flag USE_GEMINI_CLIENT=true")
-            except Exception as e:
-                logger.error(f"[ERROR] Error inicializando GeminiClient: {e}")
-                logger.warning("[ADVERTENCIA] Usando lógica original de AIService como fallback")
-                self.use_gemini_client = False
+            logger.info("[OK] GeminiClient habilitado via feature flag USE_GEMINI_CLIENT=true")
+            # La inicialización se hace de forma lazy en _ensure_gemini_client()
+            
+        # La pre-carga se hará después de cargar las variables de entorno
         
         # [COHETE] FASE 2: Feature flag para usar configuraciones avanzadas por tarea
         # Permite optimizar temperatura, top_p, etc. según el tipo de tarea
-        self.use_advanced_model_configs = os.getenv("USE_ADVANCED_MODEL_CONFIGS", "false").lower() == "true"
+        # 🚀 OPTIMIZACIÓN: Habilitado por defecto para usar pre-carga optimizada
+        self.use_advanced_model_configs = os.getenv("USE_ADVANCED_MODEL_CONFIGS", "true").lower() == "true"
         
         if self.use_advanced_model_configs and self.use_gemini_client:
             logger.info("[OK] Configuraciones avanzadas de modelo habilitadas (USE_ADVANCED_MODEL_CONFIGS=true)")
@@ -147,6 +220,72 @@ class AIService:
         # Habilita prompts especializados y verificación estricta de respuestas
         self.use_guardrails = os.getenv("USE_GUARDRAILS", "true").lower() == "true"
         self.strict_guardrails = os.getenv("STRICT_GUARDRAILS", "true").lower() == "true"
+    
+    def preload_models_on_startup(self):
+        """
+        Pre-carga los modelos de IA después de que se carguen las variables de entorno
+        
+        Este método debe ser llamado desde main.py después de cargar las variables
+        de entorno para asegurar que la API key esté disponible.
+        """
+        try:
+            logger.info("🚀 Iniciando pre-carga de modelos de IA al startup del servicio...")
+            
+            # Verificar si tenemos API key disponible
+            api_key = os.getenv("GEMINI_API_KEY")
+            if not api_key:
+                logger.warning("⚠️ GEMINI_API_KEY no disponible - saltando pre-carga")
+                return
+            
+            # 🔧 FIX: Siempre inicializar el modelo principal, no solo el cliente
+            logger.info("🚀 Inicializando modelo principal de IA...")
+            self._ensure_model_initialized()
+            
+            if self.use_gemini_client:
+                logger.info("🚀 Pre-cargando modelos de IA...")
+                self._ensure_gemini_client()
+                logger.info("✅ Pre-carga completada al startup del servicio")
+            else:
+                logger.info("ℹ️ GeminiClient no habilitado - usando lógica original")
+                
+        except Exception as e:
+            logger.error(f"❌ Error durante pre-carga al startup: {e}")
+            import traceback
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
+            # No fallar el startup si hay error en la pre-carga
+    
+    def _ensure_gemini_client(self):
+        """
+        Inicializa el GeminiClient de forma lazy con pre-carga de modelos
+        
+        Este método se ejecuta solo cuando se necesita usar el GeminiClient,
+        asegurando que las variables de entorno ya estén cargadas.
+        """
+        if self.gemini_client is not None:
+            logger.info("✅ GeminiClient ya está inicializado")
+            return
+            
+        if not self.use_gemini_client:
+            logger.info("⚠️ GeminiClient no está habilitado")
+            return
+            
+        try:
+            logger.info("🚀 Inicializando GeminiClient con pre-carga de modelos...")
+            from chatbot_ai_service.clients.gemini_client import GeminiClient
+            self.gemini_client = GeminiClient()
+            
+            # 🚀 OPTIMIZACIÓN: Pre-cargar modelos para mejorar tiempo de respuesta
+            logger.info("🚀 Iniciando pre-carga de modelos de IA...")
+            self.gemini_client.preload_models()
+            logger.info("✅ Pre-carga de modelos completada")
+            
+        except Exception as e:
+            logger.error(f"[ERROR] Error inicializando GeminiClient: {e}")
+            import traceback
+            logger.error(f"[ERROR] Traceback: {traceback.format_exc()}")
+            logger.warning("[ADVERTENCIA] Usando lógica original de AIService como fallback")
+            self.use_gemini_client = False
+            self.gemini_client = None
         
         if self.use_rag_orchestrator:
             if not self.use_gemini_client:
@@ -224,7 +363,10 @@ class AIService:
         if self._initialized:
             return
             
-        self.api_key = os.getenv("GEMINI_API_KEY")
+        # 🔧 FIX: Solo obtener api_key si no está ya configurada
+        if not hasattr(self, 'api_key') or not self.api_key:
+            self.api_key = os.getenv("GEMINI_API_KEY")
+        
         if self.api_key:
             logger.info(f"[OK] GEMINI_API_KEY cargada correctamente: {self.api_key[:10]}...")
             
@@ -339,13 +481,127 @@ class AIService:
             logger.error(f"Error llamando a Gemini REST API: {str(e)}")
             return f"Error: {str(e)}"
     
+    async def _generate_fast_ai_response(self, query: str, user_context: Dict[str, Any], 
+                                        tenant_context: Dict[str, Any], session_context: str, 
+                                        intent: str) -> str:
+        """Genera respuesta rápida con IA usando contexto completo del usuario"""
+        try:
+            # 🚀 OPTIMIZACIÓN: Verificar caché primero
+            cache_key = f"fast_ai:{hash(query)}:{hash(session_context[:200])}"
+            cached_response = self._response_cache.get(cache_key)
+            if cached_response:
+                logger.info(f"🚀 RESPUESTA RÁPIDA DESDE CACHÉ para '{query[:30]}...'")
+                return cached_response
+            
+            # Obtener información del usuario desde el contexto
+            user_name = user_context.get('user_name', '')
+            user_city = user_context.get('user_city', '')
+            user_country = user_context.get('user_country', '')
+            user_state = user_context.get('user_state', '')
+            
+            # Construir contexto personalizado del usuario
+            user_info = ""
+            if user_name:
+                user_info += f"El usuario se llama {user_name}. "
+            if user_city:
+                user_info += f"Vive en {user_city}. "
+            if user_country:
+                user_info += f"País: {user_country}. "
+            if user_state:
+                user_info += f"Estado actual: {user_state}. "
+            
+            # Obtener información de la campaña desde memoria precargada
+            campaign_context = tenant_context.get('campaign_context', '')
+            branding_config = tenant_context.get('tenant_config', {}).get('branding', {})
+            contact_name = branding_config.get('contactName', 'el candidato')
+            
+            # Crear prompt ultra-optimizado con contexto completo
+            prompt = f"""Eres {contact_name}. Responde de manera personalizada y profesional.
+
+CONTEXTO DEL USUARIO:
+{user_info}
+
+CONTEXTO DE LA CAMPAÑA:
+{campaign_context}
+
+CONSULTA: "{query}"
+
+INSTRUCCIONES:
+- Responde de manera personalizada usando el nombre del usuario si está disponible
+- Menciona su ciudad si es relevante
+- Sé conciso pero completo (máximo 999 caracteres)
+- Mantén un tono profesional y cercano
+
+RESPUESTA:"""
+            
+            # 🔧 OPTIMIZACIÓN: Generación ultra-rápida con IA
+            response = await self._generate_content_ultra_fast(prompt, max_tokens=150)
+            
+            # 🚀 OPTIMIZACIÓN: Guardar en caché
+            self._response_cache[cache_key] = response
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error en respuesta rápida con IA: {e}")
+            return None  # Dejar que el flujo normal continúe
+
+    async def _generate_content_ultra_fast(self, prompt: str, max_tokens: int = 50) -> str:
+        """
+        Generación ultra-rápida de contenido para clasificación de intenciones
+        """
+        try:
+            if self.use_gemini_client and self.gemini_client:
+                # 🚀 OPTIMIZACIÓN MÁXIMA: Timeout ultra-agresivo para generación
+                import asyncio
+                try:
+                    response = await asyncio.wait_for(
+                        self.gemini_client.generate_content(prompt),
+                        timeout=1.0  # Timeout ultra-agresivo de 1 segundo
+                    )
+                    return response
+                except asyncio.TimeoutError:
+                    logger.warning(f"⚠️ Timeout en generación ultra-rápida para prompt: {prompt[:50]}...")
+                    return "saludo_apoyo"  # Fallback seguro
+            else:
+                # Fallback al método original
+                return await self._generate_content(prompt, "intent_classification")
+        except Exception as e:
+            logger.error(f"Error en generación ultra-rápida: {e}")
+            return "saludo_apoyo"  # Fallback seguro
+
+    async def _generate_content_with_documents(self, prompt: str, max_tokens: int = 200) -> str:
+        """
+        Generación de contenido específica para respuestas basadas en documentos
+        Con timeout más generoso para permitir procesamiento completo
+        """
+        try:
+            if self.use_gemini_client and self.gemini_client:
+                # 🚀 OPTIMIZACIÓN: Timeout más generoso para documentos (5 segundos)
+                import asyncio
+                try:
+                    response = await asyncio.wait_for(
+                        self.gemini_client.generate_content(prompt),
+                        timeout=5.0  # Timeout más generoso para documentos
+                    )
+                    return response
+                except asyncio.TimeoutError:
+                    logger.warning(f"⚠️ Timeout en generación con documentos para prompt: {prompt[:50]}...")
+                    return "Sobre este tema, tengo información específica que te puede interesar. Te puedo ayudar a conectarte con nuestro equipo para obtener más detalles."
+            else:
+                # Fallback al método original
+                return await self._generate_content(prompt, "document_response")
+        except Exception as e:
+            logger.error(f"Error en generación con documentos: {e}")
+            return "Sobre este tema, tengo información específica que te puede interesar. Te puedo ayudar a conectarte con nuestro equipo para obtener más detalles."
+
     async def _generate_content_optimized(self, prompt: str, task_type: str = "general") -> str:
         """
         Generación optimizada de contenido para máxima velocidad
         """
         try:
             if self.use_gemini_client and self.gemini_client:
-                # Usar configuración optimizada
+                # Usar configuración optimizada (ya pre-cargado al startup)
                 response = await self.gemini_client.generate_content(prompt)
                 return response
             else:
@@ -366,6 +622,9 @@ class AIService:
         Returns:
             Respuesta generada por Gemini
         """
+        logger.info(f"🔍 DEBUG: _generate_content llamado con task_type: '{task_type}'")
+        logger.info(f"🔍 DEBUG: Prompt length: {len(prompt)} caracteres")
+        logger.info(f"🔍 DEBUG: Prompt preview: {prompt[:200]}...")
         
         # 🔧 OPTIMIZACIÓN: Cache local para evitar llamadas repetidas
         cache_key = self._generate_cache_key(prompt, task_type)
@@ -417,6 +676,8 @@ class AIService:
         
         # 🔧 OPTIMIZACIÓN: Guardar en cache
         self._cache_response(cache_key, response)
+        logger.info(f"🔍 DEBUG: _generate_content devolviendo: {len(response)} caracteres")
+        logger.info(f"🔍 DEBUG: _generate_content respuesta: {response[:200]}...")
         return response
     
     def _get_cached_response(self, key: str) -> Optional[str]:
@@ -439,7 +700,7 @@ class AIService:
         content = f"{task_type}:{prompt[:100]}"  # Solo primeros 100 chars
         return hashlib.md5(content.encode()).hexdigest()[:16]
     
-    async def process_chat_message(self, tenant_id: str, query: str, user_context: Dict[str, Any], session_id: str = None) -> Dict[str, Any]:
+    async def process_chat_message(self, tenant_id: str, query: str, user_context: Dict[str, Any], session_id: str = None, tenant_config: Dict[str, Any] = None) -> Dict[str, Any]:
         """
         Procesa un mensaje de chat usando IA específica del tenant con sesión persistente y clasificación
         
@@ -448,6 +709,7 @@ class AIService:
             query: Mensaje del usuario
             user_context: Contexto del usuario
             session_id: ID de la sesión para mantener contexto
+            tenant_config: Configuración del tenant (incluye ai_config con documentation_bucket_url)
         """
         print(f"INICIANDO PROCESAMIENTO: '{query}' para tenant {tenant_id}")
         start_time = time.time()
@@ -457,6 +719,49 @@ class AIService:
         
         try:
             logger.info(f"Procesando mensaje para tenant {tenant_id}, sesión: {session_id}")
+            logger.info(f"🔍 DEBUG: Iniciando process_chat_message - query: '{query}', tenant_id: {tenant_id}")
+            
+            # 🔧 DEBUG CRÍTICO: Verificar parámetros de entrada
+            logger.info(f"🔍 DEBUG: Parámetros recibidos:")
+            logger.info(f"   - tenant_id: {tenant_id}")
+            logger.info(f"   - query: '{query}'")
+            logger.info(f"   - user_context: {user_context}")
+            logger.info(f"   - session_id: {session_id}")
+            logger.info(f"   - tenant_config: {tenant_config}")
+            
+            # 🚀 OPTIMIZACIÓN: Usar memoria precargada + contexto de sesión para acelerar clasificación de IA
+            from chatbot_ai_service.services.tenant_memory_service import tenant_memory_service
+            from chatbot_ai_service.services.session_context_service import session_context_service
+            
+            # Obtener contexto del tenant desde memoria precargada
+            tenant_context = tenant_memory_service.get_tenant_context(tenant_id)
+            if tenant_context:
+                logger.info(f"🧠 Usando contexto precargado del tenant {tenant_id} para acelerar clasificación")
+                user_context['tenant_context'] = tenant_context
+            else:
+                logger.info(f"⚠️ No hay contexto precargado para tenant {tenant_id}, usando flujo normal")
+            
+            # Obtener contexto de la sesión del usuario (datos personales, historial)
+            if session_id:
+                session_context = session_context_service.build_context_for_ai(session_id)
+                if session_context:
+                    logger.info(f"👤 Usando contexto de sesión del usuario para personalizar respuesta")
+                    user_context['session_context'] = session_context
+                else:
+                    logger.info(f"ℹ️ No hay contexto de sesión para {session_id}")
+            
+            # Clasificar la intencion del mensaje usando IA (pero con contexto precargado)
+            logger.info(f"🔍 DEBUG: Clasificando intención...")
+            try:
+                classification_result = await self.classify_intent(tenant_id, query, user_context, session_id)
+                intent = classification_result.get("category", "saludo_apoyo").strip()
+                confidence = classification_result.get("confidence", 0.0)
+                logger.info(f"🔍 DEBUG: Intención clasificada: '{intent}' con confianza: {confidence}")
+            except Exception as e:
+                logger.error(f"❌ ERROR en clasificación de intención: {str(e)}")
+                intent = "saludo_apoyo"
+                confidence = 0.5
+                logger.info(f"🔍 DEBUG: Usando intención por defecto: '{intent}'")
             
             # VERIFICAR SI EL USUARIO ESTÁ BLOQUEADO PRIMERO
             user_state = user_context.get("user_state", "")
@@ -472,18 +777,32 @@ class AIService:
                     "confidence": 1.0
                 }
             
-            # Obtener configuración del tenant desde el servicio Java
-            tenant_config = configuration_service.get_tenant_config(tenant_id)
+            # 🚀 OPTIMIZACIÓN: Usar configuración del tenant desde memoria precargada
             if not tenant_config:
-                return {
-                    "response": "Lo siento, no puedo procesar tu mensaje en este momento.",
-                    "followup_message": "",
-                    "error": "Tenant no encontrado"
-                }
+                tenant_context = user_context.get('tenant_context', {})
+                tenant_config = tenant_context.get('tenant_config', {})
+                if not tenant_config:
+                    logger.warning(f"⚠️ No hay configuración del tenant {tenant_id} en memoria precargada")
+                    return {
+                        "response": "Lo siento, no puedo procesar tu mensaje en este momento.",
+                        "followup_message": "",
+                        "error": "Tenant no encontrado"
+                    }
+                else:
+                    logger.info(f"✅ Usando configuración del tenant {tenant_id} desde memoria precargada")
+            else:
+                logger.info(f"🔧 Usando configuración del tenant enviada desde Java: {bool(tenant_config.get('ai_config'))}")
             
             # Obtener configuración de IA
-            ai_config = configuration_service.get_ai_config(tenant_id)
-            branding_config = configuration_service.get_branding_config(tenant_id)
+            ai_config = tenant_config.get("ai_config", {}) if tenant_config else {}
+            branding_config = tenant_config.get("branding", {}) if tenant_config else {}
+            
+            # 🔧 DEBUG: Log de configuración recibida
+            logger.info(f"🔍 Configuración recibida para tenant {tenant_id}:")
+            logger.info(f"  - tenant_config keys: {list(tenant_config.keys()) if tenant_config else 'None'}")
+            logger.info(f"  - ai_config: {ai_config}")
+            logger.info(f"  - ai_config keys: {list(ai_config.keys()) if ai_config else 'None'}")
+            logger.info(f"  - documentation_bucket_url: {ai_config.get('documentation_bucket_url') if ai_config else 'None'}")
             
             # Gestionar sesión
             if not session_id:
@@ -554,30 +873,47 @@ class AIService:
             logger.info(f"🔍 DESPUÉS DE CLASIFICACIÓN - intent: '{intent}'")
             logger.info(f"🔍 JUSTO DESPUÉS DEL PRINT - intent: '{intent}'")
             logger.info(f"🔍 INICIANDO BLOQUE RAG")
+            logger.info(f"🔍 DEBUG: Llegando al bloque RAG - intent: '{intent}'")
+            logger.info(f"🔍 DEBUG: ANTES DE CUALQUIER PROCESAMIENTO - intent: '{intent}'")
+            logger.info(f"🔍 DEBUG: Continuando con el flujo normal...")
             
             # RAG con orden correcto: primero documentos, luego fallback
             document_context = None
             logger.info(f"🔍 ANTES DEL BLOQUE RAG - intent: '{intent}'")
             
-            # Consultar documentos para intenciones que requieren información específica
-            intents_requiring_docs = ["conocer_candidato", "solicitud_funcional", "pregunta_especifica", "consulta_propuesta"]
-            
-            if intent in intents_requiring_docs:
-                # PRIMERO: Intentar obtener información de documentos
-                try:
-                    document_context = await self._fast_rag_search(tenant_id, query, ai_config, branding_config)
-                    if not document_context:
+            try:
+                # Consultar documentos para intenciones que requieren información específica
+                intents_requiring_docs = ["conocer_candidato", "solicitud_funcional", "pregunta_especifica", "consulta_propuesta"]
+                
+                if intent in intents_requiring_docs:
+                    logger.info(f"🔍 DEBUG: Intentando RAG para intención '{intent}'")
+                    # PRIMERO: Intentar obtener información de documentos
+                    try:
+                        logger.info(f"🔍 DEBUG: Llamando a _fast_rag_search...")
+                        document_context = await self._fast_rag_search(tenant_id, query, ai_config, branding_config)
+                        logger.info(f"🔍 DEBUG: _fast_rag_search devolvió: '{document_context}'")
+                        if not document_context:
+                            document_context = "gemini_direct"
+                            logger.info(f"🔍 DEBUG: document_context es None, usando gemini_direct")
+                        else:
+                            logger.info(f"🔍 DEBUG: document_context tiene contenido: {len(document_context)} caracteres")
+                        logger.info(f"📚 Documentos consultados para intención '{intent}'")
+                    except Exception as e:
+                        logger.error(f"[ERROR] Error en RAG: {e}")
+                        # Solo usar fallback si hay error
                         document_context = "gemini_direct"
-                    logger.info(f"📚 Documentos consultados para intención '{intent}'")
-                except Exception as e:
-                    logger.error(f"[ERROR] Error en RAG: {e}")
-                    # Solo usar fallback si hay error
-                    document_context = "gemini_direct"
-            else:
-                logger.info(f"[OBJETIVO] Intención '{intent}' no requiere documentos, saltando carga")
+                else:
+                    logger.info(f"[OBJETIVO] Intención '{intent}' no requiere documentos, saltando carga")
+            except Exception as e:
+                logger.error(f"❌ ERROR en bloque RAG: {str(e)}")
+                document_context = "gemini_direct"
             
             logger.info(f"🔍 DESPUÉS DEL BLOQUE RAG - intent: '{intent}'")
             logger.info(f"🧠 Intención extraída: {intent} (confianza: {confidence:.2f})")
+            logger.info(f"🔍 DEBUG: Continuando con procesamiento de intención...")
+            logger.info(f"🔍 DEBUG: Llegando al bloque de procesamiento de intención")
+            logger.info(f"🔍 DEBUG: document_context = '{document_context}'")
+            logger.info(f"🔍 DEBUG: ANTES DE CACHÉ - intent: '{intent}'")
             
             # 1.5 NUEVO: Intentar obtener respuesta del caché
             logger.info(f"🔍 ANTES DE cache_service.get_cached_response")
@@ -611,65 +947,111 @@ class AIService:
             session_context = session_context_service.build_context_for_ai(session_id)
             logger.info(f"🔍 DESPUÉS DE session_context_service.build_context_for_ai")
             
-            logger.info(f"🔍 EVALUANDO INTENT: '{intent}' - Tipo: {type(intent)}")
-            if intent == "conocer_candidato":
-                # Generar respuesta especializada para consultas sobre el candidato
-                if document_context and document_context != "gemini_direct":
-                    response = await self._generate_candidate_response_with_documents(
-                        query, user_context, branding_config, tenant_config, document_context, session_context
-                    )
-                else:
-                    response = await self._generate_candidate_response_gemini_direct(
-                        query, user_context, branding_config, tenant_config, session_context
-                    )
-            elif intent == "cita_campaña":
-                logger.info(f"[OBJETIVO] RESPUESTA RÁPIDA: cita_campaña")
-                response = self._handle_appointment_request_with_context(branding_config, tenant_config, session_context)
-            elif intent == "saludo_apoyo":
-                logger.info(f"[OBJETIVO] RESPUESTA RÁPIDA: saludo_apoyo")
-                response = self._get_greeting_response_with_context(branding_config, session_context)
-            elif intent == "colaboracion_voluntariado":
-                logger.info(f"[OBJETIVO] RESPUESTA RÁPIDA: colaboracion_voluntariado")
-                response = self._get_volunteer_response_with_context(branding_config, session_context)
-            elif intent == "solicitud_funcional":
-                logger.info(f"🔍 LLEGANDO AL BLOQUE solicitud_funcional - intent: '{intent}'")
-                # Respuesta específica para consultas funcionales con contexto de sesión
-                logger.info(f"🎯 PROCESANDO solicitud_funcional - llamando _handle_functional_request_with_session")
-                result = await self._handle_functional_request_with_session(
-                    query, user_context, ai_config, branding_config, tenant_id, session_id
+            # 🚀 OPTIMIZACIÓN: Intentar respuesta rápida con IA pero usando contexto precargado
+            tenant_context = user_context.get('tenant_context', {})
+            logger.info(f"🔍 DEBUG: tenant_context obtenido: {bool(tenant_context)}")
+            logger.info(f"🔍 DEBUG: intent: '{intent}'")
+            if tenant_context and intent in ["saludo_apoyo"]:
+                logger.info(f"🔍 DEBUG: USANDO RESPUESTA RÁPIDA CON IA - saltando RAG")
+                # Solo para casos simples, usar IA rápida con contexto completo del usuario
+                fast_response = await self._generate_fast_ai_response(
+                    query, user_context, tenant_context, session_context, intent
                 )
-                
-                # Manejar el nuevo formato de respuesta (puede ser string o tupla)
-                if isinstance(result, tuple):
-                    response, followup_message = result
-                    logger.info(f"🎯 RESPUESTA GENERADA para solicitud_funcional: {len(response)} caracteres")
-                    logger.info(f"🎯 FOLLOWUP_MESSAGE generado: {len(followup_message) if followup_message else 0} caracteres")
-                else:
-                    response = result
-                    followup_message = ""
-                    logger.info(f"🎯 RESPUESTA GENERADA para solicitud_funcional: {len(response)} caracteres")
-            else:
-                # Procesar según la intención clasificada con IA
-                logger.info(f"🔍 INTENT DETECTADO: '{intent}' - Iniciando procesamiento")
-                
+                if fast_response:
+                    logger.info(f"🚀 RESPUESTA RÁPIDA CON IA para '{query[:30]}...'")
+                    logger.info(f"🔍 DEBUG: RESPUESTA RÁPIDA: {fast_response[:200]}...")
+                    
+                    # Agregar respuesta del bot a la sesión
+                    session_context_service.add_message(session_id, "assistant", fast_response)
+                    
+                    processing_time = time.time() - start_time if 'start_time' in locals() else 0.0
+                    return {
+                        "response": fast_response,
+                        "followup_message": "",
+                        "from_fast_ai": True,
+                        "processing_time": processing_time,
+                        "tenant_id": tenant_id,
+                        "session_id": session_id
+                    }
+            
+            logger.info(f"🔍 EVALUANDO INTENT: '{intent}' - Tipo: {type(intent)}")
+            logger.info(f"🔍 DEBUG: ANTES DEL TRY - intent: '{intent}'")
+            
+            try:
+                logger.info(f"🔍 DEBUG: DENTRO DEL TRY - intent: '{intent}'")
                 if intent == "conocer_candidato":
-                    logger.info(f"🎯 PROCESANDO conocer_candidato")
-                    # Respuesta específica sobre el candidato
-                    response = await self._generate_ai_response_with_session(
+                    # Generar respuesta especializada para consultas sobre el candidato
+                    logger.info(f"🎯 PROCESANDO conocer_candidato - document_context: {document_context[:100] if document_context else 'None'}...")
+                    
+                    if document_context and document_context != "gemini_direct":
+                        logger.info(f"📚 Usando documentos para respuesta")
+                        response = await self._generate_candidate_response_with_documents(
+                            query, user_context, branding_config, tenant_config, document_context, session_context
+                        )
+                        logger.info(f"📚 RESPUESTA CON DOCUMENTOS GENERADA:")
+                        logger.info(f"📚 CONTENIDO: {response}")
+                    else:
+                        logger.info(f"🤖 Usando Gemini directo para respuesta")
+                        response = await self._generate_candidate_response_gemini_direct(
+                            query, user_context, branding_config, tenant_config, session_context
+                        )
+                        logger.info(f"🤖 RESPUESTA GEMINI DIRECTO GENERADA:")
+                        logger.info(f"🤖 CONTENIDO: {response}")
+                    
+                    logger.info(f"✅ RESPUESTA GENERADA para conocer_candidato: {len(response)} caracteres")
+                elif intent == "cita_campaña":
+                    logger.info(f"[OBJETIVO] RESPUESTA RÁPIDA: cita_campaña")
+                    response = self._handle_appointment_request_with_context(branding_config, tenant_config, session_context)
+                elif intent == "saludo_apoyo":
+                    logger.info(f"[OBJETIVO] RESPUESTA RÁPIDA: saludo_apoyo")
+                    response = self._get_greeting_response_with_context(branding_config, session_context)
+                elif intent == "colaboracion_voluntariado":
+                    logger.info(f"[OBJETIVO] RESPUESTA RÁPIDA: colaboracion_voluntariado")
+                    response = self._get_volunteer_response_with_context(branding_config, session_context)
+                elif intent == "solicitud_funcional":
+                    logger.info(f"🔍 LLEGANDO AL BLOQUE solicitud_funcional - intent: '{intent}'")
+                    # Respuesta específica para consultas funcionales con contexto de sesión
+                    logger.info(f"🎯 PROCESANDO solicitud_funcional - llamando _handle_functional_request_with_session")
+                    result = await self._handle_functional_request_with_session(
                         query, user_context, ai_config, branding_config, tenant_id, session_id
                     )
-                elif intent == "malicioso":
-                    logger.info(f"🎯 PROCESANDO malicioso")
-                    # Manejo específico para comportamiento malicioso
-                    response = await self._handle_malicious_behavior(
-                        query, user_context, tenant_id, confidence
-                    )
+                    
+                    # Manejar el nuevo formato de respuesta (puede ser string o tupla)
+                    if isinstance(result, tuple):
+                        response, followup_message = result
+                        logger.info(f"🎯 RESPUESTA GENERADA para solicitud_funcional: {len(response)} caracteres")
+                        logger.info(f"🎯 FOLLOWUP_MESSAGE generado: {len(followup_message) if followup_message else 0} caracteres")
+                    else:
+                        response = result
+                        followup_message = ""
+                        logger.info(f"🎯 RESPUESTA GENERADA para solicitud_funcional: {len(response)} caracteres")
                 else:
-                    logger.info(f"🎯 PROCESANDO respuesta general para intent: '{intent}'")
-                    # Respuesta general con contexto de sesión
-                    response = await self._generate_ai_response_with_session(
-                        query, user_context, ai_config, branding_config, tenant_id, session_id
-                    )
+                    # Procesar según la intención clasificada con IA
+                    logger.info(f"🔍 INTENT DETECTADO: '{intent}' - Iniciando procesamiento")
+                    
+                    if intent == "conocer_candidato":
+                        logger.info(f"🎯 PROCESANDO conocer_candidato (BLOQUE ELSE)")
+                        # Respuesta específica sobre el candidato
+                        response = await self._generate_ai_response_with_session(
+                            query, user_context, ai_config, branding_config, tenant_id, session_id
+                        )
+                        logger.info(f"🎯 RESPUESTA GENERADA (BLOQUE ELSE):")
+                        logger.info(f"🎯 CONTENIDO: {response}")
+                    elif intent == "malicioso":
+                        logger.info(f"🎯 PROCESANDO malicioso")
+                        # Manejo específico para comportamiento malicioso
+                        response = await self._handle_malicious_behavior(
+                            query, user_context, tenant_id, confidence
+                        )
+                    else:
+                        logger.info(f"🎯 PROCESANDO respuesta general para intent: '{intent}'")
+                        # Respuesta general con contexto de sesión
+                        response = await self._generate_ai_response_with_session(
+                            query, user_context, ai_config, branding_config, tenant_id, session_id
+                        )
+            except Exception as e:
+                logger.error(f"❌ ERROR en procesamiento de intención '{intent}': {str(e)}")
+                response = f"Lo siento, hubo un error procesando tu consulta sobre '{intent}'. Por favor intenta de nuevo."
             
             # Filtrar enlaces de la respuesta para WhatsApp (excepto citas)
             if intent == "cita_campaña":
@@ -678,9 +1060,9 @@ class AIService:
             else:
                 filtered_response = self._filter_links_from_response(response)
             
-            # Limitar respuesta a máximo 1000 caracteres de forma inteligente
-            if len(filtered_response) > 1000:
-                filtered_response = self._truncate_response_intelligently(filtered_response, 1000)
+            # Limitar respuesta a máximo 999 caracteres de forma inteligente
+            if len(filtered_response) > 999:
+                filtered_response = self._truncate_response_intelligently(filtered_response, 999)
             
             # Agregar respuesta del asistente a la sesión
             session_context_service.add_message(session_id, "assistant", filtered_response, metadata={"intent": intent, "confidence": confidence})
@@ -701,7 +1083,35 @@ class AIService:
                 intent=intent
             )
             
-            return {
+            # 🧠 ACTUALIZAR MEMORIA DEL USUARIO CON EL CONTEXTO DE LA CONVERSACIÓN
+            user_phone = user_context.get("user_id", "unknown")
+            if user_phone != "unknown":
+                from chatbot_ai_service.services.tenant_memory_service import tenant_memory_service
+                
+                # Actualizar contexto del usuario con información relevante
+                context_update = {
+                    "last_query": query,
+                    "last_intent": intent,
+                    "last_response": filtered_response[:100],  # Solo primeros 100 caracteres
+                    "conversation_count": user_context.get("conversation_count", 0) + 1
+                }
+                
+                tenant_memory_service.update_user_context(tenant_id, user_phone, context_update)
+                logger.info(f"🧠 Memoria actualizada para {tenant_id}:{user_phone}")
+            
+            # 🔧 DEBUG CRÍTICO: Log antes del return final
+            logger.info(f"🚀 PREPARANDO RESPUESTA FINAL:")
+            logger.info(f"   - Response: {len(filtered_response)} caracteres")
+            logger.info(f"   - Followup: {len(followup_message) if followup_message else 0} caracteres")
+            logger.info(f"   - Intent: {intent}")
+            logger.info(f"   - Confidence: {confidence}")
+            logger.info(f"   - Processing time: {processing_time:.2f}s")
+            
+            # 🔧 DEBUG CRÍTICO: Mostrar contenido completo de la respuesta
+            logger.info(f"📝 CONTENIDO COMPLETO DE LA RESPUESTA:")
+            logger.info(f"📝 {filtered_response}")
+            
+            final_response = {
                 "response": filtered_response,
                 "followup_message": followup_message,
                 "processing_time": processing_time,
@@ -711,6 +1121,9 @@ class AIService:
                 "confidence": confidence,
                 "from_cache": False
             }
+            
+            logger.info(f"✅ DEVOLVIENDO RESPUESTA FINAL: {final_response}")
+            return final_response
             
         except Exception as e:
             logger.error(f"Error procesando mensaje para tenant {tenant_id}: {str(e)}")
@@ -723,23 +1136,37 @@ class AIService:
     async def _generate_ai_response_with_session(self, query: str, user_context: Dict[str, Any], 
                                                ai_config: Dict[str, Any], branding_config: Dict[str, Any], 
                                                tenant_id: str, session_id: str) -> str:
-        """Genera respuesta usando IA con contexto de sesión persistente"""
+        """Genera respuesta usando IA con contexto de sesión persistente y caché"""
         self._ensure_model_initialized()
         if not self.model:
             return "Lo siento, el servicio de IA no está disponible."
         
         try:
+            # 🚀 OPTIMIZACIÓN: Verificar caché de respuestas primero
+            cache_key = f"response:{tenant_id}:{query.lower().strip()}"
+            cached_response = self._response_cache.get(cache_key)
+            if cached_response:
+                logger.info(f"🚀 RESPUESTA DESDE CACHÉ para '{query[:30]}...'")
+                return cached_response
+            
             # Obtener contexto completo de la sesión
             session_context = session_context_service.build_context_for_ai(session_id)
             
-            # Obtener configuración del tenant para incluir en el prompt
-            tenant_config = configuration_service.get_tenant_config(tenant_id)
+            # 🚀 OPTIMIZACIÓN: Usar configuración del tenant desde memoria precargada
+            tenant_context = user_context.get('tenant_context', {})
+            tenant_config = tenant_context.get('tenant_config', {})
+            if not tenant_config:
+                logger.warning(f"⚠️ No hay configuración del tenant {tenant_id} en memoria precargada para sesión")
+                return "Lo siento, no puedo procesar tu mensaje en este momento."
             
             # Construir prompt con contexto de sesión
             prompt = self._build_session_prompt(query, user_context, branding_config, session_context, tenant_config)
             
-            #  FASE 2: Usar configuración optimizada para chat con sesión
-            response_text = await self._generate_content(prompt, task_type="chat_with_session")
+            # 🔧 OPTIMIZACIÓN: Generación optimizada para velocidad
+            response_text = await self._generate_content_optimized(prompt, task_type="chat_with_session")
+            
+            # 🚀 OPTIMIZACIÓN: Guardar en caché para futuras consultas
+            self._response_cache[cache_key] = response_text
             
             return response_text
             
@@ -752,12 +1179,20 @@ class AIService:
         """Construye el prompt para chat con contexto de sesión"""
         contact_name = branding_config.get("contactName", "el candidato")
         
-        # Contexto del usuario actual
+        # Contexto completo del usuario actual
         current_context = ""
         if user_context.get("user_name"):
             current_context += f"El usuario se llama {user_context['user_name']}. "
+        if user_context.get("user_city"):
+            current_context += f"Vive en {user_context['user_city']}. "
+        if user_context.get("user_country"):
+            current_context += f"País: {user_context['user_country']}. "
         if user_context.get("user_state"):
             current_context += f"Estado actual: {user_context['user_state']}. "
+        if user_context.get("user_phone"):
+            current_context += f"Teléfono: {user_context['user_phone']}. "
+        if user_context.get("conversation_count"):
+            current_context += f"Es su conversación #{user_context['conversation_count']}. "
         
         # Información específica del tenant
         tenant_info = ""
@@ -779,28 +1214,30 @@ INFORMACIÓN IMPORTANTE:
 
 Tu objetivo es mantener conversaciones fluidas y naturales, recordando el contexto de la conversación anterior.
 
+CONTEXTO COMPLETO DEL USUARIO:
+{current_context}
+
 CONTEXTO ACTUAL DE LA SESIÓN:
 {session_context}
-
-CONTEXTO INMEDIATO:
-{current_context}
 
 INFORMACIÓN ESPECÍFICA DEL TENANT:
 {tenant_info}
 
 Mensaje actual del usuario: "{query}"
 
-INSTRUCCIONES:
-1. Mantén el contexto de la conversación anterior
-2. Si es una pregunta de seguimiento, responde de manera natural
-3. Usa la información específica de la campaña cuando sea relevante
-4. Mantén un tono amigable y profesional
-5. Si no tienes información específica, sé honesto al respecto
-6. Integra sutilmente elementos motivacionales sin ser explícito sobre "EPIC MEANING" o "DEVELOPMENT"
-7. **IMPORTANTE**: Si el usuario pide agendar una cita, usar el enlace específico de ENLACE DE CITAS
-8. **CRÍTICO**: Mantén la respuesta concisa, máximo 800 caracteres
-9. **NO menciones enlaces** a documentos externos, solo da información directa
-10. **SIEMPRE identifica correctamente que {contact_name} es el candidato**
+INSTRUCCIONES PERSONALIZADAS:
+1. **PERSONALIZA** tu respuesta usando el nombre del usuario si está disponible
+2. **MENCIÓN** su ciudad si es relevante para la respuesta
+3. Mantén el contexto de la conversación anterior
+4. Si es una pregunta de seguimiento, responde de manera natural
+5. Usa la información específica de la campaña cuando sea relevante
+6. Mantén un tono amigable y profesional
+7. Si no tienes información específica, sé honesto al respecto
+8. Integra sutilmente elementos motivacionales sin ser explícito sobre "EPIC MEANING" o "DEVELOPMENT"
+9. **IMPORTANTE**: Si el usuario pide agendar una cita, usar el enlace específico de ENLACE DE CITAS
+10. **CRÍTICO**: Mantén la respuesta concisa, máximo 999 caracteres
+11. **NO menciones enlaces** a documentos externos, solo da información directa
+12. **SIEMPRE identifica correctamente que {contact_name} es el candidato**
 
 SISTEMA DE PUNTOS Y RANKING:
 - Cada referido registrado suma 50 puntos
@@ -809,7 +1246,7 @@ SISTEMA DE PUNTOS Y RANKING:
 - Los usuarios pueden preguntar "?Cómo voy?" para ver su progreso
 - Para invitar personas: "mandame el link" o "dame mi código"
 
-Responde de manera natural, contextual y útil. Si tienes información específica sobre la campaña en el contexto, úsala para dar una respuesta más precisa.
+Responde de manera natural, contextual y útil, personalizando la respuesta según la información del usuario disponible.
 
 Respuesta:
 """
@@ -937,116 +1374,64 @@ Respuesta:
             return None, None
     
     async def _fast_rag_search(self, tenant_id: str, query: str, ai_config: Dict[str, Any], branding_config: Dict[str, Any] = None) -> Optional[str]:
-        """RAG rápido usando Gemini para buscar en documentos sin LlamaIndex"""
+        """RAG rápido usando documentos precargados"""
         try:
             # Obtener contact_name del branding config
             contact_name = "el candidato"
             if branding_config:
                 contact_name = branding_config.get("contactName", "el candidato")
             
-            # Obtener URL del bucket de documentos
-            documentation_bucket_url = ai_config.get("documentation_bucket_url")
-            if not documentation_bucket_url:
-                logger.warning(f"[ADVERTENCIA] No hay URL de bucket de documentos para tenant {tenant_id}")
-                return None
+            logger.info(f"[RAG] Buscando en documentos precargados para tenant {tenant_id}")
             
-            logger.info(f"[LUP] RAG rápido: buscando en bucket {documentation_bucket_url}")
+            # 🚀 USAR DOCUMENTOS PRECARGADOS en lugar de descargarlos cada vez
+            from chatbot_ai_service.services.document_context_service import document_context_service
             
-            # Inicializar Gemini directamente
-            try:
-                api_key = os.getenv("GEMINI_API_KEY")
-                if not api_key:
-                    logger.warning("[ADVERTENCIA] GEMINI_API_KEY no disponible")
+            # Verificar si los documentos ya están precargados
+            doc_info = document_context_service.get_tenant_document_info(tenant_id)
+            if not doc_info or doc_info.get('document_count', 0) == 0:
+                # Solo reportar warning si NO hay documentos precargados
+                documentation_bucket_url = ai_config.get("documentation_bucket_url")
+                if not documentation_bucket_url:
+                    logger.warning(f"[ADVERTENCIA] No hay URL de bucket de documentos para tenant {tenant_id}")
                     return None
-                
-                genai.configure(api_key=api_key)
-                
-                # Probar múltiples modelos para RAG también (optimizado para velocidad y calidad)
-                rag_models = ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash', 'gemini-1.5-flash-002', 'gemini-1.5-pro-002']
-                model = None
-                
-                for model_name in rag_models:
-                    try:
-                        test_model = genai.GenerativeModel(model_name)
-                        # Prueba rápida
-                        test_response = test_model.generate_content("OK")
-                        if test_response and test_response.text:
-                            model = test_model
-                            logger.info(f"[OK] Modelo RAG {model_name} inicializado correctamente")
-                            break
-                    except Exception as e:
-                        logger.warning(f"[ADVERTENCIA] Error con modelo RAG {model_name}: {str(e)}")
-                        continue
-                
-                if not model:
-                    logger.error("[ERROR] No se pudo inicializar ningún modelo para RAG")
-                    return None
-                
-            except Exception as e:
-                logger.error(f"[ERROR] Error inicializando modelo: {e}")
-                return None
+                else:
+                    logger.info(f"📥 Cargando documentos para tenant {tenant_id} desde: {documentation_bucket_url}")
+                    success = await document_context_service.load_tenant_documents(tenant_id, documentation_bucket_url)
+                    if not success:
+                        logger.warning(f"[ADVERTENCIA] No se pudieron cargar documentos para tenant {tenant_id}")
+                        return None
             
-            # Intentar obtener contenido real de documentos específicos
-            document_content, document_name = await self._get_document_content_for_query(query, documentation_bucket_url)
+            # Obtener contexto relevante de documentos precargados
+            document_content = await document_context_service.get_relevant_context(tenant_id, query, max_results=3)
             
             if document_content:
-                logger.info(f"[LIBROS] Contenido de documentos obtenido: {len(document_content)} caracteres")
-                if document_name:
-                    print(f"📄 DOCUMENTO: {document_name}")
-                # Usar el contenido real de los documentos
-                prompt = f"""
-                Eres un asistente que busca información específica en documentos políticos.
-                
-                PREGUNTA DEL USUARIO: "{query}"
-                
-                CONTENIDO DE DOCUMENTOS DISPONIBLE:
-                {document_content}
-                
-                INSTRUCCIONES:
-                1. Busca información relevante sobre esta pregunta en el contenido de documentos proporcionado
-                2. Si la pregunta es sobre el candidato (quien es, biografia, perfil), busca información específica sobre {contact_name}
-                3. {contact_name} es el candidato - busca información sobre esta persona en los documentos
-                4. Si encuentras información específica, extrae los puntos más importantes
-                5. Si no encuentras información específica, responde "NO_ENCONTRADO"
-                6. Responde solo con la información encontrada, sin agregar explicaciones adicionales
-                7. Máximo 500 palabras
-                
-                Busca información relevante para la pregunta: "{query}"
-                """
+                logger.info(f"[LIBROS] Contenido de documentos precargados obtenido: {len(document_content)} caracteres")
+                print(f"📄 DOCUMENTOS PRECARGADOS: {len(document_content)} caracteres")
+                # Usar el contenido real de los documentos con prompt optimizado
+                prompt = f"""Eres {contact_name}. Usuario pregunta: "{query}"
+
+INFORMACIÓN DE DOCUMENTOS: {document_content}
+
+Responde específicamente usando esta información. Máximo 999 caracteres."""
             else:
-                logger.info("[LIBROS] No se pudo obtener contenido de documentos, usando títulos")
-                # Fallback a solo títulos
-                prompt = f"""
-                Eres un asistente que busca información específica en documentos políticos.
-                
-                PREGUNTA DEL USUARIO: "{query}"
-                
-                INSTRUCCIONES:
-                1. Basándote en los títulos de documentos disponibles, determina si hay información relevante
-                2. Si encuentras información específica, extrae los puntos más importantes
-                3. Si no encuentras información específica, responde "NO_ENCONTRADO"
-                4. Responde solo con la información encontrada, sin agregar explicaciones adicionales
-                5. Máximo 500 palabras
-                
-                DOCUMENTOS DISPONIBLES:
-                Se encuentran documentos políticos y de campaña disponibles para consulta.
-                
-                Busca información relevante para la pregunta: "{query}"
-                """
+                logger.info("[RAG] No se pudo obtener contenido de documentos precargados")
+                return None
             
+            # Procesar con Gemini usando el contenido precargado
             try:
-                response = model.generate_content(prompt)
-                result = response.text.strip()
+                response = await self._generate_content(prompt, task_type="rag_search")
+                result = response.strip()
                 
-                if "NO_ENCONTRADO" in result or len(result) < 50:
-                    logger.info(f"[LUP] RAG rápido: No se encontró información específica para '{query}'")
+                if len(result) < 50:
+                    logger.info(f"[RAG] Respuesta muy corta para '{query}'")
                     return None
                 
-                logger.info(f"[LUP] RAG rápido: Información encontrada ({len(result)} caracteres)")
+                logger.info(f"[RAG] Respuesta generada: {len(result)} caracteres")
+                logger.info(f"🔍 DEBUG: RESPUESTA RAG COMPLETA: {result}")
                 return result
                 
             except Exception as e:
-                logger.error(f"[ERROR] Error en Gemini RAG: {e}")
+                logger.error(f"[ERROR] Error generando respuesta RAG: {e}")
                 return None
                 
         except Exception as e:
@@ -1059,6 +1444,19 @@ Respuesta:
         """Genera respuesta especializada usando Gemini directamente (más rápido)"""
         try:
             contact_name = branding_config.get("contactName", "el candidato")
+            
+            # 🚀 OPTIMIZACIÓN: Construir contexto completo del usuario
+            user_info = ""
+            if user_context.get("user_name"):
+                user_info += f"El usuario se llama {user_context['user_name']}. "
+            if user_context.get("user_city"):
+                user_info += f"Vive en {user_context['user_city']}. "
+            if user_context.get("user_country"):
+                user_info += f"País: {user_context['user_country']}. "
+            if user_context.get("user_state"):
+                user_info += f"Estado actual: {user_context['user_state']}. "
+            if user_context.get("user_phone"):
+                user_info += f"Teléfono: {user_context['user_phone']}. "
             
             # Usar Gemini directamente para respuesta rápida
             self._ensure_model_initialized()
@@ -1074,24 +1472,29 @@ Respuesta:
                 
                 prompt = f"""
                 Eres el asistente virtual de {contact_name}. El usuario pregunta: "{query}"
+                
+                CONTEXTO COMPLETO DEL USUARIO:
+                {user_info}
                 {context_section}
                 
                 INFORMACIÓN IMPORTANTE:
                 - El candidato es {contact_name}
                 - Si el usuario pregunta sobre "el candidato", se refiere a {contact_name}
                 
-                INSTRUCCIONES:
-                1. Responde específicamente sobre las propuestas de {contact_name} relacionadas con la pregunta
-                2. Mantén un tono profesional y político, enfocado en las propuestas del candidato
-                3. Si hay contexto de conversación anterior, úsalo para dar respuestas más naturales y fluidas
-                4. Si no tienes información específica, ofrece conectar al usuario con el equipo de la campaña
-                5. Responde en máximo 1000 caracteres de forma COMPLETA - no uses "..." ni cortes abruptos
-                6. SIEMPRE identifica correctamente que {contact_name} es el candidato
-                7. PRIORIDAD: Genera una respuesta completa que quepa en 1000 caracteres sin truncar
-                8. Si mencionas listas numeradas, completa al menos 3 elementos principales
-                9. Termina la respuesta de manera natural, no abrupta
+                INSTRUCCIONES PERSONALIZADAS:
+                1. **PERSONALIZA** tu respuesta usando el nombre del usuario si está disponible
+                2. **MENCIÓN** su ciudad si es relevante para la respuesta
+                3. Responde específicamente sobre las propuestas de {contact_name} relacionadas con la pregunta
+                4. Mantén un tono profesional y político, enfocado en las propuestas del candidato
+                5. Si hay contexto de conversación anterior, úsalo para dar respuestas más naturales y fluidas
+                6. Si no tienes información específica, ofrece conectar al usuario con el equipo de la campaña
+                7. Responde en máximo 999 caracteres de forma COMPLETA - no uses "..." ni cortes abruptos
+                8. SIEMPRE identifica correctamente que {contact_name} es el candidato
+                9. PRIORIDAD: Genera una respuesta completa que quepa en 999 caracteres sin truncar
+                10. Si mencionas listas numeradas, completa al menos 3 elementos principales
+                11. Termina la respuesta de manera natural, no abrupta
                 
-                Responde de manera natural, útil y COMPLETA sobre las propuestas de {contact_name}.
+                Responde de manera natural, útil y COMPLETA sobre las propuestas de {contact_name}, personalizando según la información del usuario.
                 """
                 
                 try:
@@ -1113,56 +1516,72 @@ Te gustaría que alguien del equipo te contacte para brindarte información más
     async def _generate_candidate_response_with_documents(self, query: str, user_context: Dict[str, Any], 
                                                          branding_config: Dict[str, Any], tenant_config: Dict[str, Any], 
                                                          document_context: str, session_context: str = "") -> str:
-        """Genera respuesta especializada usando documentos reales"""
+        """Genera respuesta especializada usando documentos reales con caché"""
         try:
+            # 🚀 OPTIMIZACIÓN: Verificar caché de respuestas con documentos
+            cache_key = f"doc_response:{hash(query)}:{hash(document_context[:500])}"
+            cached_response = self._response_cache.get(cache_key)
+            if cached_response:
+                logger.info(f"🚀 RESPUESTA CON DOCUMENTOS DESDE CACHÉ para '{query[:30]}...'")
+                return cached_response
+            
             contact_name = branding_config.get("contactName", "el candidato")
             
-            # Mostrar solo el título del documento
-            print(f"📄 DOCUMENTO: {document_context[:100]}...")
+            # 🚀 OPTIMIZACIÓN: Construir contexto completo del usuario
+            user_info = ""
+            if user_context.get("user_name"):
+                user_info += f"El usuario se llama {user_context['user_name']}. "
+            if user_context.get("user_city"):
+                user_info += f"Vive en {user_context['user_city']}. "
+            if user_context.get("user_country"):
+                user_info += f"País: {user_context['user_country']}. "
+            if user_context.get("user_state"):
+                user_info += f"Estado actual: {user_context['user_state']}. "
+            if user_context.get("user_phone"):
+                user_info += f"Teléfono: {user_context['user_phone']}. "
+            
+            # Mostrar el contenido completo del documento para debugging
+            print(f"📄 CONTENIDO COMPLETO DEL DOCUMENTO:")
+            print(f"📄 {document_context}")
+            print(f"📄 LONGITUD: {len(document_context)} caracteres")
+            
+            # Truncar el contenido para acelerar Gemini (máximo 1500 caracteres para mayor velocidad)
+            if len(document_context) > 1500:
+                document_context = document_context[:1500] + "..."
+                print(f"⚠️ CONTENIDO TRUNCADO para acelerar Gemini: {len(document_context)} caracteres")
             
             # El document_context ya contiene la información procesada por la IA
             # Solo necesitamos formatearla de manera más natural
             if document_context and document_context != "NO_ENCONTRADO":
-                # Incluir contexto de sesión si está disponible
-                context_section = ""
-                if session_context:
-                    context_section = f"""
+                # Crear prompt ULTRA-OPTIMIZADO con contexto completo del usuario
+                prompt = f"""Eres {contact_name}. Responde de manera personalizada y profesional.
+
+CONTEXTO COMPLETO DEL USUARIO:
+{user_info}
+
+INFORMACIÓN ESPECÍFICA SOBRE LA CONSULTA: {document_context}
+
+CONSULTA: "{query}"
+
+INSTRUCCIONES CRÍTICAS:
+- **USA EXCLUSIVAMENTE** la información específica proporcionada arriba
+- **NO INVENTES** información que no esté en el contenido proporcionado
+- **RESPONDE DIRECTAMENTE** basándote en los datos específicos del documento
+- **PERSONALIZA** tu respuesta usando el nombre del usuario si está disponible
+- **MENCIÓN** su ciudad si es relevante para la respuesta
+- Máximo 999 caracteres
+- Mantén un tono profesional y cercano
+- Si la información específica no responde completamente la consulta, dilo claramente
+
+RESPUESTA BASADA EN LA INFORMACIÓN ESPECÍFICA:"""
                 
-                CONTEXTO DE LA CONVERSACIÓN:
-                {session_context}
-                """
-                
-                # Crear prompt para formatear la respuesta de manera más natural
-                prompt = f"""
-                Eres el asistente virtual de {contact_name}. El usuario pregunta: "{query}"
-                {context_section}
-                
-                INFORMACIÓN IMPORTANTE:
-                - El candidato es {contact_name}
-                - Si el usuario pregunta sobre "el candidato", se refiere a {contact_name}
-                
-                INFORMACIÓN ENCONTRADA EN DOCUMENTOS:
-                {document_context}
-                
-                INSTRUCCIONES:
-                1. Responde específicamente sobre la pregunta del usuario usando la información encontrada
-                2. Mantén un tono profesional y político, enfocado en las propuestas del candidato
-                3. Si hay contexto de conversación anterior, úsalo para dar respuestas más naturales y fluidas
-                4. Si la información no responde directamente la pregunta, explica qué información relevante contiene
-                5. Mantén la respuesta CONCISA y COMPLETA - no uses "..." ni cortes abruptos
-                6. NO menciones que la información viene de un documento, solo responde naturalmente
-                7. Si la información es sobre casos o investigaciones, preséntala de manera objetiva
-                8. SIEMPRE identifica correctamente que {contact_name} es el candidato
-                9. PRIORIDAD: Genera una respuesta completa que quepa en 1000 caracteres sin truncar
-                10. Si mencionas listas numeradas, completa al menos 3 elementos principales
-                11. Termina la respuesta de manera natural, no abrupta
-                
-                Responde en máximo 1000 caracteres de forma COMPLETA:
-                """
-                
-                # Procesar con IA
-                response = await self._generate_content(prompt, task_type="chat_with_session")
+                # 🔧 OPTIMIZACIÓN: Generación específica para documentos (timeout más generoso)
+                response = await self._generate_content_with_documents(prompt, max_tokens=200)
                 print(f"🤖 RESPUESTA GENERADA: {response[:200]}...")
+                
+                # 🚀 OPTIMIZACIÓN: Guardar en caché
+                self._response_cache[cache_key] = response
+                
                 return response
             else:
                 # Si no se encontró información específica, usar respuesta genérica
@@ -1477,7 +1896,7 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
                     logger.info(f"🔗 NUEVO ENFOQUE: Detectada solicitud de enlace - generando respuesta con followup_message")
                     
                     # Generar enlace de WhatsApp
-                    whatsapp_link = self._generate_whatsapp_referral_link(user_name, referral_code, contact_name, tenant_id)
+                    whatsapp_link = self._generate_whatsapp_referral_link(user_name, referral_code, contact_name, tenant_id, user_context)
                     
                     if whatsapp_link:
                         # Generar respuesta principal sin enlace
@@ -1641,7 +2060,7 @@ Responde de manera natural:"""
 
         return prompt
     
-    def _generate_direct_link_response_with_followup(self, user_name: str, referral_code: str, contact_name: str, tenant_id: str, user_data: Dict[str, Any]) -> str:
+    def _generate_direct_link_response_with_followup(self, user_name: str, referral_code: str, contact_name: str, tenant_id: str, user_data: Dict[str, Any], user_context: Dict[str, Any] = None) -> str:
         """Genera una respuesta directa con información de seguimiento para segundo mensaje"""
         try:
             logger.info(f"🚀 INICIANDO _generate_direct_link_response_with_followup")
@@ -1649,7 +2068,7 @@ Responde de manera natural:"""
             
             # Generar enlace de WhatsApp
             logger.info(f"🔗 Generando enlace de WhatsApp para {user_name} con código {referral_code}")
-            whatsapp_link = self._generate_whatsapp_referral_link(user_name, referral_code, contact_name, tenant_id)
+            whatsapp_link = self._generate_whatsapp_referral_link(user_name, referral_code, contact_name, tenant_id, user_context)
             logger.info(f"🔗 Enlace generado: {whatsapp_link}")
             logger.info(f"🔗 Longitud del enlace: {len(whatsapp_link) if whatsapp_link else 0}")
             
@@ -1693,11 +2112,11 @@ Responde de manera natural:"""
             logger.error(f"❌ Error generando respuesta directa con seguimiento: {str(e)}")
             return f"¡Hola {user_name}! Tu código de referido es: {referral_code}"
     
-    def _generate_direct_link_response(self, user_name: str, referral_code: str, contact_name: str, tenant_id: str, user_data: Dict[str, Any]) -> str:
+    def _generate_direct_link_response(self, user_name: str, referral_code: str, contact_name: str, tenant_id: str, user_data: Dict[str, Any], user_context: Dict[str, Any] = None) -> str:
         """Genera una respuesta directa con el enlace de WhatsApp cuando se solicita"""
         try:
             # Generar enlace de WhatsApp
-            whatsapp_link = self._generate_whatsapp_referral_link(user_name, referral_code, contact_name, tenant_id)
+            whatsapp_link = self._generate_whatsapp_referral_link(user_name, referral_code, contact_name, tenant_id, user_context)
             
             if not whatsapp_link:
                 logger.error("❌ No se pudo generar enlace de WhatsApp")
@@ -1728,11 +2147,13 @@ En el siguiente mensaje te envío tu enlace para compartir."""
             logger.error(f"❌ Error generando respuesta directa: {str(e)}")
             return f"¡Hola {user_name}! Tu código de referido es: {referral_code}"
     
-    def _generate_whatsapp_referral_link(self, user_name: str, referral_code: str, contact_name: str, tenant_id: str = None) -> str:
+    def _generate_whatsapp_referral_link(self, user_name: str, referral_code: str, contact_name: str, tenant_id: str = None, user_context: Dict[str, Any] = None) -> str:
         """Genera un enlace de WhatsApp personalizado para referidos"""
         try:
-            # Obtener número de WhatsApp del tenant (configurable)
-            whatsapp_number = self._get_tenant_whatsapp_number(tenant_id)
+            # Obtener número de WhatsApp del tenant desde memoria precargada
+            tenant_context = user_context.get('tenant_context', {}) if user_context else {}
+            tenant_config = tenant_context.get('tenant_config', {})
+            whatsapp_number = self._get_tenant_whatsapp_number(tenant_id, tenant_config)
             # Validar número
             if not whatsapp_number or not str(whatsapp_number).strip():
                 logger.warning("⚠️ No hay numero_whatsapp configurado para el tenant; no se generará enlace")
@@ -1765,13 +2186,17 @@ En el siguiente mensaje te envío tu enlace para compartir."""
             logger.error(f"❌ Error generando enlace de WhatsApp: {str(e)}")
             return ""
     
-    def _get_tenant_whatsapp_number(self, tenant_id: str) -> str:
-        """Obtiene el número de WhatsApp configurado para el tenant"""
+    def _get_tenant_whatsapp_number(self, tenant_id: str, tenant_config: Dict[str, Any] = None) -> str:
+        """Obtiene el número de WhatsApp configurado para el tenant desde memoria precargada"""
         try:
             logger.info(f"🔍 INICIANDO _get_tenant_whatsapp_number para tenant: {tenant_id}")
             if tenant_id:
-                logger.info(f"🌐 URL del servicio Java: {configuration_service.java_service_url}")
-                tenant_config = configuration_service.get_tenant_config(tenant_id)
+                # 🚀 OPTIMIZACIÓN: Usar configuración del tenant desde memoria precargada
+                if not tenant_config:
+                    logger.warning(f"⚠️ No hay configuración del tenant {tenant_id} para WhatsApp")
+                    return ""
+                
+                logger.info(f"✅ Usando configuración del tenant {tenant_id} desde memoria precargada para WhatsApp")
                 logger.info(f"📋 Configuración del tenant {tenant_id}: {tenant_config}")
                 if tenant_config:
                     # Aceptar claves alternativas por compatibilidad
@@ -1818,10 +2243,11 @@ En el siguiente mensaje te envío tu enlace para compartir."""
                 logger.warning("No se encontró teléfono en el contexto del usuario")
                 return None
             
-            # Obtener configuración del tenant para el client_project_id
-            tenant_config = configuration_service.get_tenant_config(tenant_id)
+            # 🚀 OPTIMIZACIÓN: Usar configuración del tenant desde memoria precargada
+            tenant_context = user_context.get('tenant_context', {})
+            tenant_config = tenant_context.get('tenant_config', {})
             if not tenant_config:
-                logger.warning(f"No se encontró configuración para tenant {tenant_id}")
+                logger.warning(f"No se encontró configuración para tenant {tenant_id} en memoria precargada")
                 return None
                 
             client_project_id = tenant_config.get("client_project_id")
@@ -2019,6 +2445,18 @@ Puedes preguntarme sobre:
             Clasificación de intención
         """
         try:
+            # 🚀 OPTIMIZACIÓN: Detección ultra-rápida para saludos comunes
+            message_lower = message.lower().strip()
+            if message_lower in self._common_responses:
+                classification = self._common_responses[message_lower]
+                logger.info(f"🚀 BYPASS GEMINI: Saludo común '{message_lower}' -> {classification}")
+                return {
+                    "category": classification,
+                    "confidence": 0.95,
+                    "original_message": message,
+                    "reason": "Bypass Gemini - Saludo común"
+                }
+            
             # 🚀 VELOCIDAD MÁXIMA: Usar solo IA, sin bypass
             logger.info(f"🎯 USANDO IA DIRECTA: '{message[:30]}...'")
             
@@ -2056,8 +2494,13 @@ Puedes preguntarme sobre:
             # 🔧 OPTIMIZACIÓN: Solo usar Gemini para casos complejos
             logger.info(f"🎯 USANDO GEMINI para caso complejo: '{message[:50]}...'")
             
-            # Obtener configuración del tenant
-            tenant_config = configuration_service.get_tenant_config(tenant_id)
+            # 🚀 OPTIMIZACIÓN: Usar configuración del tenant desde memoria precargada
+            tenant_context = user_context.get('tenant_context', {})
+            tenant_config = tenant_context.get('tenant_config', {})
+            if not tenant_config:
+                logger.warning(f"No se encontró configuración para tenant {tenant_id} en memoria precargada para clasificación")
+                # Usar configuración por defecto si no hay memoria precargada
+                tenant_config = {}
 
             # Asegurar session_id estable: derivar de user_context cuando no venga
             if not session_id:
@@ -2085,7 +2528,7 @@ Puedes preguntarme sobre:
             session_context = session_context_service.build_context_for_ai(session_id)
             
             # Clasificar intención usando IA con contexto de sesión
-            classification = await self._classify_with_ai(message, user_context, session_context)
+            classification = await self._classify_with_ai(message, user_context, session_context, tenant_id)
             
             return classification
             
@@ -2215,7 +2658,9 @@ Puedes preguntarme sobre:
         try:
             logger.info(f"Extrayendo {data_type} para tenant {tenant_id}")
             
-            # Obtener configuración del tenant
+            # 🚀 OPTIMIZACIÓN: Usar configuración del tenant desde memoria precargada
+            # Nota: Este método necesita ser llamado con user_context para acceder a tenant_context
+            logger.warning(f"⚠️ Método extract_data necesita ser optimizado para usar memoria precargada")
             tenant_config = configuration_service.get_tenant_config(tenant_id)
             if not tenant_config:
                 return {
@@ -2506,7 +2951,7 @@ Responde solo el JSON estricto sin comentarios:
     
     async def _generate_ai_response(self, query: str, user_context: Dict[str, Any], 
                                   ai_config: Dict[str, Any], branding_config: Dict[str, Any], 
-                                  tenant_id: str) -> str:
+                                  tenant_id: str, session_id: str = None) -> str:
         """Genera respuesta usando IA con contexto de documentos"""
         
         # [COHETE] FASE 6: Usar RAGOrchestrator si está habilitado
@@ -2628,15 +3073,14 @@ Responde solo el JSON estricto sin comentarios:
             "reason": "intelligent_intent_detection"
         }
 
-    async def _classify_with_ai(self, message: str, user_context: Dict[str, Any], session_context: str = "") -> Dict[str, Any]:
-        """Clasifica intención usando IA"""
+    async def _classify_with_ai(self, message: str, user_context: Dict[str, Any], session_context: str = "", tenant_id: str = None) -> Dict[str, Any]:
+        """Clasifica intención usando IA con optimizaciones de velocidad"""
         
         self._ensure_model_initialized()
         
         # Primero verificar intención maliciosa de manera inteligente
         malicious_detection = self._detect_malicious_intent(message)
         if malicious_detection["is_malicious"]:
-            logger.info(f"🚨 INTENCIÓN MALICIOSA DETECTADA: {malicious_detection['reason']}")
             return {
                 "category": "malicioso",
                 "confidence": malicious_detection["confidence"],
@@ -2645,12 +3089,12 @@ Responde solo el JSON estricto sin comentarios:
                 "detected_categories": malicious_detection["categories"]
             }
         
+        # 🚀 OPTIMIZACIÓN: Clasificación híbrida (patrones + IA)
+        pattern_result = self._classify_with_patterns(message, user_context)
+        if pattern_result["confidence"] > 0.8:
+            return pattern_result
         
         if not self.model:
-            logger.warning(f"[ADVERTENCIA] Modelo no disponible, usando fallback")
-            print(f"⚠️ MODELO NO DISPONIBLE - Usando fallback: saludo_apoyo")
-            print(f"🔍 DEBUG: self.model = {self.model}")
-            print(f"🔍 DEBUG: self._initialized = {self._initialized}")
             return {
                 "category": "saludo_apoyo", 
                 "confidence": 0.0,
@@ -2658,49 +3102,32 @@ Responde solo el JSON estricto sin comentarios:
             }
         
         try:
-            # Agregar timeout para evitar cuelgues
+            # 🚀 OPTIMIZACIÓN: Verificar caché de intenciones primero
+            if tenant_id:
+                cache_key = f"intent:{tenant_id}:{message.lower().strip()}"
+                cached_result = self._intent_cache.get(cache_key)
+                if cached_result and time.time() - cached_result.get("timestamp", 0) < 300:  # TTL 5 minutos
+                    return cached_result
+            
+            # 🚀 OPTIMIZACIÓN: Prompt ultra-corto para velocidad máxima
+            prompt = f"""Clasifica: "{message}" en UNA categoría:
+saludo_apoyo|cita_campaña|conocer_candidato|publicidad_info|colaboracion_voluntariado|quejas|malicioso|registration_response|solicitud_funcional
+
+Respuesta:"""
+            
+            # 🔧 OPTIMIZACIÓN: Timeout ultra-agresivo (2 segundos)
             import asyncio
-            
-            # 🔧 OPTIMIZACIÓN: Logs mínimos para funcionalidad de registro
-            logger.info(f"🎯 CLASIFICANDO INTENCIÓN: '{message[:50]}...'")
-            
-            # Prompt optimizado para clasificación de intenciones
-            prompt = f"""Eres un clasificador de intenciones para un chatbot de campaña política. Analiza el mensaje del usuario y clasifícalo en UNA de estas categorías:
-
-CATEGORÍAS VÁLIDAS:
-- saludo_apoyo: Saludos simples, confirmaciones, respuestas cortas como "hola", "ok", "gracias"
-- cita_campaña: Solicitudes de citas, reuniones, encuentros con el candidato o equipo
-- conocer_candidato: Preguntas sobre el candidato, sus propuestas, políticas, programas, obras
-- publicidad_info: Solicitudes de materiales de campaña, folletos, difusión, propaganda
-- colaboracion_voluntariado: Ofrecimientos de ayuda, voluntariado, colaboración
-- quejas: Quejas, reclamos, problemas con el servicio
-- malicioso: Mensajes agresivos, ofensivos, spam
-- registration_response: Información para registro (nombres, ciudades, datos personales)
-- solicitud_funcional: Preguntas técnicas, consultas sobre el sistema, progreso del usuario
-
-MENSAJE: "{message}"
-ESTADO DEL USUARIO: {user_context.get('user_state', 'UNKNOWN') if user_context else 'UNKNOWN'}
-
-INSTRUCCIONES:
-1. Analiza la INTENCIÓN real del mensaje, no solo palabras clave
-2. Considera el contexto del estado del usuario
-3. Si es una pregunta sobre el candidato/propuestas → conocer_candidato
-4. Si es una pregunta sobre el progreso del usuario → solicitud_funcional
-5. Si es una solicitud de cita/reunión → cita_campaña
-6. Si es un saludo simple → saludo_apoyo
-
-RESPUESTA: Solo el nombre de la categoría (ej: "conocer_candidato"):"""
-            
-            # 🔧 OPTIMIZACIÓN: Generación optimizada para velocidad
             try:
-                response_text = await self._generate_content_optimized(prompt, task_type="intent_classification")
+                response_text = await asyncio.wait_for(
+                    self._generate_content_ultra_fast(prompt, max_tokens=5),
+                    timeout=2.0
+                )
             except asyncio.TimeoutError:
-                logger.warning("⏰ TIMEOUT ULTRA-CORTO - Usando fallback")
                 return {
                     "category": "saludo_apoyo",
                     "confidence": 0.0,
                     "original_message": message,
-                    "reason": "Timeout ultra-corto"
+                    "reason": "Timeout ultra-agresivo"
                 }
             
             category = response_text.strip().lower()
@@ -2734,11 +3161,24 @@ RESPUESTA: Solo el nombre de la categoría (ej: "conocer_candidato"):"""
             logger.info(f"[OBJETIVO] CLASIFICACIÓN FINAL: '{category}' para mensaje: '{message[:50]}...'")
             print(f"✅ CLASIFICACIÓN FINAL: '{category}' para mensaje: '{message[:50]}...'")
             
-            return {
+            # 🚀 OPTIMIZACIÓN: Guardar en caché para futuras consultas
+            result = {
                 "category": category,
                 "confidence": 0.8,  # Confianza fija por simplicidad
-                "original_message": message
+                "original_message": message,
+                "timestamp": time.time()  # TTL para limpieza automática
             }
+            
+            # Guardar en caché solo si tenemos tenant_id
+            if tenant_id:
+                cache_key = f"intent:{tenant_id}:{message.lower().strip()}"
+                
+                # Limpiar caché automáticamente (TTL + tamaño)
+                self._cleanup_intent_cache()
+                
+                self._intent_cache[cache_key] = result
+            
+            return result
             
         except Exception as e:
             logger.error(f"[ERROR] Error clasificando con IA: {str(e)}", exc_info=True)
@@ -2747,6 +3187,94 @@ RESPUESTA: Solo el nombre de la categoría (ej: "conocer_candidato"):"""
                 "confidence": 0.0,
                 "original_message": message
             }
+    
+    def _classify_with_patterns(self, message: str, user_context: Dict[str, Any]) -> Dict[str, Any]:
+        """Clasificación ultra-rápida usando patrones de texto"""
+        message_lower = message.lower().strip()
+        
+        # Patrones de alta confianza
+        patterns = {
+            "saludo_apoyo": [
+                "hola", "hi", "hello", "buenos días", "buenas tardes", "buenas noches",
+                "gracias", "ok", "okay", "sí", "si", "no", "perfecto", "excelente"
+            ],
+            "conocer_candidato": [
+                "quien es", "qué es", "cómo funciona", "aguas vivas", "propuestas",
+                "candidato", "políticas", "obras", "programas", "plan de gobierno"
+            ],
+            "cita_campaña": [
+                "cita", "reunión", "encuentro", "agendar", "visitar", "conocer",
+                "hablar", "conversar", "entrevista"
+            ],
+            "publicidad_info": [
+                "folleto", "material", "publicidad", "difusión", "propaganda",
+                "información", "brochure", "panfleto"
+            ],
+            "colaboracion_voluntariado": [
+                "voluntario", "ayudar", "colaborar", "trabajar", "participar",
+                "unirme", "apoyar", "contribuir"
+            ],
+            "quejas": [
+                "queja", "reclamo", "problema", "mal servicio", "no funciona",
+                "error", "falla", "defecto"
+            ],
+            "registration_response": [
+                "me llamo", "mi nombre es", "soy", "vivo en", "mi ciudad es",
+                "mi teléfono es", "mi email es"
+            ]
+        }
+        
+        # Buscar coincidencias exactas primero
+        for category, pattern_list in patterns.items():
+            for pattern in pattern_list:
+                if pattern in message_lower:
+                    return {
+                        "category": category,
+                        "confidence": 0.9,
+                        "original_message": message,
+                        "reason": f"Pattern match: {pattern}"
+                    }
+        
+        # Buscar coincidencias parciales
+        for category, pattern_list in patterns.items():
+            for pattern in pattern_list:
+                pattern_words = pattern.split()
+                if any(word in message_lower for word in pattern_words):
+                    return {
+                        "category": category,
+                        "confidence": 0.7,
+                        "original_message": message,
+                        "reason": f"Partial pattern match: {pattern}"
+                    }
+        
+        # Si no hay coincidencias, usar fallback inteligente
+        return {
+            "category": "conocer_candidato",  # Fallback más común
+            "confidence": 0.3,
+            "original_message": message,
+            "reason": "No pattern match, using fallback"
+        }
+    
+    def _cleanup_intent_cache(self):
+        """Limpia automáticamente el caché de intenciones (TTL + tamaño)"""
+        current_time = time.time()
+        
+        # Limpiar por TTL (5 minutos)
+        expired_keys = []
+        for key, value in self._intent_cache.items():
+            if current_time - value.get("timestamp", 0) > 300:  # 5 minutos
+                expired_keys.append(key)
+        
+        for key in expired_keys:
+            del self._intent_cache[key]
+        
+        # Limpiar por tamaño si es necesario
+        if len(self._intent_cache) >= self._intent_cache_max_size:
+            # Eliminar el 20% más antiguo
+            sorted_items = sorted(self._intent_cache.items(), key=lambda x: x[1].get("timestamp", 0))
+            keys_to_remove = [key for key, _ in sorted_items[:self._intent_cache_max_size // 5]]
+            for key in keys_to_remove:
+                del self._intent_cache[key]
     
     def _fallback_intent_classification(self, message: str, context: Dict[str, Any] = None) -> str:
         """
@@ -2765,6 +3293,16 @@ RESPUESTA: Solo el nombre de la categoría (ej: "conocer_candidato"):"""
         # Solo detectar casos muy obvios y específicos
         if message_lower in ["hola", "buenos días", "buenas tardes", "buenas noches", "gracias"]:
             return "saludo_apoyo"
+        
+        # Detectar preguntas sobre casos específicos, propuestas, políticas
+        political_question_patterns = [
+            "que es", "qué es", "quien es", "quién es", "como funciona", "cómo funciona",
+            "aguas vivas", "caso", "propuesta", "política", "obra", "proyecto"
+        ]
+        
+        for pattern in political_question_patterns:
+            if pattern in message_lower:
+                return "conocer_candidato"
         
         # Detectar explicaciones sobre datos disponibles (muy específico)
         if self._looks_like_data_explanation(message):
@@ -3405,8 +3943,16 @@ Responde SOLO con un JSON válido en este formato:
         context_info = ""
         if user_context.get("user_name"):
             context_info += f"El usuario se llama {user_context['user_name']}. "
+        if user_context.get("user_city"):
+            context_info += f"Vive en {user_context['user_city']}. "
+        if user_context.get("user_country"):
+            context_info += f"País: {user_context['user_country']}. "
         if user_context.get("user_state"):
             context_info += f"Estado actual: {user_context['user_state']}. "
+        if user_context.get("user_phone"):
+            context_info += f"Teléfono: {user_context['user_phone']}. "
+        if user_context.get("conversation_count"):
+            context_info += f"Es su conversación #{user_context['conversation_count']}. "
         
         # Detectar si es un saludo y el usuario está en proceso de registro
         user_state = user_context.get("user_state", "")
@@ -3462,14 +4008,19 @@ Responde SOLO con un JSON válido en este formato:
             - Los usuarios pueden preguntar "?Cómo voy?" para ver su progreso
             - Para invitar personas: "mandame el link" o "dame mi código"
             
-            Contexto del usuario: {context_info}{document_context_section}
+            CONTEXTO COMPLETO DEL USUARIO: {context_info}{document_context_section}
             
             Mensaje del usuario: "{query}"
             
-            Responde de manera amigable, motivadora y natural. Si el usuario está en proceso de registro, 
-            ayúdale a completarlo. Si tiene preguntas sobre la campaña, responde con información relevante 
-            y oportunidades de participación. Usa la información específica de la campaña cuando sea apropiado.
-            Usa emojis apropiados y un tono positivo.
+            INSTRUCCIONES PERSONALIZADAS:
+            1. **PERSONALIZA** tu respuesta usando el nombre del usuario si está disponible
+            2. **MENCIÓN** su ciudad si es relevante para la respuesta
+            3. Responde de manera amigable, motivadora y natural
+            4. Si el usuario está en proceso de registro, ayúdale a completarlo
+            5. Si tiene preguntas sobre la campaña, responde con información relevante y oportunidades de participación
+            6. Usa la información específica de la campaña cuando sea apropiado
+            7. Usa emojis apropiados y un tono positivo
+            8. Mantén la respuesta concisa, máximo 999 caracteres
             
             Respuesta:
             """
@@ -3712,7 +4263,7 @@ Te puedo ayudar a conectarte con nuestro equipo de voluntarios. ¿Te gustaría q
 
     async def validate_user_data(self, tenant_id: str, data: str, data_type: str) -> Dict[str, Any]:
         """
-        Valida datos de usuario usando IA
+        Valida datos de usuario usando cache y IA
         
         Args:
             tenant_id: ID del tenant
@@ -3722,6 +4273,15 @@ Te puedo ayudar a conectarte con nuestro equipo de voluntarios. ¿Te gustaría q
         Returns:
             Dict con resultado de validación
         """
+        # 🚀 OPTIMIZACIÓN: Verificar cache primero para datos comunes
+        if data_type in self._validation_cache:
+            data_lower = data.lower().strip()
+            if data_lower in self._validation_cache[data_type]:
+                logger.info(f"✅ Cache hit para validación {data_type}: '{data}' -> válido")
+                return self._validation_cache[data_type][data_lower]
+        
+        logger.info(f"🔍 Cache miss para validación {data_type}: '{data}' - usando IA")
+        
         self._ensure_model_initialized()
         
         if not self.model:
@@ -4075,7 +4635,96 @@ RESPUESTA NATURAL:""",
                 "error": str(e)
             }
 
-    async def extract_user_name_from_referral_message(self, tenant_id: str, message: str) -> Dict[str, Any]:
+    async def extract_user_name_from_message(self, tenant_id: str, message: str) -> Dict[str, Any]:
+        """
+        Extrae el nombre del usuario de cualquier mensaje (no necesariamente con código de referido)
+        
+        Args:
+            tenant_id: ID del tenant
+            message: Mensaje del usuario
+            
+        Returns:
+            Dict con el nombre extraído y validación
+        """
+        self._ensure_model_initialized()
+        
+        if not self.model:
+            return {
+                "name": None,
+                "is_valid": False,
+                "confidence": 0.0,
+                "reason": "Servicio de IA no disponible"
+            }
+        
+        try:
+            prompt = f"""
+Analiza el siguiente mensaje y extrae el nombre completo de la persona:
+
+Mensaje: "{message}"
+
+IMPORTANTE:
+- Busca patrones como "Soy [nombre]", "Me llamo [nombre]", "Mi nombre es [nombre]", etc.
+- Extrae el nombre completo (nombre y apellidos si están disponibles)
+- Si el mensaje no contiene un nombre claro, responde "NO_NAME"
+- Ignora saludos como "hola", "buenos días", etc.
+
+Ejemplos:
+- "Soy Santiago Buitrago Rojas" -> "Santiago Buitrago Rojas"
+- "Me llamo María García" -> "María García"
+- "Mi nombre es Carlos" -> "Carlos"
+- "Hola, soy Ana" -> "Ana"
+- "hola" -> "NO_NAME"
+- "buenos días" -> "NO_NAME"
+
+Responde ÚNICAMENTE el nombre extraído o "NO_NAME" si no se puede determinar.
+"""
+
+            response_text = await self._generate_content(prompt)
+            
+            if not response_text:
+                return {
+                    "name": None,
+                    "is_valid": False,
+                    "confidence": 0.0,
+                    "reason": "No se pudo obtener respuesta de la IA"
+                }
+            
+            response_clean = response_text.strip()
+            
+            if response_clean.upper() == "NO_NAME":
+                return {
+                    "name": None,
+                    "is_valid": False,
+                    "confidence": 0.9,
+                    "reason": "El mensaje no contiene un nombre claro"
+                }
+            
+            # Validar que el nombre extraído es válido
+            validation_result = await self.validate_user_data(tenant_id, response_clean, "name")
+            
+            if validation_result.get("is_valid", False):
+                return {
+                    "name": response_clean,
+                    "is_valid": True,
+                    "confidence": validation_result.get("confidence", 0.8),
+                    "reason": "Nombre extraído y validado correctamente"
+                }
+            else:
+                return {
+                    "name": response_clean,
+                    "is_valid": False,
+                    "confidence": validation_result.get("confidence", 0.5),
+                    "reason": f"Nombre extraído pero no válido: {validation_result.get('reason', '')}"
+                }
+                
+        except Exception as e:
+            logger.error(f"Error extrayendo nombre del mensaje con IA: {str(e)}")
+            return {
+                "name": None,
+                "is_valid": False,
+                "confidence": 0.0,
+                "reason": f"Error en extracción: {str(e)}"
+            }
         """
         Extrae el nombre del usuario de un mensaje que contiene un código de referido
         
@@ -4164,6 +4813,218 @@ Responde ÚNICAMENTE el nombre extraído o "NO_NAME" si no se puede determinar.
                 "reason": f"Error en extracción: {str(e)}"
             }
 
+    async def generate_welcome_message(self, tenant_config: Dict[str, Any] = None) -> str:
+        """
+        Genera un mensaje de bienvenida personalizado usando IA
+        
+        Args:
+            tenant_config: Configuración del tenant (opcional)
+            
+        Returns:
+            Mensaje de bienvenida generado por IA
+        """
+        try:
+            # Obtener información del tenant para personalización
+            tenant_info = ""
+            if tenant_config:
+                branding = tenant_config.get('branding', {})
+                if branding:
+                    candidate_name = branding.get('candidate_name', '')
+                    campaign_name = branding.get('campaign_name', '')
+                    if candidate_name:
+                        tenant_info += f"Candidato: {candidate_name}. "
+                    if campaign_name:
+                        tenant_info += f"Campaña: {campaign_name}. "
+            
+            # Generar mensaje con IA usando el método que sí funciona
+            prompt = f"""Genera un mensaje de bienvenida para WhatsApp de la campaña de {tenant_info.strip() or 'nuestro candidato'}.
+
+El mensaje debe ser amigable y presentar la campaña. Máximo 100 caracteres.
+
+Mensaje:"""
+
+            try:
+                response = await self._generate_content(prompt, task_type="chat_conversational")
+                if response and len(response.strip()) > 0:
+                    return response.strip()
+            except Exception as e:
+                logger.warning(f"Error generando mensaje con IA: {e}")
+            
+            # Fallback si IA falla
+            if candidate_name and campaign_name:
+                response = f"¡Hola! Bienvenido a la campaña de {candidate_name} - {campaign_name}."
+            elif candidate_name:
+                response = f"¡Hola! Bienvenido a la campaña de {candidate_name}."
+            elif campaign_name:
+                response = f"¡Hola! Bienvenido a {campaign_name}."
+            else:
+                response = "¡Hola! Bienvenido a nuestra campaña."
+            
+            return response.strip()
+                
+        except Exception as e:
+            logger.error(f"Error generando mensaje de bienvenida con IA: {str(e)}")
+            return "¡Hola! Te doy la bienvenida a nuestra campaña. ¡Es un placer conocerte!"
+
+    async def generate_contact_save_message(self, tenant_config: Dict[str, Any] = None) -> str:
+        """
+        Genera un mensaje para pedir al usuario que guarde el contacto usando IA
+        
+        Args:
+            tenant_config: Configuración del tenant (opcional)
+            
+        Returns:
+            Mensaje para guardar contacto generado por IA
+        """
+        try:
+            # Obtener nombre del contacto desde la configuración
+            contact_name = "Contacto"
+            if tenant_config:
+                branding = tenant_config.get('branding', {})
+                if branding:
+                    config_contact_name = branding.get('contact_name', '')
+                    if config_contact_name and config_contact_name.strip():
+                        contact_name = config_contact_name.strip()
+            
+            # Generar mensaje con IA usando el método que sí funciona
+            prompt = f"""Genera un mensaje para WhatsApp pidiendo guardar el contacto como "{contact_name}".
+
+El mensaje debe ser educado y explicar por qué es importante. Máximo 150 caracteres.
+
+Mensaje:"""
+
+            try:
+                response = await self._generate_content(prompt, task_type="chat_conversational")
+                if response and len(response.strip()) > 0:
+                    return response.strip()
+            except Exception as e:
+                logger.warning(f"Error generando mensaje con IA: {e}")
+            
+            # Fallback si IA falla
+            response = f"Por favor, guarda este número como '{contact_name}' para recibir actualizaciones importantes de la campaña."
+            
+            return response.strip()
+                
+        except Exception as e:
+            logger.error(f"Error generando mensaje de guardar contacto con IA: {str(e)}")
+            return f"Te pido que lo primero que hagas sea guardar este número con el nombre: {contact_name}"
+
+    async def generate_all_initial_messages(self, tenant_config: Dict[str, Any] = None) -> Dict[str, str]:
+        """
+        Genera los 3 mensajes iniciales de una vez para optimizar el tiempo de respuesta
+        
+        Args:
+            tenant_config: Configuración del tenant (opcional)
+            
+        Returns:
+            Diccionario con los 3 mensajes generados
+        """
+        try:
+            # 🚀 OPTIMIZACIÓN: Usar respuestas precomputadas para casos comunes
+            candidate_name = ""
+            contact_name = "Mi Candidato"
+            
+            if tenant_config:
+                branding = tenant_config.get('branding', {})
+                if branding:
+                    candidate_name = branding.get('candidate_name', '')
+                    config_contact_name = branding.get('contact_name', '')
+                    if config_contact_name and config_contact_name.strip():
+                        contact_name = config_contact_name.strip()
+            
+            # Verificar si podemos usar respuestas precomputadas genéricas
+            if not candidate_name or candidate_name.strip() == "":
+                logger.info("🚀 Usando respuestas precomputadas genéricas")
+                return self._precomputed_initial_messages["default"].copy()
+            
+            # Si necesitamos personalización específica, usar IA
+            logger.info(f"🔄 Generando mensajes personalizados para candidato: {candidate_name}")
+            
+            # Obtener información del tenant para personalización
+            tenant_info = ""
+            if tenant_config:
+                branding = tenant_config.get('branding', {})
+                if branding:
+                    campaign_name = branding.get('campaign_name', '')
+                    
+                    if candidate_name:
+                        tenant_info += f"Candidato: {candidate_name}. "
+                    if campaign_name:
+                        tenant_info += f"Campaña: {campaign_name}. "
+            
+            # 🚀 OPTIMIZACIÓN: Prompt ultra-optimizado para velocidad
+            prompt = f"""Genera 3 mensajes WhatsApp campaña política.
+
+Info: {tenant_info}
+Contacto: {contact_name}
+
+1. Bienvenida (100 chars): BIENVENIDA:
+2. Guardar contacto (150 chars): CONTACTO:  
+3. Pedir nombre (120 chars): NOMBRE:"""
+
+            try:
+                # 🚀 OPTIMIZACIÓN: Usar configuración ultra-rápida para mensajes iniciales
+                response = await self._generate_content_ultra_fast(prompt)
+                if response and len(response.strip()) > 0:
+                    # Parsear la respuesta
+                    lines = response.strip().split('\n')
+                    messages = {}
+                    
+                    for line in lines:
+                        if line.startswith('BIENVENIDA:'):
+                            messages['welcome'] = line.replace('BIENVENIDA:', '').strip()
+                        elif line.startswith('CONTACTO:'):
+                            messages['contact'] = line.replace('CONTACTO:', '').strip()
+                        elif line.startswith('NOMBRE:'):
+                            messages['name'] = line.replace('NOMBRE:', '').strip()
+                    
+                    if len(messages) == 3:
+                        return messages
+            except Exception as e:
+                logger.warning(f"Error generando mensajes con IA: {e}")
+            
+            # 🚀 FALLBACK ULTRA-RÁPIDO: Usar respuestas precomputadas si IA falla
+            logger.warning("⚠️ IA falló, usando respuestas precomputadas como fallback")
+            return self._precomputed_initial_messages["default"].copy()
+                
+        except Exception as e:
+            logger.error(f"Error generando mensajes iniciales: {str(e)}")
+            # Usar respuestas genéricas como último recurso
+            return self._precomputed_initial_messages["default"].copy()
+
+    async def generate_name_request_message(self, tenant_config: Dict[str, Any] = None) -> str:
+        """
+        Genera un mensaje para pedir el nombre del usuario usando IA
+        
+        Args:
+            tenant_config: Configuración del tenant (opcional)
+            
+        Returns:
+            Mensaje para pedir nombre generado por IA
+        """
+        try:
+            # Generar mensaje con IA usando el método que sí funciona
+            prompt = f"""Genera un mensaje para WhatsApp pidiendo el nombre del usuario.
+
+El mensaje debe ser amigable y explicar por qué necesitas el nombre. Máximo 120 caracteres.
+
+Mensaje:"""
+
+            try:
+                response = await self._generate_content(prompt, task_type="chat_conversational")
+                if response and len(response.strip()) > 0:
+                    return response.strip()
+            except Exception as e:
+                logger.warning(f"Error generando mensaje con IA: {e}")
+            
+            # Fallback si IA falla
+            response = "¿Me confirmas tu nombre para guardarte en mis contactos y personalizar tu experiencia?"
+            
+            return response.strip()
+                
+        except Exception as e:
+            logger.error(f"Error generando mensaje de pedir nombre con IA: {str(e)}")
+            return "¿Me confirmas tu nombre para guardarte en mis contactos?"
 
 # Instancia global para compatibilidad
 ai_service = AIService()

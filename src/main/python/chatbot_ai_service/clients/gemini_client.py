@@ -53,6 +53,79 @@ class GeminiClient:
         
         logger.info("GeminiClient inicializado (lazy loading)")
     
+    def preload_models(self):
+        """
+        Pre-carga los modelos más comunes para mejorar el tiempo de respuesta
+        
+        Este método inicializa los modelos que se usan frecuentemente
+        para evitar la latencia de inicialización en tiempo real.
+        """
+        if not self.api_key:
+            logger.warning("⚠️ No se puede pre-cargar modelos: GEMINI_API_KEY no configurado")
+            return
+            
+        logger.info("🚀 Pre-cargando modelos de IA para optimizar tiempo de respuesta...")
+        
+        # Configuraciones de modelos más comunes
+        common_configs = [
+            # Configuración para clasificación de intenciones
+            {
+                "model_name": "gemini-2.5-flash",
+                "temperature": 0.1,
+                "top_p": 0.8,
+                "top_k": 20,
+                "max_output_tokens": 100,
+                "description": "Para clasificación de intenciones"
+            },
+            # Configuración para generación de mensajes de bienvenida
+            {
+                "model_name": "gemini-2.5-flash", 
+                "temperature": 0.8,
+                "top_p": 0.9,
+                "top_k": 50,
+                "max_output_tokens": 500,
+                "description": "Para generar mensajes de bienvenida personalizados"
+            },
+            # Configuración para generación de mensajes de contacto
+            {
+                "model_name": "gemini-2.5-flash",
+                "temperature": 0.8,
+                "top_p": 0.9,
+                "top_k": 50,
+                "max_output_tokens": 500,
+                "description": "Para generar mensajes de guardado de contacto"
+            },
+            # Configuración para solicitud de nombre
+            {
+                "model_name": "gemini-2.5-flash",
+                "temperature": 0.8,
+                "top_p": 0.9,
+                "top_k": 50,
+                "max_output_tokens": 500,
+                "description": "Para solicitar información del usuario"
+            },
+            # Configuración para análisis de registro
+            {
+                "model_name": "gemini-2.5-flash",
+                "temperature": 0.1,
+                "top_p": 0.8,
+                "top_k": 20,
+                "max_output_tokens": 200,
+                "description": "Para analizar respuestas de registro"
+            }
+        ]
+        
+        # Pre-cargar cada configuración
+        for i, config in enumerate(common_configs):
+            try:
+                logger.info(f"📦 Pre-cargando modelo {i+1}/{len(common_configs)}: {config['description']}")
+                self._get_or_create_model(config)
+                logger.info(f"✅ Modelo {i+1} pre-cargado exitosamente")
+            except Exception as e:
+                logger.warning(f"⚠️ Error pre-cargando modelo {i+1}: {str(e)}")
+        
+        logger.info(f"🎯 Pre-carga completada: {len(self.models_cache)} modelos disponibles en cache")
+    
     def _ensure_model_initialized(self):
         """
         Inicializa el modelo de forma lazy
@@ -70,31 +143,31 @@ class GeminiClient:
                 # Configuración básica para Gemini AI
                 genai.configure(api_key=self.api_key)
                 
-                # 🔧 OPTIMIZACIÓN MÁXIMA: Configuración ultra-rápida
+                # 🚀 OPTIMIZACIÓN MÁXIMA: Configuración ultra-rápida para clasificación
                 safety_settings = [
                     {
                         "category": "HARM_CATEGORY_HARASSMENT",
-                        "threshold": "BLOCK_NONE"  # Más permisivo
+                        "threshold": "BLOCK_NONE"  # Deshabilitado para velocidad
                     },
                     {
                         "category": "HARM_CATEGORY_HATE_SPEECH", 
-                        "threshold": "BLOCK_NONE"  # Más permisivo
+                        "threshold": "BLOCK_NONE"  # Deshabilitado para velocidad
                     },
                     {
                         "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                        "threshold": "BLOCK_NONE"  # Más permisivo
+                        "threshold": "BLOCK_NONE"  # Deshabilitado para velocidad
                     },
                     {
                         "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-                        "threshold": "BLOCK_NONE"  # Más permisivo
+                        "threshold": "BLOCK_NONE"  # Deshabilitado para velocidad
                     }
                 ]
                 
                 generation_config = {
                     "temperature": 0.0,  # Máximo determinismo
-                    "top_p": 0.5,        # Mínimas opciones
-                    "top_k": 10,         # Muy pocos tokens
-                    "max_output_tokens": 50,  # Respuestas ultra-cortas
+                    "top_p": 0.3,        # Mínimas opciones para velocidad
+                    "top_k": 5,          # Muy pocos tokens para velocidad
+                    "max_output_tokens": 10,  # Respuestas ultra-cortas
                     "candidate_count": 1  # Solo una respuesta
                 }
                 
