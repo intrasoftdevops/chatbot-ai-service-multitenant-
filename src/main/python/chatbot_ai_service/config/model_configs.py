@@ -23,14 +23,14 @@ from typing import Dict, Any
 
 MODEL_CONFIGS: Dict[str, Dict[str, Any]] = {
     # ──────────────────────────────────────────────────────────────────────────
-    # CHAT CONVERSACIONAL
+    # CHAT CONVERSACIONAL OPTIMIZADO
     # ──────────────────────────────────────────────────────────────────────────
     "chat_conversational": {
         "model_name": "gemini-2.5-flash",  # ✅ Modelo oficial disponible según Google
         "temperature": 0.7,  # Respuestas naturales y variadas
         "top_p": 0.8,
         "top_k": 40,
-        "max_output_tokens": 1024,
+        "max_output_tokens": 512,  # Reducido para respuestas más rápidas
         "description": "Para conversaciones naturales con el usuario",
     },
     
@@ -48,7 +48,17 @@ MODEL_CONFIGS: Dict[str, Dict[str, Any]] = {
     },
     
     # ──────────────────────────────────────────────────────────────────────────
-    # EXTRACCIÓN DE DATOS
+    # GENERACIÓN RAG OPTIMIZADA
+    # ──────────────────────────────────────────────────────────────────────────
+    "rag_generation": {
+        "model_name": "gemini-2.5-flash",  # ✅ Modelo oficial disponible según Google
+        "temperature": 0.6,  # Menos creatividad para respuestas más consistentes
+        "top_p": 0.7,  # Más restrictivo para respuestas más precisas
+        "top_k": 20,  # Menos opciones para respuestas más rápidas
+        "max_output_tokens": 400,  # Respuestas más concisas
+        "description": "Para generación RAG optimizada y rápida",
+    },
+    
     # ──────────────────────────────────────────────────────────────────────────
     "data_extraction": {
         "model_name": "gemini-2.5-flash",  # 🔧 FIX: Probar modelo más moderno

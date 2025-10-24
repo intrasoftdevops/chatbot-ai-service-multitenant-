@@ -12,6 +12,7 @@ import time
 import re
 
 from chatbot_ai_service.services.ai_service import AIService
+from chatbot_ai_service.services.optimized_ai_service import OptimizedAIService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["chat"])
@@ -22,7 +23,8 @@ async def process_chat_message(tenant_id: str, request: Dict[str, Any]) -> Dict[
     Procesa un mensaje de chat y maneja los marcadores FOLLOWUP_MESSAGE
     """
     try:
-        logger.info(f"🎯 Procesando mensaje de chat para tenant: {tenant_id}")
+        logger.info(f"🎯 [CONTROLLER] INICIANDO procesamiento de chat para tenant: {tenant_id}")
+        logger.info(f"🎯 [CONTROLLER] Request recibido: {type(request)} con keys: {list(request.keys()) if isinstance(request, dict) else 'No es dict'}")
         
         # Extraer datos del request
         query = request.get("query", "").strip()
@@ -37,8 +39,8 @@ async def process_chat_message(tenant_id: str, request: Dict[str, Any]) -> Dict[
         logger.info(f"👤 Usuario: {user_context.get('user_id', 'unknown')}")
         logger.info(f"🔧 Configuración del tenant recibida: {bool(tenant_config)}")
         
-        # Procesar mensaje con el servicio de IA
-        logger.info(f"🔍 DEBUG: Llamando a ai_service.process_chat_message...")
+        # Procesar mensaje con el servicio de IA optimizado
+        logger.info(f"🚀 Usando servicio de IA optimizado...")
         logger.info(f"🔍 DEBUG: Parámetros enviados:")
         logger.info(f"   - tenant_id: {tenant_id}")
         logger.info(f"   - query: '{query}'")
@@ -46,8 +48,34 @@ async def process_chat_message(tenant_id: str, request: Dict[str, Any]) -> Dict[
         logger.info(f"   - session_id: {session_id}")
         logger.info(f"   - tenant_config keys: {list(tenant_config.keys()) if tenant_config else 'None'}")
         
-        ai_service = AIService()
-        ai_response = await ai_service.process_chat_message(tenant_id, query, user_context, session_id, tenant_config)
+        # Usar servicio optimizado
+        logger.info(f"🚀 [CONTROLLER] Iniciando OptimizedAIService para tenant {tenant_id}")
+        logger.info(f"🔍 [CONTROLLER] tenant_config recibido: {tenant_config}")
+        logger.info(f"🔍 [CONTROLLER] tenant_config type: {type(tenant_config)}")
+        logger.info(f"🔍 [CONTROLLER] tenant_config keys: {list(tenant_config.keys()) if tenant_config else 'None'}")
+        
+        logger.info(f"🔧 [CONTROLLER] Creando AIService base...")
+        base_ai_service = AIService()
+        logger.info(f"🔧 [CONTROLLER] AIService base creado exitosamente")
+        
+        logger.info(f"🔧 [CONTROLLER] Creando OptimizedAIService...")
+        optimized_ai_service = OptimizedAIService(base_ai_service)
+        logger.info(f"🔧 [CONTROLLER] OptimizedAIService creado exitosamente, iniciando procesamiento...")
+        
+        try:
+            logger.info(f"🚀 [CONTROLLER] Llamando a process_chat_message_optimized...")
+            ai_response = await optimized_ai_service.process_chat_message_optimized(
+                tenant_id, query, user_context, session_id, tenant_config
+            )
+            logger.info(f"✅ [CONTROLLER] OptimizedAIService completado exitosamente")
+        except Exception as e:
+            logger.error(f"❌ [CONTROLLER] Error en OptimizedAIService: {str(e)}")
+            logger.error(f"❌ [CONTROLLER] Traceback: {e}", exc_info=True)
+            # Fallback al servicio básico
+            logger.info(f"🔄 [CONTROLLER] Fallback al AIService básico...")
+            ai_response = await base_ai_service.process_chat_message(
+                tenant_id, query, user_context, session_id, tenant_config
+            )
         
         logger.info(f"🔍 DEBUG: Respuesta recibida del ai_service:")
         logger.info(f"   - Tipo: {type(ai_response)}")

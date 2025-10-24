@@ -15,6 +15,7 @@ import logging
 
 from chatbot_ai_service.controllers.chat_controller import router as chat_router
 from chatbot_ai_service.controllers.city_normalization_controller import router as city_router
+from chatbot_ai_service.controllers.preprocessing_controller import router as preprocessing_router
 
 # Cargar variables de entorno
 # Buscar .env en el directorio raíz del proyecto (3 niveles arriba)
@@ -59,10 +60,14 @@ except Exception as e:
     # No fallar el startup si hay error en la pre-carga
 
 # 🚀 PRECARGA AUTOMÁTICA DE DOCUMENTOS
-async def preload_documents_on_startup():
-    """Precargar documentos automáticamente al inicio del servicio"""
+async def preload_documents_on_startup_optimized():
+    """Precargar documentos automáticamente al inicio del servicio usando el servicio optimizado"""
     try:
-        print("📚 Iniciando precarga automática de documentos...")
+        print("🚀 Iniciando precarga optimizada de documentos...")
+        
+        # Importar servicios optimizados
+        from chatbot_ai_service.services.document_preprocessor_service import document_preprocessor_service
+        from chatbot_ai_service.services.tenant_memory_service import tenant_memory_service
         
         # Obtener configuración de tenants desde Java
         response_data = await get_tenant_configs_from_java()
@@ -78,15 +83,10 @@ async def preload_documents_on_startup():
             print("⚠️ No se encontraron configuraciones de tenants en la respuesta")
             return
         
-        from chatbot_ai_service.services.document_context_service import document_context_service
-        from chatbot_ai_service.services.tenant_memory_service import tenant_memory_service
+        print(f"📊 Encontrados {len(tenant_configs)} tenants para precargar")
         
-        # Iterar sobre los tenants (tenant_configs es un diccionario con tenant_id como clave)
+        # Inicializar memoria para cada tenant (rápido)
         for tenant_id, tenant_config in tenant_configs.items():
-            ai_config = tenant_config.get("aiConfig", {})
-            documentation_bucket_url = ai_config.get("documentation_bucket_url") if ai_config else None
-            
-            # 🧠 INICIALIZAR MEMORIA DEL TENANT
             print(f"🧠 Inicializando memoria para tenant {tenant_id}...")
             memory_success = tenant_memory_service.initialize_tenant_memory(
                 tenant_id=tenant_id,
@@ -98,39 +98,35 @@ async def preload_documents_on_startup():
                 print(f"✅ Memoria inicializada para tenant {tenant_id}")
             else:
                 print(f"⚠️ No se pudo inicializar memoria para tenant {tenant_id}")
-            
-            if tenant_id and documentation_bucket_url:
-                try:
-                    print(f"📚 Precargando documentos para tenant {tenant_id}...")
-                    success = await document_context_service.load_tenant_documents(tenant_id, documentation_bucket_url)
-                    
-                    if success:
-                        print(f"✅ Documentos precargados para tenant {tenant_id}")
-                        
-                        # 🧠 ACTUALIZAR MEMORIA CON RESUMEN DE DOCUMENTOS
-                        doc_info = document_context_service.get_tenant_document_info(tenant_id)
-                        if doc_info and doc_info.get('document_count', 0) > 0:
-                            # Obtener un resumen de los documentos para la memoria
-                            document_summary = f"Tenant {tenant_id} tiene {doc_info['document_count']} documentos precargados"
-                            tenant_memory_service._tenant_memories[tenant_id].document_summary = document_summary
-                            print(f"🧠 Memoria actualizada con resumen de documentos para tenant {tenant_id}")
-                    else:
-                        print(f"⚠️ No se pudieron precargar documentos para tenant {tenant_id}")
-                        
-                except Exception as e:
-                    print(f"❌ Error precargando documentos para tenant {tenant_id}: {e}")
-            else:
-                print(f"ℹ️ Tenant {tenant_id} no tiene documentation_bucket_url configurada")
         
-        # 📊 MOSTRAR ESTADÍSTICAS DE MEMORIA
-        memory_stats = tenant_memory_service.get_memory_stats()
-        print(f"🧠 Estadísticas de memoria:")
-        print(f"  - Memorias de tenants: {memory_stats['tenant_memories']}")
-        print(f"  - Conciencias de usuarios: {memory_stats['user_consciousness']}")
+        # Iniciar preprocesamiento en background (no bloqueante)
+        print("🚀 Iniciando preprocesamiento en background...")
+        import asyncio
         
-        print("✅ Precarga automática de documentos y memoria completada")
+        async def background_preprocessing():
+            try:
+                print("📚 [BACKGROUND] Iniciando preprocesamiento de documentos...")
+                results = await document_preprocessor_service.preprocess_all_tenants()
+                
+                successful_tenants = sum(1 for success in results.values() if success)
+                print(f"✅ [BACKGROUND] Preprocesamiento completado: {successful_tenants}/{len(results)} tenants exitosos")
+                
+                # Mostrar estadísticas de memoria
+                memory_stats = tenant_memory_service.get_memory_stats()
+                print(f"🧠 [BACKGROUND] Estadísticas de memoria:")
+                print(f"  - Memorias de tenants: {memory_stats['tenant_memories']}")
+                print(f"  - Conciencias de usuarios: {memory_stats['user_consciousness']}")
+                
+                print("🎉 [BACKGROUND] ¡Preprocesamiento completado! El servicio está completamente optimizado.")
+                
+            except Exception as e:
+                print(f"❌ [BACKGROUND] Error en preprocesamiento: {e}")
+        
+        asyncio.create_task(background_preprocessing())
+        
+        print("✅ Servicio listo - preprocesamiento ejecutándose en background")
     except Exception as e:
-        print(f"❌ Error durante precarga de documentos: {e}")
+        print(f"❌ Error durante precarga optimizada de documentos: {e}")
         # No fallar el startup si hay error en la precarga
 
 async def get_tenant_configs_from_java():
@@ -169,6 +165,7 @@ app.add_middleware(
 # Incluir routers
 app.include_router(chat_router)
 app.include_router(city_router)
+app.include_router(preprocessing_router)
 
 # Importar y agregar el nuevo controlador de clasificación de intenciones
 from chatbot_ai_service.controllers.intent_classification_controller import router as intent_classification_router
@@ -178,7 +175,7 @@ app.include_router(intent_classification_router)
 @app.on_event("startup")
 async def startup_event():
     """Evento de startup para precargar documentos automáticamente"""
-    await preload_documents_on_startup()
+    await preload_documents_on_startup_optimized()
 
 @app.get("/")
 async def root():

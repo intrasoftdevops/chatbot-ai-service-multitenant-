@@ -52,6 +52,8 @@ class ConfigurationService:
                 
                 if response.status_code == 200:
                     config = response.json()
+                    # Normalizar configuración del Java a Python
+                    config = self._normalize_java_config(config)
                     # Guardar en cache
                     self._config_cache[tenant_id] = config
                     logger.info(f"Configuración obtenida exitosamente para tenant: {tenant_id}")
@@ -63,6 +65,40 @@ class ConfigurationService:
         except Exception as e:
             logger.error(f"Error obteniendo configuración del tenant {tenant_id}: {str(e)}")
             return None
+    
+    def _normalize_java_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Normaliza la configuración del Java (camelCase) a Python (snake_case)
+        
+        Args:
+            config: Configuración del Java
+            
+        Returns:
+            Configuración normalizada para Python
+        """
+        try:
+            normalized = config.copy()
+            
+            # Normalizar aiConfig -> ai_config
+            if "aiConfig" in normalized:
+                normalized["ai_config"] = normalized.pop("aiConfig")
+            
+            # Normalizar otros campos si es necesario
+            if "watiApiToken" in normalized:
+                normalized["wati_api_token"] = normalized.pop("watiApiToken")
+            
+            if "watiApiEndpoint" in normalized:
+                normalized["wati_api_endpoint"] = normalized.pop("watiApiEndpoint")
+            
+            if "watiTenantId" in normalized:
+                normalized["wati_tenant_id"] = normalized.pop("watiTenantId")
+            
+            logger.info(f"Configuración normalizada: {list(normalized.keys())}")
+            return normalized
+            
+        except Exception as e:
+            logger.error(f"Error normalizando configuración: {str(e)}")
+            return config
     
     def clear_cache(self, tenant_id: Optional[str] = None):
         """

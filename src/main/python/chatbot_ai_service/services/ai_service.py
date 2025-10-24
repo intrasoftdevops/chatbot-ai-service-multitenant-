@@ -8,10 +8,6 @@ load_dotenv(env_path)
 
 # Verificar que se cargó correctamente
 political_url = os.getenv("POLITICAL_REFERRALS_SERVICE_URL")
-if political_url:
-    print(f"✅ ai_service.py - POLITICAL_REFERRALS_SERVICE_URL cargada: {political_url}")
-else:
-    print("❌ ai_service.py - POLITICAL_REFERRALS_SERVICE_URL no encontrada")
 
 """
 Servicio de IA simplificado para el Chatbot AI Service
@@ -43,7 +39,7 @@ class AIService:
         # 🔧 FIX: Inicializar api_key en el constructor para evitar AttributeError
         self.api_key = os.getenv("GEMINI_API_KEY")
         if self.api_key:
-            logger.info(f"[OK] GEMINI_API_KEY cargada en constructor: {self.api_key[:10]}...")
+            logger.info(f"[OK] GEMINI_API_KEY cargada en constructor")
         else:
             logger.warning("⚠️ GEMINI_API_KEY no configurado en constructor")
         
@@ -338,25 +334,26 @@ class AIService:
             logger.warning(f"[ADVERTENCIA] No se pudo pre-calentar el modelo: {e}")
             # No es crítico, el modelo se inicializará en la primera llamada real
     
-    def _get_fallback_response(self, prompt: str) -> str:
-        """Genera respuesta de fallback inteligente sin usar IA"""
-        # Analizar el prompt para dar respuesta contextual
-        prompt_lower = prompt.lower()
-        
-        if "nombre" in prompt_lower or "llamo" in prompt_lower:
-            return "Por favor, comparte tu nombre completo para continuar con el registro."
-        elif "ciudad" in prompt_lower or "vives" in prompt_lower:
-            return "?En qué ciudad vives? Esto nos ayuda a conectar con promotores de tu región."
-        elif "apellido" in prompt_lower:
-            return "Perfecto, ahora necesito tu apellido para completar tu información."
-        elif "código" in prompt_lower or "referido" in prompt_lower:
-            return "Si tienes un código de referido, compártelo. Si no, escribe 'no' para continuar."
-        elif "términos" in prompt_lower or "condiciones" in prompt_lower:
-            return "?Aceptas los términos y condiciones? Responde 'sí' o 'no'."
-        elif "confirmar" in prompt_lower or "correcto" in prompt_lower:
-            return "?Confirmas que esta información es correcta? Responde 'sí' o 'no'."
-        else:
-            return "Gracias por tu mensaje. Te ayudo a completar tu registro paso a paso."
+    # def _get_fallback_response(self, prompt: str) -> str:
+    #     """Genera respuesta de fallback inteligente sin usar IA"""
+    #     # MÉTODO NO SE USA - COMENTADO
+    #     # Analizar el prompt para dar respuesta contextual
+    #     prompt_lower = prompt.lower()
+    #     
+    #     if "nombre" in prompt_lower or "llamo" in prompt_lower:
+    #         return "Por favor, comparte tu nombre completo para continuar con el registro."
+    #     elif "ciudad" in prompt_lower or "vives" in prompt_lower:
+    #         return "?En qué ciudad vives? Esto nos ayuda a conectar con promotores de tu región."
+    #     elif "apellido" in prompt_lower:
+    #         return "Perfecto, ahora necesito tu apellido para completar tu información."
+    #     elif "código" in prompt_lower or "referido" in prompt_lower:
+    #         return "Si tienes un código de referido, compártelo. Si no, escribe 'no' para continuar."
+    #     elif "términos" in prompt_lower or "condiciones" in prompt_lower:
+    #         return "?Aceptas los términos y condiciones? Responde 'sí' o 'no'."
+    #     elif "confirmar" in prompt_lower or "correcto" in prompt_lower:
+    #         return "?Confirmas que esta información es correcta? Responde 'sí' o 'no'."
+    #     else:
+    #         return "Gracias por tu mensaje. Te ayudo a completar tu registro paso a paso."
     
     def _ensure_model_initialized(self):
         """Inicializa el modelo de forma lazy con timeout, probando múltiples modelos"""
@@ -423,36 +420,37 @@ class AIService:
         
         # No mostrar lista de modelos disponibles
     
-    def _list_available_models(self):
-        """Lista todos los modelos disponibles con la API key actual"""
-        try:
-            import requests
-            api_key = os.getenv("GEMINI_API_KEY")
-            if not api_key:
-                print("❌ GEMINI_API_KEY no configurado")
-                return []
-            
-            url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
-            response = requests.get(url, timeout=10)
-            
-            if response.status_code == 200:
-                models_data = response.json()
-                models = []
-                for model in models_data.get('models', []):
-                    model_name = model.get('name', '').replace('models/', '')
-                    if 'gemini' in model_name.lower():
-                        models.append(model_name)
-                        print(f"📋 Modelo disponible: {model_name}")
-                
-                print(f"🎯 Total de modelos Gemini disponibles: {len(models)}")
-                return models
-            else:
-                print(f"❌ Error obteniendo modelos: {response.status_code}")
-                return []
-                
-        except Exception as e:
-            print(f"❌ Error listando modelos: {str(e)}")
-            return []
+    # def _list_available_models(self):
+    #     """Lista todos los modelos disponibles con la API key actual"""
+    #     # MÉTODO NO SE USA - COMENTADO
+    #     try:
+    #         import requests
+    #         api_key = os.getenv("GEMINI_API_KEY")
+    #         if not api_key:
+    #             print("❌ GEMINI_API_KEY no configurado")
+    #             return []
+    #         
+    #         url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+    #         response = requests.get(url, timeout=10)
+    #         
+    #         if response.status_code == 200:
+    #             models_data = response.json()
+    #             models = []
+    #             for model in models_data.get('models', []):
+    #                 model_name = model.get('name', '').replace('models/', '')
+    #                 if 'gemini' in model_name.lower():
+    #                     models.append(model_name)
+    #                     print(f"📋 Modelo disponible: {model_name}")
+    #             
+    #             print(f"🎯 Total de modelos Gemini disponibles: {len(models)}")
+    #             return models
+    #         else:
+    #             print(f"❌ Error obteniendo modelos: {response.status_code}")
+    #             return []
+    #             
+    #     except Exception as e:
+    #         print(f"❌ Error listando modelos: {str(e)}")
+    #         return []
     
     async def _call_gemini_rest_api(self, prompt: str) -> str:
         """Llama a Gemini usando REST API en lugar de gRPC"""
@@ -577,12 +575,12 @@ RESPUESTA:"""
         """
         try:
             if self.use_gemini_client and self.gemini_client:
-                # 🚀 OPTIMIZACIÓN: Timeout más generoso para documentos (5 segundos)
+                # 🚀 OPTIMIZACIÓN: Timeout optimizado para documentos (3 segundos)
                 import asyncio
                 try:
                     response = await asyncio.wait_for(
                         self.gemini_client.generate_content(prompt),
-                        timeout=5.0  # Timeout más generoso para documentos
+                        timeout=3.0  # Timeout optimizado para documentos
                     )
                     return response
                 except asyncio.TimeoutError:
@@ -1279,99 +1277,100 @@ Respuesta:
             logger.error(f"[ERROR] Error obteniendo lista de documentos: {e}")
             return []
     
-    async def _get_document_content_for_query(self, query: str, documentation_bucket_url: str) -> tuple[Optional[str], Optional[str]]:
-        """Obtiene contenido real de documentos relevantes usando SmartRetriever optimizado"""
-        try:
-            import httpx
-            import pypdf
-            import io
-            from chatbot_ai_service.retrievers.smart_retriever import SmartRetriever
-            
-            # Obtener todos los documentos disponibles
-            all_documents = await self._get_available_documents(documentation_bucket_url)
-            
-            if not all_documents:
-                logger.warning("[ADVERTENCIA] No hay documentos disponibles")
-                return None, None
-            
-            # Crear instancia del SmartRetriever
-            smart_retriever = SmartRetriever()
-            
-            # Descargar y procesar todos los documentos para crear la lista de documentos con contenido
-            documents_with_content = []
-            for doc_name in all_documents:
-                try:
-                    doc_url = f"{documentation_bucket_url}/{doc_name}"
-                    
-                    async with httpx.AsyncClient(timeout=30.0) as client:
-                        response = await client.get(doc_url)
-                        if response.status_code == 200:
-                            text = ""
-                            
-                            # Procesar PDF
-                            if doc_name.endswith('.pdf'):
-                                pdf_content = io.BytesIO(response.content)
-                                pdf_reader = pypdf.PdfReader(pdf_content)
-                                for page in pdf_reader.pages[:5]:  # Primeras 5 páginas
-                                    text += page.extract_text() + "\n"
-                            
-                            # Procesar DOCX
-                            elif doc_name.endswith('.docx'):
-                                from docx import Document as DocxDocument
-                                doc_content = io.BytesIO(response.content)
-                                doc = DocxDocument(doc_content)
-                                for paragraph in doc.paragraphs[:50]:  # Primeras 50 líneas
-                                    text += paragraph.text + "\n"
-                            
-                            if text.strip():
-                                documents_with_content.append({
-                                    "id": doc_name,
-                                    "filename": doc_name,
-                                    "content": text.strip()
-                                })
-                                logger.info(f"[OK] Documento {doc_name} cargado: {len(text)} caracteres")
-                            
-                except Exception as e:
-                    logger.warning(f"[ADVERTENCIA] Error procesando {doc_name}: {e}")
-                    continue
-            
-            if not documents_with_content:
-                logger.warning("[ADVERTENCIA] No se pudo cargar contenido de ningún documento")
-                return None, None
-            
-            # Usar SmartRetriever para encontrar documentos relevantes
-            search_results = smart_retriever.search_documents(documents_with_content, query, max_results=3)
-            
-            if not search_results:
-                logger.warning("[ADVERTENCIA] No se encontraron documentos relevantes")
-                return None, None
-            
-            # Log de documentos seleccionados
-            selected_docs = [result.filename for result in search_results]
-            logger.info(f"[LIBROS] Buscando documentos relevantes: {selected_docs}")
-            print(f"📚 DOCUMENTOS SELECCIONADOS: {selected_docs}")
-            
-            # Construir contenido usando los resultados del SmartRetriever
-            content_parts = []
-            document_name = search_results[0].filename  # Primer documento
-            
-            for result in search_results:
-                # Limitar contenido a 2000 caracteres por documento
-                content_preview = result.content[:2000] + "..." if len(result.content) > 2000 else result.content
-                content_parts.append(f"=== {result.filename} ===\n{content_preview}")
-                logger.info(f"[OK] Documento {result.filename} incluido (score: {result.score:.1f})")
-            
-            if content_parts:
-                full_content = "\n\n".join(content_parts)
-                logger.info(f"[LIBROS] Contenido total obtenido: {len(full_content)} caracteres")
-                return full_content, document_name
-            else:
-                logger.warning("[ADVERTENCIA] No se pudo obtener contenido de ningún documento")
-                return None, None
-                
-        except Exception as e:
-            logger.error(f"[ERROR] Error obteniendo contenido de documentos: {e}")
-            return None, None
+    # async def _get_document_content_for_query(self, query: str, documentation_bucket_url: str) -> tuple[Optional[str], Optional[str]]:
+    #     """Obtiene contenido real de documentos relevantes usando SmartRetriever optimizado"""
+    #     # MÉTODO NO SE USA - COMENTADO
+    #     try:
+    #         import httpx
+    #         import pypdf
+    #         import io
+    #         from chatbot_ai_service.retrievers.smart_retriever import SmartRetriever
+    #         
+    #         # Obtener todos los documentos disponibles
+    #         all_documents = await self._get_available_documents(documentation_bucket_url)
+    #         
+    #         if not all_documents:
+    #             logger.warning("[ADVERTENCIA] No hay documentos disponibles")
+    #             return None, None
+    #         
+    #         # Crear instancia del SmartRetriever
+    #         smart_retriever = SmartRetriever()
+    #         
+    #         # Descargar y procesar todos los documentos para crear la lista de documentos con contenido
+    #         documents_with_content = []
+    #         for doc_name in all_documents:
+    #             try:
+    #                 doc_url = f"{documentation_bucket_url}/{doc_name}"
+    #                 
+    #                 async with httpx.AsyncClient(timeout=30.0) as client:
+    #                     response = await client.get(doc_url)
+    #                     if response.status_code == 200:
+    #                         text = ""
+    #                         
+    #                         # Procesar PDF
+    #                         if doc_name.endswith('.pdf'):
+    #                             pdf_content = io.BytesIO(response.content)
+    #                             pdf_reader = pypdf.PdfReader(pdf_content)
+    #                             for page in pdf_reader.pages[:5]:  # Primeras 5 páginas
+    #                                 text += page.extract_text() + "\n"
+    #                         
+    #                         # Procesar DOCX
+    #                         elif doc_name.endswith('.docx'):
+    #                             from docx import Document as DocxDocument
+    #                             doc_content = io.BytesIO(response.content)
+    #                             doc = DocxDocument(doc_content)
+    #                             for paragraph in doc.paragraphs[:50]:  # Primeras 50 líneas
+    #                                 text += paragraph.text + "\n"
+    #                         
+    #                         if text.strip():
+    #                             documents_with_content.append({
+    #                                 "id": doc_name,
+    #                                 "filename": doc_name,
+    #                                 "content": text.strip()
+    #                             })
+    #                             logger.info(f"[OK] Documento {doc_name} cargado: {len(text)} caracteres")
+    #                         
+    #             except Exception as e:
+    #                 logger.warning(f"[ADVERTENCIA] Error procesando {doc_name}: {e}")
+    #                 continue
+    #         
+    #         if not documents_with_content:
+    #             logger.warning("[ADVERTENCIA] No se pudo cargar contenido de ningún documento")
+    #             return None, None
+    #         
+    #         # Usar SmartRetriever para encontrar documentos relevantes
+    #         search_results = smart_retriever.search_documents(documents_with_content, query, max_results=3)
+    #         
+    #         if not search_results:
+    #             logger.warning("[ADVERTENCIA] No se encontraron documentos relevantes")
+    #             return None, None
+    #         
+    #         # Log de documentos seleccionados
+    #         selected_docs = [result.filename for result in search_results]
+    #         logger.info(f"[LIBROS] Buscando documentos relevantes: {selected_docs}")
+    #         print(f"📚 DOCUMENTOS SELECCIONADOS: {selected_docs}")
+    #         
+    #         # Construir contenido usando los resultados del SmartRetriever
+    #         content_parts = []
+    #         document_name = search_results[0].filename  # Primer documento
+    #         
+    #         for result in search_results:
+    #             # Limitar contenido a 2000 caracteres por documento
+    #             content_preview = result.content[:2000] + "..." if len(result.content) > 2000 else result.content
+    #             content_parts.append(f"=== {result.filename} ===\n{content_preview}")
+    #             logger.info(f"[OK] Documento {result.filename} incluido (score: {result.score:.1f})")
+    #         
+    #         if content_parts:
+    #             full_content = "\n\n".join(content_parts)
+    #             logger.info(f"[LIBROS] Contenido total obtenido: {len(full_content)} caracteres")
+    #             return full_content, document_name
+    #         else:
+    #             logger.warning("[ADVERTENCIA] No se pudo obtener contenido de ningún documento")
+    #             return None, None
+    #             
+    #     except Exception as e:
+    #         logger.error(f"[ERROR] Error obteniendo contenido de documentos: {e}")
+    #         return None, None
     
     async def _fast_rag_search(self, tenant_id: str, query: str, ai_config: Dict[str, Any], branding_config: Dict[str, Any] = None) -> Optional[str]:
         """RAG rápido usando documentos precargados"""
@@ -2445,11 +2444,16 @@ Puedes preguntarme sobre:
             Clasificación de intención
         """
         try:
+            logger.info(f"🎯 [CLASIFICACIÓN BASE] Iniciando clasificación para: '{message[:50]}...'")
+            logger.info(f"🎯 [CLASIFICACIÓN BASE] Tenant ID: {tenant_id}")
+            logger.info(f"🎯 [CLASIFICACIÓN BASE] Session ID: {session_id}")
+            
             # 🚀 OPTIMIZACIÓN: Detección ultra-rápida para saludos comunes
             message_lower = message.lower().strip()
             if message_lower in self._common_responses:
                 classification = self._common_responses[message_lower]
-                logger.info(f"🚀 BYPASS GEMINI: Saludo común '{message_lower}' -> {classification}")
+                logger.info(f"🚀 [CLASIFICACIÓN BASE] BYPASS GEMINI: Saludo común '{message_lower}' -> {classification}")
+                logger.info(f"📊 [CLASIFICACIÓN BASE] Resultado: {classification} (confianza: 1.0)")
                 return {
                     "category": classification,
                     "confidence": 0.95,
@@ -2529,6 +2533,15 @@ Puedes preguntarme sobre:
             
             # Clasificar intención usando IA con contexto de sesión
             classification = await self._classify_with_ai(message, user_context, session_context, tenant_id)
+            
+            # 📊 IMPRIMIR RESULTADO FINAL DE CLASIFICACIÓN
+            if classification and classification.get("category"):
+                logger.info(f"📊 [CLASIFICACIÓN BASE] RESULTADO FINAL: {classification['category']} (confianza: {classification.get('confidence', 0):.2f})")
+                logger.info(f"📊 [CLASIFICACIÓN BASE] Mensaje original: '{message[:100]}...'")
+                logger.info(f"📊 [CLASIFICACIÓN BASE] Tenant: {tenant_id}")
+                logger.info(f"📊 [CLASIFICACIÓN BASE] {'='*60}")
+            else:
+                logger.warning(f"⚠️ [CLASIFICACIÓN BASE] No se pudo clasificar el mensaje: '{message[:50]}...'")
             
             return classification
             
@@ -2954,6 +2967,10 @@ Responde solo el JSON estricto sin comentarios:
                                   tenant_id: str, session_id: str = None) -> str:
         """Genera respuesta usando IA con contexto de documentos"""
         
+        # 🚀 OPTIMIZACIÓN: Obtener configuración del tenant desde memoria precargada
+        tenant_context = user_context.get('tenant_context', {})
+        tenant_config = tenant_context.get('tenant_config', {})
+        
         # [COHETE] FASE 6: Usar RAGOrchestrator si está habilitado
         if self.use_rag_orchestrator and self.rag_orchestrator:
             try:
@@ -2965,7 +2982,8 @@ Responde solo el JSON estricto sin comentarios:
                     query=query,
                     tenant_id=tenant_id,
                     user_context=user_context,
-                    session_id=session_id
+                    session_id=session_id,
+                    tenant_config=tenant_config
                 )
                 logger.info(f"[OK] RAG respuesta generada | length={len(response)} chars")
                 return response
@@ -3483,173 +3501,153 @@ Respuesta:"""
         
         return False
     
-    def _looks_like_name_response(self, message: str) -> bool:
-        """
-        Detecta si un mensaje parece ser una respuesta de nombre
-        
-        Args:
-            message: Mensaje a analizar
-            
-        Returns:
-            True si parece ser un nombre
-        """
-        message_lower = message.lower().strip()
-        
-        # Palabras que indican que NO es un nombre (lista expandida)
-        not_name_indicators = [
-            "hola", "buenos", "buenas", "saludos", "como", "que", "cual", 
-            "donde", "cuando", "por que", "quiero", "necesito", "me gustaria",
-            "puedo", "soy", "mi nombre es", "me llamo", "soy de", "vivo en",
-            "ok", "okey", "okay", "listo", "bien", "si", "no", "tal vez",
-            "gracias", "por favor", "disculpa", "perdon", "lo siento",
-            "entendido", "comprendo", "vale", "perfecto", "excelente",
-            "claro", "obvio", "seguro", "por supuesto", "naturalmente"
-        ]
-        
-        if any(indicator in message_lower for indicator in not_name_indicators):
-            return False
-        
-        # Si contiene palabras como "nombre", "apellido", "solo" - probablemente es una respuesta de datos
-        data_indicators = [
-            "nombre", "apellido", "solo", "un", "una", "dos", "tres", "varias"
-        ]
-        
-        if any(indicator in message_lower for indicator in data_indicators):
-            return True
-        
-        # Si es una frase corta (1-4 palabras) sin signos de interrogación Y no contiene palabras comunes
-        words = message.split()
-        if len(words) <= 4 and "?" not in message:
-            # Verificar que no sean palabras muy comunes
-            common_words = ["ok", "listo", "bien", "si", "no", "hola", "gracias", "vale", "claro"]
-            if not any(word.lower() in common_words for word in words):
-                return True
-        
-        return False
+    # def _looks_like_name_response(self, message: str) -> bool:
+    #     """
+    #     Detecta si un mensaje parece ser una respuesta de nombre
+    #     MÉTODO NO SE USA - COMENTADO
+    #     """
+    #     message_lower = message.lower().strip()
+    #     
+    #     # Palabras que indican que NO es un nombre (lista expandida)
+    #     not_name_indicators = [
+    #         "hola", "buenos", "buenas", "saludos", "como", "que", "cual", 
+    #         "donde", "cuando", "por que", "quiero", "necesito", "me gustaria",
+    #         "puedo", "soy", "mi nombre es", "me llamo", "soy de", "vivo en",
+    #         "ok", "okey", "okay", "listo", "bien", "si", "no", "tal vez",
+    #         "gracias", "por favor", "disculpa", "perdon", "lo siento",
+    #         "entendido", "comprendo", "vale", "perfecto", "excelente",
+    #         "claro", "obvio", "seguro", "por supuesto", "naturalmente"
+    #     ]
+    #     
+    #     if any(indicator in message_lower for indicator in not_name_indicators):
+    #         return False
+    #     
+    #     # Si contiene palabras como "nombre", "apellido", "solo" - probablemente es una respuesta de datos
+    #     data_indicators = [
+    #         "nombre", "apellido", "solo", "un", "una", "dos", "tres", "varias"
+    #     ]
+    #     
+    #     if any(indicator in message_lower for indicator in data_indicators):
+    #         return True
+    #     
+    #     # Si es una frase corta (1-4 palabras) sin signos de interrogación Y no contiene palabras comunes
+    #     words = message.split()
+    #     if len(words) <= 4 and "?" not in message:
+    #         # Verificar que no sean palabras muy comunes
+    #         common_words = ["ok", "listo", "bien", "si", "no", "hola", "gracias", "vale", "claro"]
+    #         if not any(word.lower() in common_words for word in words):
+    #             return True
+    #     
+    #     return False
     
-    def _looks_like_lastname_response(self, message: str) -> bool:
-        """
-        Detecta si un mensaje parece ser una respuesta de apellido
-        
-        Args:
-            message: Mensaje a analizar
-            
-        Returns:
-            True si parece ser un apellido
-        """
-        message_lower = message.lower().strip()
-        
-        # Palabras que indican que NO es un apellido (lista expandida)
-        not_lastname_indicators = [
-            "hola", "buenos", "buenas", "saludos", "como", "que", "cual", 
-            "donde", "cuando", "por que", "quiero", "necesito", "me gustaria",
-            "puedo", "soy", "mi apellido es", "me apellido", "soy de", "vivo en",
-            "ok", "okey", "okay", "listo", "bien", "si", "no", "tal vez",
-            "gracias", "por favor", "disculpa", "perdon", "lo siento",
-            "entendido", "comprendo", "vale", "perfecto", "excelente",
-            "claro", "obvio", "seguro", "por supuesto", "naturalmente"
-        ]
-        
-        if any(indicator in message_lower for indicator in not_lastname_indicators):
-            return False
-        
-        # Si contiene palabras como "apellido", "solo" - probablemente es una respuesta de datos
-        data_indicators = [
-            "apellido", "solo", "un", "una", "dos", "tres", "varias"
-        ]
-        
-        if any(indicator in message_lower for indicator in data_indicators):
-            return True
-        
-        # Si es una frase corta (1-3 palabras) sin signos de interrogación Y no contiene palabras comunes
-        words = message.split()
-        if len(words) <= 3 and "?" not in message:
-            # Verificar que no sean palabras muy comunes
-            common_words = ["ok", "listo", "bien", "si", "no", "hola", "gracias", "vale", "claro"]
-            if not any(word.lower() in common_words for word in words):
-                return True
-        
-        return False
+    # def _looks_like_lastname_response(self, message: str) -> bool:
+    #     """
+    #     Detecta si un mensaje parece ser una respuesta de apellido
+    #     MÉTODO NO SE USA - COMENTADO
+    #     """
+    #     message_lower = message.lower().strip()
+    #     
+    #     # Palabras que indican que NO es un apellido (lista expandida)
+    #     not_lastname_indicators = [
+    #         "hola", "buenos", "buenas", "saludos", "como", "que", "cual", 
+    #         "donde", "cuando", "por que", "quiero", "necesito", "me gustaria",
+    #         "puedo", "soy", "mi apellido es", "me apellido", "soy de", "vivo en",
+    #         "ok", "okey", "okay", "listo", "bien", "si", "no", "tal vez",
+    #         "gracias", "por favor", "disculpa", "perdon", "lo siento",
+    #         "entendido", "comprendo", "vale", "perfecto", "excelente",
+    #         "claro", "obvio", "seguro", "por supuesto", "naturalmente"
+    #     ]
+    #     
+    #     if any(indicator in message_lower for indicator in not_lastname_indicators):
+    #         return False
+    #     
+    #     # Si contiene palabras como "apellido", "solo" - probablemente es una respuesta de datos
+    #     data_indicators = [
+    #         "apellido", "solo", "un", "una", "dos", "tres", "varias"
+    #     ]
+    #     
+    #     if any(indicator in message_lower for indicator in data_indicators):
+    #         return True
+    #     
+    #     # Si es una frase corta (1-3 palabras) sin signos de interrogación Y no contiene palabras comunes
+    #     words = message.split()
+    #     if len(words) <= 3 and "?" not in message:
+    #         # Verificar que no sean palabras muy comunes
+    #         common_words = ["ok", "listo", "bien", "si", "no", "hola", "gracias", "vale", "claro"]
+    #         if not any(word.lower() in common_words for word in words):
+    #             return True
+    #     
+    #     return False
     
-    def _looks_like_city_response(self, message: str) -> bool:
-        """
-        Detecta si un mensaje parece ser una respuesta de ciudad
-        
-        Args:
-            message: Mensaje a analizar
-            
-        Returns:
-            True si parece ser una ciudad
-        """
-        message_lower = message.lower().strip()
-        
-        # Palabras que indican que NO es una ciudad (lista expandida)
-        not_city_indicators = [
-            "hola", "buenos", "buenas", "saludos", "como", "que", "cual", 
-            "donde", "cuando", "por que", "quiero", "necesito", "me gustaria",
-            "puedo", "soy", "mi ciudad es", "vivo en", "soy de",
-            "ok", "okey", "okay", "listo", "bien", "si", "no", "tal vez",
-            "gracias", "por favor", "disculpa", "perdon", "lo siento",
-            "entendido", "comprendo", "vale", "perfecto", "excelente",
-            "claro", "obvio", "seguro", "por supuesto", "naturalmente"
-        ]
-        
-        if any(indicator in message_lower for indicator in not_city_indicators):
-            return False
-        
-        # Si contiene palabras como "ciudad", "vivo", "soy de" - probablemente es una respuesta de datos
-        data_indicators = [
-            "ciudad", "vivo", "soy de", "estoy en", "resido en", "habito en"
-        ]
-        
-        if any(indicator in message_lower for indicator in data_indicators):
-            return True
-        
-        # Si es una frase corta (1-3 palabras) sin signos de interrogación
-        words = message.split()
-        if len(words) <= 3 and "?" not in message:
-            return True
-        
-        return False
+    # def _looks_like_city_response(self, message: str) -> bool:
+    #     """
+    #     Detecta si un mensaje parece ser una respuesta de ciudad
+    #     MÉTODO NO SE USA - COMENTADO
+    #     """
+    #     message_lower = message.lower().strip()
+    #     
+    #     # Palabras que indican que NO es una ciudad (lista expandida)
+    #     not_city_indicators = [
+    #         "hola", "buenos", "buenas", "saludos", "como", "que", "cual", 
+    #         "donde", "cuando", "por que", "quiero", "necesito", "me gustaria",
+    #         "puedo", "soy", "mi ciudad es", "vivo en", "soy de",
+    #         "ok", "okey", "okay", "listo", "bien", "si", "no", "tal vez",
+    #         "gracias", "por favor", "disculpa", "perdon", "lo siento",
+    #         "entendido", "comprendo", "vale", "perfecto", "excelente",
+    #         "claro", "obvio", "seguro", "por supuesto", "naturalmente"
+    #     ]
+    #     
+    #     if any(indicator in message_lower for indicator in not_city_indicators):
+    #         return False
+    #     
+    #     # Si contiene palabras como "ciudad", "vivo", "soy de" - probablemente es una respuesta de datos
+    #     data_indicators = [
+    #         "ciudad", "vivo", "soy de", "estoy en", "resido en", "habito en"
+    #     ]
+    #     
+    #     if any(indicator in message_lower for indicator in data_indicators):
+    #         return True
+    #     
+    #     # Si es una frase corta (1-3 palabras) sin signos de interrogación
+    #     words = message.split()
+    #     if len(words) <= 3 and "?" not in message:
+    #         return True
+    #     
+    #     return False
     
-    def _looks_like_data_explanation(self, message: str) -> bool:
-        """
-        Detecta si un mensaje es una explicación sobre qué datos puede proporcionar el usuario
-        
-        Args:
-            message: Mensaje a analizar
-            
-        Returns:
-            True si parece ser una explicación sobre datos disponibles
-        """
-        message_lower = message.lower().strip()
-        
-        # Patrones que indican explicaciones sobre datos disponibles
-        explanation_patterns = [
-            "puedo solo", "solo puedo", "solo tengo", "solo tengo", "solo dispongo",
-            "solo me permite", "solo me deja", "solo me da", "solo me da",
-            "un nombre y un apellido", "nombre y apellido", "solo nombre", "solo apellido",
-            "no tengo más", "no tengo otros", "no tengo más datos", "no tengo más información",
-            "solo eso", "nada más", "eso es todo", "eso es lo que tengo",
-            "me permite solo", "me deja solo", "me da solo", "me da únicamente"
-        ]
-        
-        # Verificar si contiene alguno de los patrones
-        for pattern in explanation_patterns:
-            if pattern in message_lower:
-                return True
-        
-        # Verificar si contiene palabras clave de datos + palabras de limitación
-        data_words = ["nombre", "apellido", "ciudad", "dirección", "teléfono", "email", "datos", "información"]
-        limitation_words = ["solo", "únicamente", "solamente", "nada más", "eso es todo", "no tengo más"]
-        
-        has_data_word = any(word in message_lower for word in data_words)
-        has_limitation_word = any(word in message_lower for word in limitation_words)
-        
-        if has_data_word and has_limitation_word:
-            return True
-        
-        return False
+    # def _looks_like_data_explanation(self, message: str) -> bool:
+    #     """
+    #     Detecta si un mensaje es una explicación sobre qué datos puede proporcionar el usuario
+    #     MÉTODO DUPLICADO - NO SE USA
+    #     """
+    #     message_lower = message.lower().strip()
+    #     
+    #     # Patrones que indican explicaciones sobre datos disponibles
+    #     explanation_patterns = [
+    #         "puedo solo", "solo puedo", "solo tengo", "solo tengo", "solo dispongo",
+    #         "solo me permite", "solo me deja", "solo me da", "solo me da",
+    #         "un nombre y un apellido", "nombre y apellido", "solo nombre", "solo apellido",
+    #         "no tengo más", "no tengo otros", "no tengo más datos", "no tengo más información",
+    #         "solo eso", "nada más", "eso es todo", "eso es lo que tengo",
+    #         "me permite solo", "me deja solo", "me da solo", "me da únicamente"
+    #     ]
+    #     
+    #     # Verificar si contiene alguno de los patrones
+    #     for pattern in explanation_patterns:
+    #         if pattern in message_lower:
+    #             return True
+    #     
+    #     # Verificar si contiene palabras clave de datos + palabras de limitación
+    #     data_words = ["nombre", "apellido", "ciudad", "dirección", "teléfono", "email", "datos", "información"]
+    #     limitation_words = ["solo", "únicamente", "solamente", "nada más", "eso es todo", "no tengo más"]
+    #     
+    #     has_data_word = any(word in message_lower for word in data_words)
+    #     has_limitation_word = any(word in message_lower for word in limitation_words)
+    #     
+    #     if has_data_word and has_limitation_word:
+    #         return True
+    #     
+    #     return False
     
     async def _extract_with_ai(self, message: str, data_type: str) -> Dict[str, Any]:
         """Extrae datos usando IA"""
@@ -3860,62 +3858,63 @@ Responde SOLO con un JSON válido en este formato:
             logger.error(f"Error analizando registro con IA: {str(e)}")
             return None
 
-    async def _analyze_city_with_ai(self, text: str) -> Dict[str, Any]:
-        """Usa IA para analizar si un texto contiene información de ciudad y extraerla"""
-        self._ensure_model_initialized()
-        if not self.model:
-            return {"is_city": False, "extracted_city": None, "confidence": 0.0}
-        
-        try:
-            prompt = f"""
-            Analiza el siguiente texto y determina si contiene información sobre una ciudad o ubicación.
-            
-            Texto: "{text}"
-            
-            Instrucciones:
-            1. Si el texto menciona una ciudad, país, o ubicación geográfica, responde "SI"
-            2. Si el texto NO menciona ubicación geográfica, responde "NO"
-            3. Si es "SI", extrae la información completa de ubicación
-            4. Si menciona país Y ciudad, extrae la frase completa
-            5. Si solo menciona ciudad, extrae solo la ciudad
-            6. IMPORTANTE: Para frases como "en españa, en madrid", extrae la ciudad específica (madrid)
-            7. Para frases como "vivo en españa, en madrid", extrae "madrid" como ciudad
-            
-            Ejemplos:
-            - "vivo en españa, en madrid" -> SI, ciudad: "madrid"
-            - "soy de bogotá" -> SI, ciudad: "bogotá"
-            - "estoy en medellín" -> SI, ciudad: "medellín"
-            - "en españa, madrid" -> SI, ciudad: "madrid"
-            - "en madrid, españa" -> SI, ciudad: "madrid"
-            - "hola" -> NO
-            - "mi nombre es juan" -> NO
-            
-            Responde en formato: SI|ciudad o NO
-            """
-            
-            # [COHETE] FASE 2: Usar configuración optimizada para normalización de ubicaciones
-            response_text = await self._generate_content(prompt, task_type="location_normalization")
-            result = response_text.strip()
-            
-            if result.startswith("SI|"):
-                city = result.split("|", 1)[1].strip()
-                logger.info(f"IA detectó ciudad: '{city}' en texto: '{text}'")
-                return {
-                    "is_city": True,
-                    "extracted_city": city,
-                    "confidence": 0.8
-                }
-            else:
-                logger.info(f"IA no detectó ciudad en texto: '{text}'")
-                return {
-                    "is_city": False,
-                    "extracted_city": None,
-                    "confidence": 0.0
-                }
-                
-        except Exception as e:
-            logger.error(f"Error analizando ciudad con IA: {str(e)}")
-            return {"is_city": False, "extracted_city": None, "confidence": 0.0}
+    # async def _analyze_city_with_ai(self, text: str) -> Dict[str, Any]:
+    #     """Usa IA para analizar si un texto contiene información de ciudad y extraerla"""
+    #     # MÉTODO NO SE USA - COMENTADO
+    #     self._ensure_model_initialized()
+    #     if not self.model:
+    #         return {"is_city": False, "extracted_city": None, "confidence": 0.0}
+    #     
+    #     try:
+    #         prompt = f"""
+    #         Analiza el siguiente texto y determina si contiene información sobre una ciudad o ubicación.
+    #         
+    #         Texto: "{text}"
+    #         
+    #         Instrucciones:
+    #         1. Si el texto menciona una ciudad, país, o ubicación geográfica, responde "SI"
+    #         2. Si el texto NO menciona ubicación geográfica, responde "NO"
+    #         3. Si es "SI", extrae la información completa de ubicación
+    #         4. Si menciona país Y ciudad, extrae la frase completa
+    #         5. Si solo menciona ciudad, extrae solo la ciudad
+    #         6. IMPORTANTE: Para frases como "en españa, en madrid", extrae la ciudad específica (madrid)
+    #         7. Para frases como "vivo en españa, en madrid", extrae "madrid" como ciudad
+    #         
+    #         Ejemplos:
+    #         - "vivo en españa, en madrid" -> SI, ciudad: "madrid"
+    #         - "soy de bogotá" -> SI, ciudad: "bogotá"
+    #         - "estoy en medellín" -> SI, ciudad: "medellín"
+    #         - "en españa, madrid" -> SI, ciudad: "madrid"
+    #         - "en madrid, españa" -> SI, ciudad: "madrid"
+    #         - "hola" -> NO
+    #         - "mi nombre es juan" -> NO
+    #         
+    #         Responde en formato: SI|ciudad o NO
+    #         """
+    #         
+    #         # [COHETE] FASE 2: Usar configuración optimizada para normalización de ubicaciones
+    #         response_text = await self._generate_content(prompt, task_type="location_normalization")
+    #         result = response_text.strip()
+    #         
+    #         if result.startswith("SI|"):
+    #             city = result.split("|", 1)[1].strip()
+    #             logger.info(f"IA detectó ciudad: '{city}' en texto: '{text}'")
+    #             return {
+    #                 "is_city": True,
+    #                 "extracted_city": city,
+    #                 "confidence": 0.8
+    #             }
+    #         else:
+    #             logger.info(f"IA no detectó ciudad en texto: '{text}'")
+    #             return {
+    #                 "is_city": False,
+    #                 "extracted_city": None,
+    #                 "confidence": 0.0
+    #             }
+    #             
+    #     except Exception as e:
+    #         logger.error(f"Error analizando ciudad con IA: {str(e)}")
+    #         return {"is_city": False, "extracted_city": None, "confidence": 0.0}
 
     async def _validate_with_ai(self, data: str, data_type: str) -> bool:
         """Validación rápida con IA - optimizada para velocidad"""
@@ -4636,95 +4635,91 @@ RESPUESTA NATURAL:""",
             }
 
     async def extract_user_name_from_message(self, tenant_id: str, message: str) -> Dict[str, Any]:
-        """
-        Extrae el nombre del usuario de cualquier mensaje (no necesariamente con código de referido)
-        
-        Args:
-            tenant_id: ID del tenant
-            message: Mensaje del usuario
-            
-        Returns:
-            Dict con el nombre extraído y validación
-        """
-        self._ensure_model_initialized()
-        
-        if not self.model:
-            return {
-                "name": None,
-                "is_valid": False,
-                "confidence": 0.0,
-                "reason": "Servicio de IA no disponible"
-            }
-        
-        try:
-            prompt = f"""
-Analiza el siguiente mensaje y extrae el nombre completo de la persona:
+     """
+     Extrae el nombre del usuario de cualquier mensaje (no necesariamente con código de referido)
+     MÉTODO NO SE USA - COMENTADO
+     """
+     self._ensure_model_initialized()
+     
+     if not self.model:
+         return {
+             "name": None,
+             "is_valid": False,
+             "confidence": 0.0,
+             "reason": "Servicio de IA no disponible"
+         }
+     
+     try:
+         prompt = f"""
+ Analiza el siguiente mensaje y extrae el nombre completo de la persona:
 
-Mensaje: "{message}"
+ Mensaje: "{message}"
 
-IMPORTANTE:
-- Busca patrones como "Soy [nombre]", "Me llamo [nombre]", "Mi nombre es [nombre]", etc.
-- Extrae el nombre completo (nombre y apellidos si están disponibles)
-- Si el mensaje no contiene un nombre claro, responde "NO_NAME"
-- Ignora saludos como "hola", "buenos días", etc.
+ IMPORTANTE:
+ - Busca patrones como "Soy [nombre]", "Me llamo [nombre]", "Mi nombre es [nombre]", etc.
+ - Extrae el nombre completo (nombre y apellidos si están disponibles)
+ - Si el mensaje no contiene un nombre claro, responde "NO_NAME"
+ - Ignora saludos como "hola", "buenos días", etc.
 
-Ejemplos:
-- "Soy Santiago Buitrago Rojas" -> "Santiago Buitrago Rojas"
-- "Me llamo María García" -> "María García"
-- "Mi nombre es Carlos" -> "Carlos"
-- "Hola, soy Ana" -> "Ana"
-- "hola" -> "NO_NAME"
-- "buenos días" -> "NO_NAME"
+ Ejemplos:
+ - "Soy Santiago Buitrago Rojas" -> "Santiago Buitrago Rojas"
+ - "Me llamo María García" -> "María García"
+ - "Mi nombre es Carlos" -> "Carlos"
+ - "Hola, soy Ana" -> "Ana"
+ - "hola" -> "NO_NAME"
+ - "buenos días" -> "NO_NAME"
 
-Responde ÚNICAMENTE el nombre extraído o "NO_NAME" si no se puede determinar.
-"""
+ Responde ÚNICAMENTE el nombre extraído o "NO_NAME" si no se puede determinar.
+ """
 
-            response_text = await self._generate_content(prompt)
-            
-            if not response_text:
-                return {
-                    "name": None,
-                    "is_valid": False,
-                    "confidence": 0.0,
-                    "reason": "No se pudo obtener respuesta de la IA"
-                }
-            
-            response_clean = response_text.strip()
-            
-            if response_clean.upper() == "NO_NAME":
-                return {
-                    "name": None,
-                    "is_valid": False,
-                    "confidence": 0.9,
-                    "reason": "El mensaje no contiene un nombre claro"
-                }
-            
-            # Validar que el nombre extraído es válido
-            validation_result = await self.validate_user_data(tenant_id, response_clean, "name")
-            
-            if validation_result.get("is_valid", False):
-                return {
-                    "name": response_clean,
-                    "is_valid": True,
-                    "confidence": validation_result.get("confidence", 0.8),
-                    "reason": "Nombre extraído y validado correctamente"
-                }
-            else:
-                return {
-                    "name": response_clean,
-                    "is_valid": False,
-                    "confidence": validation_result.get("confidence", 0.5),
-                    "reason": f"Nombre extraído pero no válido: {validation_result.get('reason', '')}"
-                }
-                
-        except Exception as e:
-            logger.error(f"Error extrayendo nombre del mensaje con IA: {str(e)}")
-            return {
-                "name": None,
-                "is_valid": False,
-                "confidence": 0.0,
-                "reason": f"Error en extracción: {str(e)}"
-            }
+         response_text = await self._generate_content(prompt)
+         
+         if not response_text:
+             return {
+                 "name": None,
+                 "is_valid": False,
+                 "confidence": 0.0,
+                 "reason": "No se pudo obtener respuesta de la IA"
+             }
+         
+         response_clean = response_text.strip()
+         
+         if response_clean.upper() == "NO_NAME":
+             return {
+                 "name": None,
+                 "is_valid": False,
+                 "confidence": 0.9,
+                 "reason": "El mensaje no contiene un nombre claro"
+             }
+         
+         # Validar que el nombre extraído es válido
+         validation_result = await self.validate_user_data(tenant_id, response_clean, "name")
+         
+         if validation_result.get("is_valid", False):
+             return {
+                 "name": response_clean,
+                 "is_valid": True,
+                 "confidence": validation_result.get("confidence", 0.8),
+                 "reason": "Nombre extraído y validado correctamente"
+             }
+         else:
+             return {
+                 "name": response_clean,
+                 "is_valid": False,
+                 "confidence": validation_result.get("confidence", 0.5),
+                 "reason": f"Nombre extraído pero no válido: {validation_result.get('reason', '')}"
+             }
+             
+     except Exception as e:
+         logger.error(f"Error extrayendo nombre del mensaje con IA: {str(e)}")
+         return {
+             "name": None,
+             "is_valid": False,
+             "confidence": 0.0,
+             "reason": f"Error en extracción: {str(e)}"
+         }
+
+    async def extract_user_name_from_message(self, tenant_id: str, message: str) -> Dict[str, Any]:
         """
         Extrae el nombre del usuario de un mensaje que contiene un código de referido
         

@@ -216,20 +216,36 @@ class RAGOrchestrator:
         self, 
         query: str, 
         context: str,
-        user_context: Dict[str, Any] = None
+        user_context: Dict[str, Any] = None,
+        tenant_config: Dict[str, Any] = None
     ) -> str:
         """
-        Construye el prompt completo para RAG con guardrails
+        Construye el prompt completo para RAG con guardrails y personalidad específica del tenant
         INCLUYE contexto de sesión para continuidad
         
         Args:
             query: Pregunta del usuario
             context: Contexto de documentos
             user_context: Contexto adicional del usuario (puede incluir session_context)
+            tenant_config: Configuración del tenant para personalización
             
         Returns:
-            Prompt formateado con guardrails
+            Prompt formateado con guardrails y personalidad
         """
+        # Extraer información de branding del tenant
+        contact_name = "el candidato"
+        candidate_name = "Asistente"
+        
+        if tenant_config:
+            branding = tenant_config.get('branding', {})
+            if isinstance(branding, dict):
+                contact_name = branding.get('contact_name', tenant_config.get('contact_name', 'el candidato'))
+                candidate_name = branding.get('candidate_name', tenant_config.get('candidate_name', 'Asistente'))
+            else:
+                # Si branding es un string o None, usar valores por defecto
+                contact_name = tenant_config.get('contact_name', 'el candidato')
+                candidate_name = tenant_config.get('candidate_name', 'Asistente')
+        
         # 🔧 FIX: Incluir contexto de sesión si está disponible
         session_context = ""
         if user_context and "session_context" in user_context:
@@ -243,30 +259,38 @@ class RAGOrchestrator:
             
             logger.debug(f"Tipo de prompt detectado: {prompt_type.value}")
             
-            # Construir prompt con guardrails
+            # Construir prompt con guardrails y personalidad
             prompt = self.prompt_builder.build_prompt(
                 query=query,
                 documents=context,
                 prompt_type=prompt_type,
-                user_context=user_context
+                user_context=user_context,
+                tenant_config=tenant_config
             )
             
             return prompt
         
-        # Fallback: Prompt original (sin guardrails)
+        # Fallback: Prompt original con personalidad
         user_info = ""
         if user_context and user_context.get("user_name"):
             user_info = f"El usuario se llama {user_context['user_name']}. "
         
         prompt = f"""
-Eres un asistente virtual para una campaña política. Tu objetivo es proporcionar información PRECISA y VERIFICABLE.
+Eres {candidate_name}, el asistente virtual de la campaña política de {contact_name}.
+
+**PERSONALIDAD Y TONO:**
+- Habla como representante de {contact_name} y su campaña
+- Sé amigable, cercano y auténtico
+- Usa un tono conversacional pero profesional
+- Muestra pasión por los temas de la campaña
+- Si no tienes información específica, ofrece conectar con el equipo de {contact_name}
 
 **REGLAS FUNDAMENTALES:**
 1. SOLO responde con información de los DOCUMENTOS proporcionados
 2. Si la información está en los documentos, úsala pero NO cites la fuente
-3. Si NO está en los documentos, di explícitamente "No tengo esa información en los documentos disponibles"
+3. Si NO está en los documentos, di explícitamente "No tengo esa información en nuestros documentos de campaña"
 4. NUNCA inventes datos, números, fechas o detalles que no estén en los documentos
-5. Si la pregunta requiere información no disponible, sugiere contactar al equipo de campaña
+5. Si la pregunta requiere información no disponible, sugiere contactar al equipo de {contact_name}
 
 **CONTEXTO DEL USUARIO:**
 {user_info}
@@ -280,9 +304,8 @@ Eres un asistente virtual para una campaña política. Tu objetivo es proporcion
 **INSTRUCCIONES PARA LA RESPUESTA:**
 - Sé claro, conciso y directo
 - Usa la información de los documentos
-- Cita el número del documento [Documento N] cuando uses información específica
 - Si no hay información, sé honesto al respecto
-- Mantén un tono profesional y amigable
+- Mantén un tono profesional y amigable como representante de {contact_name}
 
 **TU RESPUESTA:**
 """
@@ -326,7 +349,8 @@ Eres un asistente virtual para una campaña política. Tu objetivo es proporcion
         query: str, 
         tenant_id: str,
         user_context: Dict[str, Any] = None,
-        max_docs: int = 3
+        max_docs: int = 3,
+        tenant_config: Dict[str, Any] = None
     ) -> RAGResponse:
         """
         Procesa un query completo usando RAG
@@ -390,7 +414,7 @@ Eres un asistente virtual para una campaña política. Tu objetivo es proporcion
         
         # 4. Build Prompt
         logger.info("4️⃣ Construyendo prompt...")
-        prompt = self._build_rag_prompt(query, context, user_context)
+        prompt = self._build_rag_prompt(query, context, user_context, tenant_config)
         
         # 5. Generate Response
         logger.info("5️⃣ Generando respuesta...")
@@ -504,7 +528,8 @@ Eres un asistente virtual para una campaña política. Tu objetivo es proporcion
         query: str, 
         tenant_id: str,
         user_context: Dict[str, Any] = None,
-        session_id: str = None
+        session_id: str = None,
+        tenant_config: Dict[str, Any] = None
     ) -> str:
         """
         Versión simplificada que solo retorna la respuesta con citas
@@ -515,6 +540,7 @@ Eres un asistente virtual para una campaña política. Tu objetivo es proporcion
             tenant_id: ID del tenant
             user_context: Contexto del usuario
             session_id: ID de sesión para contexto persistente
+            tenant_config: Configuración del tenant para personalización
             
         Returns:
             Respuesta con citas (string)
@@ -533,7 +559,7 @@ Eres un asistente virtual para una campaña política. Tu objetivo es proporcion
             except Exception as e:
                 logger.warning(f"⚠️ Error obteniendo contexto de sesión: {str(e)}")
         
-        rag_response = await self.process_query(query, tenant_id, user_context)
+        rag_response = await self.process_query(query, tenant_id, user_context, tenant_config=tenant_config)
         
         if self.enable_citations:
             return rag_response.response_with_citations

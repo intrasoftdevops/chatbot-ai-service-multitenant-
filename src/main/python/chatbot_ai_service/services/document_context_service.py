@@ -256,14 +256,15 @@ class DocumentContextService:
             logger.error(f"Error cargando documentos para tenant {tenant_id}: {str(e)}")
             return False
     
-    async def get_relevant_context(self, tenant_id: str, query: str, max_results: int = 5) -> str:
+    async def get_relevant_context(self, tenant_id: str, query: str, max_results: int = 3) -> str:
         """
-        Obtiene contexto relevante para una consulta usando RAG o búsqueda simple
+        Obtiene contexto relevante para una consulta usando cache optimizado
+        OPTIMIZADO: Reduce max_results por defecto para respuestas más rápidas
         
         Args:
             tenant_id: ID del tenant
             query: Consulta del usuario
-            max_results: Número máximo de resultados a retornar
+            max_results: Número máximo de resultados a retornar (reducido por defecto)
             
         Returns:
             Contexto relevante como string
@@ -281,19 +282,42 @@ class DocumentContextService:
             
             doc_info = self._document_cache[tenant_id]
             
-            # Debug: Mostrar información detallada de los documentos
-            logger.info(f"🔍 DEBUG: Documentos para tenant {tenant_id}:")
-            if "documents" in doc_info:
-                logger.info(f"   - Número de documentos: {len(doc_info['documents'])}")
-                for i, doc in enumerate(doc_info['documents'][:3]):  # Mostrar solo los primeros 3
-                    logger.info(f"   - Doc {i+1}: {doc.get('filename', 'Sin nombre')} ({len(doc.get('content', ''))} chars)")
-                    # Mostrar una muestra del contenido
-                    content_preview = doc.get('content', '')[:200] + "..." if len(doc.get('content', '')) > 200 else doc.get('content', '')
-                    logger.info(f"      Contenido: {content_preview}")
-            else:
-                logger.info("   - No hay documentos en doc_info")
+            # 🚀 OPTIMIZACIÓN: Usar búsqueda simple si hay documentos en cache
+            if "documents" in doc_info and doc_info["documents"]:
+                logger.info(f"🔍 DEBUG: Usando búsqueda simple optimizada para tenant {tenant_id}")
+                documents = doc_info["documents"]
+                
+                # Búsqueda simple por palabras clave en el contenido
+                query_words = query.lower().split()
+                scored_docs = []
+                
+                for doc in documents:
+                    content = doc.get('content', '').lower()
+                    score = sum(1 for word in query_words if word in content)
+                    if score > 0:
+                        scored_docs.append((doc, score))
+                
+                # Ordenar por score y tomar los mejores
+                scored_docs.sort(key=lambda x: x[1], reverse=True)
+                top_docs = scored_docs[:max_results]
+                
+                if top_docs:
+                    context_parts = []
+                    for i, (doc, score) in enumerate(top_docs):
+                        filename = doc.get('filename', f'Documento {i+1}')
+                        content = doc.get('content', '')
+                        # Truncar contenido para respuestas más rápidas
+                        truncated_content = content[:800] + "..." if len(content) > 800 else content
+                        context_parts.append(f"[Documento {i+1}] {filename}:\n{truncated_content}")
+                    
+                    context = "\n\n".join(context_parts)
+                    logger.info(f"🔍 DEBUG: Contexto simple generado: {len(context)} chars de {len(top_docs)} documentos")
+                    return context
+                else:
+                    logger.warning(f"No se encontraron documentos relevantes para la consulta")
+                    return ""
             
-            # Si tenemos índice vectorial, usar RAG
+            # Si tenemos índice vectorial, usar RAG (solo si es necesario)
             if tenant_id in self._index_cache and LLAMA_INDEX_SUPPORT and VectorStoreIndex is not None:
                 logger.info(f"🔍 DEBUG: Usando índice vectorial para tenant {tenant_id}")
                 index = self._index_cache[tenant_id]

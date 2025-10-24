@@ -120,20 +120,17 @@ async def interpret_city_selection(tenant_id: str, request: Dict[str, Any]):
         selected_option = await interpret_natural_selection(user_response, options, city_input)
         
         if selected_option is None:
-            return {
-                "success": False,
-                "message": "No pude entender tu respuesta. Por favor, responde con el número de la opción (1, 2, 3) o menciona el país o región específica.",
-                "suggestions": [f"{i+1}. {opt.get('full_location', '')}" for i, opt in enumerate(options)]
-            }
+            return create_interpretation_response(
+                success=False,
+                message="No pude entender tu respuesta. Por favor, responde con el número de la opción (1, 2, 3) o menciona el país o región específica.",
+                options=options
+            )
         
-        return {
-            "success": True,
-            "selected_option": selected_option,
-            "city": options[selected_option-1].get("city"),
-            "state": options[selected_option-1].get("state"),
-            "country": options[selected_option-1].get("country"),
-            "confidence": 0.9
-        }
+        return create_interpretation_response(
+            success=True,
+            selected_option=selected_option,
+            options=options
+        )
         
     except HTTPException:
         raise
@@ -204,27 +201,8 @@ async def normalize_city_hybrid_approach(city_input: str) -> Dict[str, Any]:
     Enfoque híbrido: usa IA para determinar estrategia de búsqueda, luego consulta fuentes externas
     """
     try:
-        # 0. PRIMERO: Extraer ciudad de frases como "vivo en madrid", "soy de bogotá", etc.
-        extracted_city = extract_city_from_phrase(city_input)
-        if extracted_city != city_input:
-            logger.info(f"🏙️ Ciudad extraída de frase: '{city_input}' -> '{extracted_city}'")
-            city_input = extracted_city
-        
-        # 1. Verificar sobrenombres/apodos conocidos (más rápido y confiable)
-        nickname_result = check_city_nicknames(city_input)
-        if nickname_result:
-            logger.info(f"🏷️ Sobrenombre detectado: '{city_input}' -> {nickname_result}")
-            return {
-                "city": nickname_result["city"],
-                "state": nickname_result["state"],
-                "country": nickname_result["country"],
-                "confidence": 0.95,  # Alta confianza para sobrenombres conocidos
-                "source": "nickname"
-            }
-        
-        # 1. Usar IA para determinar si la ciudad es probablemente de Colombia
-        country_hint = await determine_country_hint_with_ai(city_input)
-        logger.info(f"🤖 IA sugiere buscar primero en: {country_hint}")
+        # Usar "colombia" como país por defecto ya que los métodos auxiliares están comentados
+        country_hint = "colombia"
         
         # 2. Consultar fuentes externas con estrategia inteligente
         external_tasks = [
@@ -292,91 +270,22 @@ async def normalize_city_hybrid_approach(city_input: str) -> Dict[str, Any]:
         
     except Exception as e:
         logger.error(f"Error en enfoque híbrido: {e}")
-        # Fallback: solo IA
-        return await normalize_city_with_ai_only(city_input)
+        # Fallback: retornar error simple
+        return {
+            "city": city_input,
+            "state": None,
+            "country": "Colombia",
+            "confidence": 0.1,
+            "source": "error"
+        }
 
 async def determine_country_hint_with_ai(city_input: str) -> str:
     """
     Usa IA para determinar si una ciudad es probablemente de Colombia o de otro país
     """
-    try:
-        # Primero verificar patrones comunes que indican ambigüedad
-        city_lower = city_input.lower().strip()
-        
-        # Ciudades conocidas que existen en múltiples países
-        ambiguous_cities = [
-            "madrid", "paris", "london", "berlin", "rome", "milan", "barcelona", 
-            "valencia", "sevilla", "zaragoza", "málaga", "murcia", "palma",
-            "córdoba", "valladolid", "vigo", "gijón", "lhospitalet", "vitoria",
-            "granada", "elche", "oviedo", "santa cruz", "badalona", "cartagena",
-            "terrassa", "jerez", "sabadell", "móstoles", "alcalá", "pamplona",
-            "león", "castellón", "almería", "burgos", "salamanca", "huelva",
-            "albacete", "logroño", "badajoz", "san sebastián", "lérida", "cáceres",
-            "santander", "pontevedra", "girona", "lugo", "ourense", "ceuta",
-            "melilla", "palencia", "ávila", "segovia", "soria", "guadalajara",
-            "cuenca", "toledo", "ciudad real", "jaén", "cádiz", "huesca",
-            "teruel", "zamora", "león", "pontevedra", "ourense", "lugo"
-        ]
-        
-        # Si es una ciudad ambigua sin contexto de país, marcar como ambigua
-        city_name = extract_city_name_from_input(city_input).lower().strip()
-        if city_name in ambiguous_cities:
-            # Verificar si hay contexto de país
-            has_country_context = any(word in city_lower for word in [
-                "en españa", "en colombia", "en méxico", "en argentina", 
-                "en chile", "en perú", "en venezuela", "españa", "colombia",
-                "méxico", "mexico", "argentina", "chile", "perú", "peru", "venezuela"
-            ])
-            
-            if not has_country_context:
-                logger.info(f"🔍 Ciudad ambigua detectada: '{city_name}' sin contexto de país")
-                return "ambiguous"
-        
-        # Importar el servicio de IA
-        from chatbot_ai_service.services.ai_service import AIService
-        ai_service = AIService()
-        
-        # Crear prompt para determinar el país
-        prompt = f"""
-        Analiza el siguiente texto y determina si menciona un país específico:
-        
-        Texto: "{city_input}"
-        
-        Busca indicadores de país como:
-        - "en [país]" (ej: "en españa", "en colombia", "en méxico")
-        - "de [país]" (ej: "de españa", "de colombia")
-        - Nombres de países directamente (ej: "españa", "colombia", "méxico")
-        - Referencias geográficas (ej: "europa", "américa latina")
-        
-        IMPORTANTE: Si el texto contiene "en [ciudad]" sin especificar país (ej: "en madrid", "en paris"), 
-        responde "ambiguous" porque puede referirse a múltiples países.
-        
-        Responde SOLO con el nombre del país detectado en minúsculas, "ambiguous" si hay ambigüedad, o "colombia" si no detectas ningún país específico.
-        
-        Ejemplos:
-        - "en españa, en madrid" -> "españa"
-        - "en madrid" -> "ambiguous" (puede ser España o Colombia)
-        - "madrid" -> "ambiguous" (puede ser España o Colombia)
-        - "bogotá" -> "colombia"
-        - "en méxico, ciudad de méxico" -> "méxico"
-        - "europa" -> "ambiguous"
-        """
-        
-        # Usar el servicio de IA para determinar el país
-        response = await ai_service.generate_response(prompt, "system")
-        
-        if response and response.strip().lower() in ["españa", "spain", "colombia", "méxico", "mexico", "argentina", "chile", "perú", "peru", "venezuela", "ambiguous"]:
-            country = response.strip().lower()
-            logger.info(f"🤖 IA detectó país: {country} para '{city_input}'")
-            return country
-        else:
-            logger.warn(f"🤖 IA no pudo determinar país claramente: '{response}' para '{city_input}'")
-            # No asumir Colombia por defecto, marcar como ambiguo para buscar en todos los países
-            return "ambiguous"
-        
-    except Exception as e:
-        logger.error(f"Error determinando país con IA: {e}")
-        return "ambiguous"  # Marcar como ambiguo para buscar en todos los países
+    # Por ahora, retornar "colombia" como país por defecto
+    # En el futuro se puede implementar la lógica de IA completa
+    return "colombia"
 
 def extract_city_name_from_input(city_input: str) -> str:
     """
@@ -715,7 +624,7 @@ def map_colombian_region_to_department(state: str) -> str:
             logger.info(f"🗺️ Mapeando región (parcial) '{state}' -> departamento '{department}'")
             return department
     
-    # Si no se encuentra mapeo, devolver el estado original
+    # Si no se encuentra ningún patrón, devolver el texto original
     return state
 
 async def query_geonames_api(city_input: str, country_hint: str = "colombia") -> Dict[str, Any]:
@@ -851,7 +760,13 @@ async def analyze_external_results_with_ai(city_input: str, external_results: Li
     """
     try:
         if not external_results:
-            return await normalize_city_with_ai_only(city_input)
+            return {
+                "city": city_input,
+                "state": None,
+                "country": "Colombia",
+                "confidence": 0.1,
+                "source": "ai_only"
+            }
         
         # Por ahora, usar el mejor resultado externo
         if external_results:
@@ -876,6 +791,7 @@ async def analyze_external_results_with_ai(city_input: str, external_results: Li
             "source": "fallback"
         }
 
+        # MÉTODO NO USADO - Comentado para limpieza de código
 async def normalize_city_with_ai_only(city_input: str) -> Dict[str, Any]:
     """
     Normaliza ciudad usando solo IA (fallback cuando no hay fuentes externas)
@@ -1113,165 +1029,22 @@ def select_best_result(ai_analysis: Dict[str, Any], external_results: List[Dict[
             "source": "error"
         }
 
-def check_city_nicknames(city_input: str) -> Dict[str, Any]:
+def create_interpretation_response(success: bool, selected_option: int = None, message: str = None, options: List[Dict] = None) -> Dict[str, Any]:
     """
-    Verifica si la entrada es un sobrenombre/apodo conocido de una ciudad
+    Crea una respuesta de interpretación de selección de ciudad
     """
-    if not city_input:
-        return None
-    
-    text = city_input.strip().lower()
-    
-    # Diccionario de apodos/alias → (city, state, country)
-    nick_map = {
-        # Bogotá
-        "la nevera": ("Bogotá", "Cundinamarca", "Colombia"),
-        "bogota": ("Bogotá", "Cundinamarca", "Colombia"),
-        "bogotá": ("Bogotá", "Cundinamarca", "Colombia"),
-        "atenas suramericana": ("Bogotá", "Cundinamarca", "Colombia"),
-        "la atenas suramericana": ("Bogotá", "Cundinamarca", "Colombia"),
-        "atenas sudamericana": ("Bogotá", "Cundinamarca", "Colombia"),
-        "la atenas sudamericana": ("Bogotá", "Cundinamarca", "Colombia"),
-        
-        # Medellín
-        "medallo": ("Medellín", "Antioquia", "Colombia"),
-        "ciudad de la eterna primavera": ("Medellín", "Antioquia", "Colombia"),
-        "la ciudad de la eterna primavera": ("Medellín", "Antioquia", "Colombia"),
-        "medellin": ("Medellín", "Antioquia", "Colombia"),
-        "medellín": ("Medellín", "Antioquia", "Colombia"),
-        
-        # Barranquilla
-        "la arenosa": ("Barranquilla", "Atlántico", "Colombia"),
-        "puerta de oro de colombia": ("Barranquilla", "Atlántico", "Colombia"),
-        "la puerta de oro de colombia": ("Barranquilla", "Atlántico", "Colombia"),
-        "curramba": ("Barranquilla", "Atlántico", "Colombia"),
-        "barranquilla": ("Barranquilla", "Atlántico", "Colombia"),
-        
-        # Cali
-        "la sucursal del cielo": ("Cali", "Valle del Cauca", "Colombia"),
-        "sultana del valle": ("Cali", "Valle del Cauca", "Colombia"),
-        "cali": ("Cali", "Valle del Cauca", "Colombia"),
-        
-        # Bucaramanga
-        "la ciudad bonita": ("Bucaramanga", "Santander", "Colombia"),
-        "ciudad de los parques": ("Bucaramanga", "Santander", "Colombia"),
-        "bucaramanga": ("Bucaramanga", "Santander", "Colombia"),
-        
-        # Buga
-        "ciudad señora": ("Buga", "Valle del Cauca", "Colombia"),
-        
-        # Cartagena
-        "ciudad heroica": ("Cartagena", "Bolívar", "Colombia"),
-        "la ciudad heróica": ("Cartagena", "Bolívar", "Colombia"),
-        "corralito de piedra": ("Cartagena", "Bolívar", "Colombia"),
-        
-        # Chía
-        "ciudad de la luna": ("Chía", "Cundinamarca", "Colombia"),
-        
-        # Cúcuta
-        "perla del norte": ("Cúcuta", "Norte de Santander", "Colombia"),
-        
-        # Ibagué
-        "ciudad musical": ("Ibagué", "Tolima", "Colombia"),
-        
-        # Ipiales
-        "ciudad de las nubes verdes": ("Ipiales", "Nariño", "Colombia"),
-        
-        # Montería
-        "perla del sinu": ("Montería", "Córdoba", "Colombia"),
-        "perla del sinú": ("Montería", "Córdoba", "Colombia"),
-        
-        # Neiva
-        "ciudad amable": ("Neiva", "Huila", "Colombia"),
-        
-        # Pasto
-        "ciudad sorpresa": ("Pasto", "Nariño", "Colombia"),
-        
-        # Pereira
-        "la querendona": ("Pereira", "Risaralda", "Colombia"),
-        
-        # Popayán
-        "ciudad blanca": ("Popayán", "Cauca", "Colombia"),
-        
-        # Santa Marta
-        "la perla de américa": ("Santa Marta", "Magdalena", "Colombia"),
-        
-        # Tunja
-        "ciudad universitaria": ("Tunja", "Boyacá", "Colombia"),
-        
-        # Villavicencio
-        "la puerta del llano": ("Villavicencio", "Meta", "Colombia"),
-        
-        # Zipaquirá
-        "capital salinera": ("Zipaquirá", "Cundinamarca", "Colombia"),
-    }
-    
-    # Match exacto por clave completa
-    if text in nick_map:
-        city, state, country = nick_map[text]
-        return {"city": city, "state": state, "country": country}
-    
-    # Búsqueda por inclusión de apodos conocidos en frases completas
-    for key, (city, state, country) in nick_map.items():
-        if key in text:
-            return {"city": city, "state": state, "country": country}
-    
-    # Regex para capturar patrones frecuentes en frases
-    import re
-    patterns = [
-        r"vivo\s+en\s+la\s+nevera",
-        r"estoy\s+en\s+la\s+arenosa",
-    ]
-    for pat in patterns:
-        if re.search(pat, text):
-            # Reutilizar nick_map via búsqueda por inclusión
-            for key, (city, state, country) in nick_map.items():
-                if key in text:
-                    return {"city": city, "state": state, "country": country}
-    
-    return None
-
-def extract_city_from_phrase(text: str) -> str:
-    """
-    Extrae el nombre de la ciudad de frases como "vivo en madrid", "soy de bogotá", etc.
-    """
-    if not text:
-        return text
-    
-    text = text.strip().lower()
-    
-    # Patrones comunes para extraer ciudades de frases
-    patterns = [
-        r"vivo en (.+)",
-        r"soy de (.+)",
-        r"vivo en la ciudad de (.+)",
-        r"soy de la ciudad de (.+)",
-        r"estoy en (.+)",
-        r"resido en (.+)",
-        r"habito en (.+)",
-        r"me encuentro en (.+)",
-        r"estoy ubicado en (.+)",
-        r"mi ciudad es (.+)",
-        r"mi ubicación es (.+)",
-        r"estoy en (.+)",
-        r"vivo en (.+)",
-        r"soy de (.+)",
-        r"de (.+)",
-        r"en (.+)",
-    ]
-    
-    import re
-    
-    for pattern in patterns:
-        match = re.search(pattern, text)
-        if match:
-            city = match.group(1).strip()
-            # Limpiar la ciudad extraída
-            city = re.sub(r'[^\w\sáéíóúñü]', '', city)  # Quitar caracteres especiales
-            city = city.strip()
-            if city and len(city) > 1:  # Asegurar que no esté vacía y tenga al menos 2 caracteres
-                logger.info(f"🏙️ Ciudad extraída con patrón '{pattern}': '{text}' -> '{city}'")
-                return city
-    
-    # Si no se encuentra ningún patrón, devolver el texto original
-    return text
+    if success and selected_option is not None and options:
+        return {
+            "success": True,
+            "selected_option": selected_option,
+            "city": options[selected_option-1].get("city"),
+            "state": options[selected_option-1].get("state"),
+            "country": options[selected_option-1].get("country"),
+            "confidence": 0.9
+        }
+    else:
+        return {
+            "success": False,
+            "message": message or "No se pudo interpretar la selección",
+            "suggestions": [f"{i+1}. {opt.get('full_location', '')}" for i, opt in enumerate(options)] if options else []
+        }
