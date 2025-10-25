@@ -204,11 +204,8 @@ class DocumentContextService:
             # Crear documentos de LlamaIndex
             logger.info(f"📖 Procesando {len(documents)} documentos...")
             
-            # Limitar número de documentos para evitar timeouts
-            max_docs = 10
-            if len(documents) > max_docs:
-                logger.warning(f"⚠️ Limitando procesamiento a {max_docs} documentos de {len(documents)} encontrados")
-                documents = documents[:max_docs]
+            # Procesar todos los documentos disponibles
+            logger.info(f"📚 Procesando todos los {len(documents)} documentos encontrados")
             
             llama_documents = []
             total_chars = 0

@@ -7,7 +7,6 @@ import logging
 from typing import Dict, Any, Optional, List
 import asyncio
 from google.cloud import firestore
-from google.auth import default
 import os
 
 logger = logging.getLogger(__name__)
@@ -34,17 +33,22 @@ class FirestoreTenantService:
                     logger.info("🌩️ Detectado Cloud Run - usando credenciales automáticas")
                     self.db = firestore.Client(project=project_id, database=database_id)
                 else:
-                    logger.info("💻 Modo desarrollo local - detectando credenciales de gcloud...")
+                    logger.info("💻 Modo desarrollo local - configurando credenciales...")
+                    logger.info(f"🔍 GOOGLE_APPLICATION_CREDENTIALS: {os.getenv('GOOGLE_APPLICATION_CREDENTIALS')}")
                     
-                    # Usar Application Default Credentials (detecta automáticamente gcloud login)
                     try:
-                        credentials, project = default()
-                        logger.info(f"✅ Credenciales de gcloud detectadas para proyecto: {project}")
-                        self.db = firestore.Client(project=project_id, database=database_id, credentials=credentials)
-                    except Exception as gcloud_error:
-                        logger.warning(f"⚠️ No se detectaron credenciales de gcloud: {gcloud_error}")
-                        logger.info("💡 Para desarrollo local, ejecuta: gcloud auth application-default login")
-                        raise Exception(f"Credenciales de gcloud no disponibles: {gcloud_error}")
+                        # Usar Application Default Credentials directamente
+                        logger.info("🔄 Creando cliente de Firestore...")
+                        
+                        # Para desarrollo local, usar Application Default Credentials directamente
+                        logger.info("🔄 Usando Application Default Credentials...")
+                        self.db = firestore.Client(project=project_id, database=database_id)
+                            
+                        logger.info("✅ Cliente de Firestore creado exitosamente")
+                    except Exception as firestore_error:
+                        logger.error(f"❌ Error específico creando cliente Firestore: {firestore_error}")
+                        logger.error(f"❌ Tipo de error: {type(firestore_error)}")
+                        raise
 
                 self._initialized = True
                 logger.info(f"✅ Firestore inicializado correctamente")
