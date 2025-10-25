@@ -99,34 +99,32 @@ async def preload_documents_on_startup_optimized():
             else:
                 print(f"⚠️ No se pudo inicializar memoria para tenant {tenant_id}")
         
-        # 🚀 OPTIMIZACIÓN: Hacer preprocesamiento SINCRÓNICO antes de estar listo
-        print("🚀 Iniciando preprocesamiento SINCRÓNICO...")
+        # Iniciar preprocesamiento en background (no bloqueante)
+        print("🚀 Iniciando preprocesamiento en background...")
         import asyncio
         
         async def background_preprocessing():
             try:
-                print("📚 [SYNC] Iniciando preprocesamiento de documentos...")
+                print("📚 [BACKGROUND] Iniciando preprocesamiento de documentos...")
                 results = await document_preprocessor_service.preprocess_all_tenants()
                 
                 successful_tenants = sum(1 for success in results.values() if success)
-                print(f"✅ [SYNC] Preprocesamiento completado: {successful_tenants}/{len(results)} tenants exitosos")
+                print(f"✅ [BACKGROUND] Preprocesamiento completado: {successful_tenants}/{len(results)} tenants exitosos")
                 
                 # Mostrar estadísticas de memoria
                 memory_stats = tenant_memory_service.get_memory_stats()
-                print(f"🧠 [SYNC] Estadísticas de memoria:")
+                print(f"🧠 [BACKGROUND] Estadísticas de memoria:")
                 print(f"  - Memorias de tenants: {memory_stats['tenant_memories']}")
                 print(f"  - Conciencias de usuarios: {memory_stats['user_consciousness']}")
                 
-                print("🎉 [SYNC] ¡Preprocesamiento completado! El servicio está completamente optimizado.")
+                print("🎉 [BACKGROUND] ¡Preprocesamiento completado! El servicio está completamente optimizado.")
                 
             except Exception as e:
-                print(f"❌ [SYNC] Error en preprocesamiento: {e}")
+                print(f"❌ [BACKGROUND] Error en preprocesamiento: {e}")
         
-        # Ejecutar preprocesamiento de forma síncrona
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(background_preprocessing())
+        asyncio.create_task(background_preprocessing())
         
-        print("✅ Servicio listo - preprocesamiento completado")
+        print("✅ Servicio listo - preprocesamiento ejecutándose en background")
     except Exception as e:
         print(f"❌ Error durante precarga optimizada de documentos: {e}")
         # No fallar el startup si hay error en la precarga
@@ -173,11 +171,23 @@ app.include_router(preprocessing_router)
 from chatbot_ai_service.controllers.intent_classification_controller import router as intent_classification_router
 app.include_router(intent_classification_router)
 
-# 🚀 EVENTO DE STARTUP: Precargar documentos automáticamente
-@app.on_event("startup")
-async def startup_event():
-    """Evento de startup para precargar documentos automáticamente"""
-    await preload_documents_on_startup_optimized()
+# 🚀 INICIALIZACIÓN INMEDIATA: Precargar documentos automáticamente
+import asyncio
+import threading
+
+def run_startup_in_background():
+    """Ejecutar inicialización en un hilo separado"""
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(preload_documents_on_startup_optimized())
+    except Exception as e:
+        print(f"❌ Error en inicialización en background: {e}")
+
+# Iniciar inmediatamente en un hilo separado
+startup_thread = threading.Thread(target=run_startup_in_background, daemon=True)
+startup_thread.start()
+print("🚀 Inicialización iniciada en background thread")
 
 @app.get("/")
 async def root():
