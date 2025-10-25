@@ -79,3 +79,29 @@ jobs:
             --min-instances=1 \
             --timeout=300s \
             --concurrency=100
+          
+          # Esperar un momento para que el servicio se inicie
+          echo "⏳ Esperando que el servicio se inicie..."
+          sleep 30
+          
+          # Obtener la URL del servicio desplegado
+          SERVICE_URL=$(gcloud run services describe "${{ matrix.service_name }}" \
+            --project "${{ env.GCP_PROJECT_ID }}" \
+            --region "${{ env.GCP_REGION }}" \
+            --format="value(status.url)")
+          
+          echo "🔗 URL del servicio: $SERVICE_URL"
+          
+          # Hacer health check para activar el servicio
+          echo "🏥 Ejecutando health check para activar el servicio..."
+          curl -f "$SERVICE_URL/health" || {
+            echo "⚠️ Health check falló, pero el servicio puede estar iniciándose..."
+            echo "🔄 Reintentando en 30 segundos..."
+            sleep 30
+            curl -f "$SERVICE_URL/health" || {
+              echo "❌ Health check falló después del segundo intento"
+              exit 1
+            }
+          }
+          
+          echo "✅ Servicio desplegado y funcionando correctamente"
