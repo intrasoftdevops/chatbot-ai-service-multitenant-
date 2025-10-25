@@ -77,7 +77,7 @@ jobs:
             --cpu=2 \
             --max-instances=10 \
             --min-instances=1 \
-            --timeout=300s \
+            --timeout=900s \
             --concurrency=100
           
           # Esperar un momento para que el servicio se inicie

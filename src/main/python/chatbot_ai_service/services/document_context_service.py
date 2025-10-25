@@ -203,10 +203,18 @@ class DocumentContextService:
             
             # Crear documentos de LlamaIndex
             logger.info(f"📖 Procesando {len(documents)} documentos...")
+            
+            # Limitar número de documentos para evitar timeouts
+            max_docs = 10
+            if len(documents) > max_docs:
+                logger.warning(f"⚠️ Limitando procesamiento a {max_docs} documentos de {len(documents)} encontrados")
+                documents = documents[:max_docs]
+            
             llama_documents = []
             total_chars = 0
             for idx, doc_info in enumerate(documents, 1):
                 try:
+                    logger.info(f"📥 [{idx}/{len(documents)}] Descargando {doc_info['filename']}...")
                     content = await self._download_document_content(doc_info["url"])
                     if content:
                         document = Document(
@@ -221,6 +229,8 @@ class DocumentContextService:
                         llama_documents.append(document)
                         total_chars += len(content)
                         logger.info(f"✅ [{idx}/{len(documents)}] {doc_info['filename']} - {len(content):,} chars")
+                    else:
+                        logger.warning(f"⚠️ [{idx}/{len(documents)}] {doc_info['filename']} - contenido vacío")
                 except Exception as e:
                     logger.error(f"❌ Error cargando documento {doc_info['filename']}: {str(e)}")
                     continue
@@ -514,7 +524,8 @@ class DocumentContextService:
             Contenido del documento como string
         """
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            logger.debug(f"🌐 Descargando desde: {url}")
+            async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.get(url)
                 
                 if response.status_code == 200:

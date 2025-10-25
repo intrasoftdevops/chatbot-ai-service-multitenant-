@@ -57,9 +57,13 @@ class DocumentPreprocessorService:
             # Marcar como procesando
             self._processing_status[tenant_id] = "processing"
             
-            # Cargar documentos usando el servicio existente
-            success = await document_context_service.load_tenant_documents(
-                tenant_id, documentation_bucket_url
+            # Cargar documentos usando el servicio existente con timeout
+            logger.info(f"⏱️ Iniciando carga de documentos con timeout de 8 minutos...")
+            success = await asyncio.wait_for(
+                document_context_service.load_tenant_documents(
+                    tenant_id, documentation_bucket_url
+                ),
+                timeout=480  # 8 minutos timeout
             )
             
             if success:
@@ -88,6 +92,10 @@ class DocumentPreprocessorService:
                 logger.error(f"❌ Falló preprocesamiento para tenant {tenant_id}")
                 return False
                 
+        except asyncio.TimeoutError:
+            logger.error(f"⏰ Timeout preprocesando tenant {tenant_id} - documentos muy grandes o lentos")
+            self._processing_status[tenant_id] = "timeout"
+            return False
         except Exception as e:
             logger.error(f"❌ Error preprocesando tenant {tenant_id}: {str(e)}")
             self._processing_status[tenant_id] = "failed"
