@@ -10,7 +10,7 @@ from chatbot_ai_service.services.intelligent_cache_service import intelligent_ca
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/preprocessing", tags=["Document Preprocessing"])
+router = APIRouter(prefix="/api/preprocessing", tags=["Document Preprocessing"])
 
 @router.post("/tenant/{tenant_id}/init")
 async def initialize_tenant_preprocessing(tenant_id: str, background_tasks: BackgroundTasks):
@@ -151,4 +151,66 @@ async def clear_tenant_cache(tenant_id: str):
         
     except Exception as e:
         logger.error(f"Error limpiando cache para tenant {tenant_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/status")
+async def get_preprocessing_status():
+    """
+    Obtiene el estado general del preprocesamiento de documentos
+    
+    Returns:
+        Estado del preprocesamiento con información detallada
+    """
+    try:
+        # Obtener estadísticas del cache
+        cache_stats = document_preprocessor_service.get_cache_stats()
+        
+        # Determinar si el preprocesamiento está completo
+        processing_statuses = cache_stats.get("processing_status", {})
+        
+        # Verificar si hay tenants en procesamiento
+        processing_tenants = [tenant for tenant, status in processing_statuses.items() 
+                            if status in ["processing"]]
+        
+        # Verificar si hay tenants fallidos
+        failed_tenants = [tenant for tenant, status in processing_statuses.items() 
+                        if status in ["failed", "timeout"]]
+        
+        # Verificar si hay tenants completados
+        completed_tenants = [tenant for tenant, status in processing_statuses.items() 
+                            if status == "completed"]
+        
+        # Determinar estado general
+        if processing_tenants:
+            overall_status = "processing"
+            completed = False
+        elif failed_tenants:
+            overall_status = "failed"
+            completed = False
+        elif completed_tenants:
+            overall_status = "completed"
+            completed = True
+        else:
+            overall_status = "not_started"
+            completed = False
+        
+        return {
+            "status": overall_status,
+            "completed": completed,
+            "failed": len(failed_tenants) > 0,
+            "processing": len(processing_tenants) > 0,
+            "total_tenants": cache_stats.get("total_tenants", 0),
+            "completed_tenants": len(completed_tenants),
+            "failed_tenants": len(failed_tenants),
+            "processing_tenants": len(processing_tenants),
+            "tenant_details": {
+                "completed": completed_tenants,
+                "failed": failed_tenants,
+                "processing": processing_tenants
+            },
+            "cache_stats": cache_stats
+        }
+        
+    except Exception as e:
+        logger.error(f"Error obteniendo estado del preprocesamiento: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
