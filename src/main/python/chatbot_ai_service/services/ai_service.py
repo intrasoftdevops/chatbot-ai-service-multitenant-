@@ -789,10 +789,10 @@ RESPUESTA:"""
                 else:
                     logger.info(f"✅ Usando configuración del tenant {tenant_id} desde memoria precargada")
             else:
-                logger.info(f"🔧 Usando configuración del tenant enviada desde Java: {bool(tenant_config.get('ai_config'))}")
+                logger.info(f"🔧 Usando configuración del tenant enviada desde Java: {bool(tenant_config.get('aiConfig'))}")
             
             # Obtener configuración de IA
-            ai_config = tenant_config.get("ai_config", {}) if tenant_config else {}
+            ai_config = tenant_config.get("aiConfig", {}) if tenant_config else {}
             branding_config = tenant_config.get("branding", {}) if tenant_config else {}
             
             # 🔧 DEBUG: Log de configuración recibida
