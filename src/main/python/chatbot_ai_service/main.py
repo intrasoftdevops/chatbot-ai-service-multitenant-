@@ -207,12 +207,100 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check del servicio"""
-    return {
-        "status": "healthy",
-        "service": "chatbot-ai-service",
-        "version": "1.0.0"
-    }
+    """Health check del servicio con verificación de preprocesamiento"""
+    try:
+        from chatbot_ai_service.services.document_preprocessor_service import document_preprocessor_service
+        
+        # Obtener estado del preprocesamiento
+        cache_stats = document_preprocessor_service.get_cache_stats()
+        processing_statuses = cache_stats.get("processing_status", {})
+        
+        # Verificar si hay tenants en procesamiento o fallidos
+        processing_tenants = [tenant for tenant, status in processing_statuses.items() 
+                            if status in ["processing"]]
+        failed_tenants = [tenant for tenant, status in processing_statuses.items() 
+                        if status in ["failed", "timeout"]]
+        completed_tenants = [tenant for tenant, status in processing_statuses.items() 
+                            if status == "completed"]
+        
+        # Determinar estado de salud - CRÍTICO: Solo "healthy" cuando esté completamente listo
+        if processing_tenants:
+            health_status = "preprocessing"  # Cloud Run NO enviará tráfico
+        elif failed_tenants:
+            health_status = "degraded"      # Cloud Run NO enviará tráfico
+        elif completed_tenants:
+            health_status = "healthy"       # Cloud Run SÍ enviará tráfico
+        else:
+            health_status = "starting"      # Cloud Run NO enviará tráfico
+        
+        return {
+            "status": health_status,
+            "service": "chatbot-ai-service",
+            "version": "1.0.0",
+            "preprocessing": {
+                "completed_tenants": len(completed_tenants),
+                "processing_tenants": len(processing_tenants),
+                "failed_tenants": len(failed_tenants),
+                "total_tenants": cache_stats.get("total_tenants", 0)
+            }
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "service": "chatbot-ai-service",
+            "version": "1.0.0",
+            "error": str(e)
+        }
+
+@app.get("/ready")
+async def readiness_check():
+    """Readiness check - Cloud Run solo enviará tráfico cuando esté completamente listo"""
+    try:
+        from chatbot_ai_service.services.document_preprocessor_service import document_preprocessor_service
+        
+        # Obtener estado del preprocesamiento
+        cache_stats = document_preprocessor_service.get_cache_stats()
+        processing_statuses = cache_stats.get("processing_status", {})
+        
+        # Verificar si hay tenants en procesamiento o fallidos
+        processing_tenants = [tenant for tenant, status in processing_statuses.items() 
+                            if status in ["processing"]]
+        failed_tenants = [tenant for tenant, status in processing_statuses.items() 
+                        if status in ["failed", "timeout"]]
+        completed_tenants = [tenant for tenant, status in processing_statuses.items() 
+                            if status == "completed"]
+        
+        # Solo está listo si NO hay tenants procesando y NO hay fallidos
+        is_ready = len(processing_tenants) == 0 and len(failed_tenants) == 0 and len(completed_tenants) > 0
+        
+        if is_ready:
+            return {"status": "ready"}
+        else:
+            # Retornar 503 para indicar que no está listo
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=503, 
+                detail={
+                    "status": "not_ready",
+                    "reason": "preprocessing_incomplete",
+                    "processing_tenants": processing_tenants,
+                    "failed_tenants": failed_tenants,
+                    "completed_tenants": completed_tenants
+                }
+            )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "status": "error",
+                "error": str(e)
+            }
+        )
 
 # Nota: La aplicación se ejecuta con Granian (servidor ASGI en Rust)
 # Ver run_server.sh (local) o Dockerfile (producción) para configuración del servidor

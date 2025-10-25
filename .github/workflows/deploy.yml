@@ -78,7 +78,9 @@ jobs:
             --max-instances=10 \
             --min-instances=1 \
             --timeout=900s \
-            --concurrency=100
+            --concurrency=100 \
+            --port=8000 \
+            --http2
           
           # Esperar un momento para que el servicio se inicie
           echo "⏳ Esperando que el servicio se inicie..."
@@ -92,14 +94,14 @@ jobs:
           
           echo "🔗 URL del servicio: $SERVICE_URL"
           
-          # Hacer health check para activar el servicio
-          echo "🏥 Ejecutando health check para activar el servicio..."
-          curl -f "$SERVICE_URL/health" || {
-            echo "⚠️ Health check falló, pero el servicio puede estar iniciándose..."
+          # Hacer readiness check para activar el servicio
+          echo "🏥 Ejecutando readiness check para activar el servicio..."
+          curl -f "$SERVICE_URL/ready" || {
+            echo "⚠️ Readiness check falló, pero el servicio puede estar iniciándose..."
             echo "🔄 Reintentando en 30 segundos..."
             sleep 30
-            curl -f "$SERVICE_URL/health" || {
-              echo "❌ Health check falló después del segundo intento"
+            curl -f "$SERVICE_URL/ready" || {
+              echo "❌ Readiness check falló después del segundo intento"
               exit 1
             }
           }
@@ -123,6 +125,21 @@ jobs:
             # Verificar si el preprocesamiento ha terminado
             if echo "$STATUS_RESPONSE" | grep -q '"completed": true'; then
               echo "✅ Preprocesamiento completado exitosamente!"
+              
+              # Verificar integridad de documentos
+              if echo "$STATUS_RESPONSE" | grep -q '"document_integrity"'; then
+                echo "🔍 Verificando integridad de documentos..."
+                # Verificar que todos los tenants tengan documentos válidos
+                INVALID_TENANTS=$(echo "$STATUS_RESPONSE" | jq -r '.document_integrity | to_entries[] | select(.value.has_documents == false) | .key' 2>/dev/null || echo "")
+                if [ -n "$INVALID_TENANTS" ]; then
+                  echo "❌ Algunos tenants no tienen documentos válidos: $INVALID_TENANTS"
+                  echo "📋 Respuesta del servicio: $STATUS_RESPONSE"
+                  exit 1
+                else
+                  echo "✅ Todos los tenants tienen documentos válidos"
+                fi
+              fi
+              
               break
             elif echo "$STATUS_RESPONSE" | grep -q '"failed": true'; then
               echo "❌ Preprocesamiento falló"

@@ -208,9 +208,51 @@ async def get_preprocessing_status():
                 "failed": failed_tenants,
                 "processing": processing_tenants
             },
-            "cache_stats": cache_stats
+            "cache_stats": cache_stats,
+            "document_integrity": await self._verify_document_integrity(completed_tenants)
         }
         
     except Exception as e:
         logger.error(f"Error obteniendo estado del preprocesamiento: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+    async def _verify_document_integrity(self, completed_tenants: list) -> dict:
+        """
+        Verifica la integridad de los documentos preprocesados
+        
+        Args:
+            completed_tenants: Lista de tenants completados
+            
+        Returns:
+            Información de integridad de documentos
+        """
+        try:
+            from chatbot_ai_service.services.document_context_service import document_context_service
+            
+            integrity_info = {}
+            
+            for tenant_id in completed_tenants:
+                try:
+                    # Obtener información de documentos del tenant
+                    doc_info = document_context_service.get_tenant_document_info(tenant_id)
+                    
+                    integrity_info[tenant_id] = {
+                        "has_documents": doc_info.get("document_count", 0) > 0,
+                        "document_count": doc_info.get("document_count", 0),
+                        "total_chars": doc_info.get("total_chars", 0),
+                        "index_ready": tenant_id in document_context_service._index_cache,
+                        "cache_ready": tenant_id in document_context_service._document_cache
+                    }
+                    
+                except Exception as e:
+                    logger.warning(f"Error verificando integridad para tenant {tenant_id}: {str(e)}")
+                    integrity_info[tenant_id] = {
+                        "has_documents": False,
+                        "error": str(e)
+                    }
+            
+            return integrity_info
+            
+        except Exception as e:
+            logger.error(f"Error verificando integridad de documentos: {str(e)}")
+            return {"error": str(e)}
