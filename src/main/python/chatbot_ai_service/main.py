@@ -49,6 +49,12 @@ if api_key:
 else:
     print("❌ GEMINI_API_KEY no encontrada")
 
+# 🚀 DEBUG: Verificar variables de optimización
+local_dev = os.getenv("LOCAL_DEVELOPMENT", "false").lower() == "true"
+ultra_fast = os.getenv("ULTRA_FAST_MODE", "false").lower() == "true"
+print(f"🚀 DEBUG - LOCAL_DEVELOPMENT: {local_dev}")
+print(f"🚀 DEBUG - ULTRA_FAST_MODE: {ultra_fast}")
+
 # 🚀 OPTIMIZACIÓN: Pre-cargar modelos de IA después de cargar variables de entorno
 try:
     print("🚀 Iniciando pre-carga de modelos de IA...")

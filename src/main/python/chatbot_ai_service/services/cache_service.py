@@ -21,7 +21,8 @@ class CacheService:
     """Servicio de caché para respuestas de IA"""
     
     def __init__(self):
-        self.enabled = os.getenv("REDIS_ENABLED", "false").lower() == "true"
+        # 🚀 OPTIMIZACIÓN CRÍTICA: Habilitar Redis por defecto para mejor rendimiento
+        self.enabled = os.getenv("REDIS_ENABLED", "true").lower() == "true"
         self.client = None
         
         if self.enabled:
@@ -33,20 +34,25 @@ class CacheService:
                     db=int(os.getenv("REDIS_DB", "0")),
                     password=os.getenv("REDIS_PASSWORD", None) if os.getenv("REDIS_PASSWORD") else None,
                     decode_responses=True,
-                    socket_connect_timeout=2,
-                    socket_timeout=2
+                    socket_connect_timeout=1,  # Reducido para conexión más rápida
+                    socket_timeout=1,          # Reducido para operaciones más rápidas
+                    retry_on_timeout=True,     # Reintentar en timeout
+                    health_check_interval=30   # Verificar salud cada 30 segundos
                 )
                 # Test connection
                 self.client.ping()
-                logger.info("✅ Redis conectado exitosamente")
+                logger.info("✅ Redis conectado exitosamente - Caché habilitado para mejor rendimiento")
             except ImportError:
-                logger.warning("⚠️ Redis no instalado, caché deshabilitado")
+                logger.warning("⚠️ Redis no instalado, usando caché en memoria")
                 self.enabled = False
+                self._memory_cache = {}  # Fallback a caché en memoria
             except Exception as e:
-                logger.warning(f"⚠️ Redis no disponible: {e}")
+                logger.warning(f"⚠️ Redis no disponible: {e}, usando caché en memoria")
                 self.enabled = False
+                self._memory_cache = {}  # Fallback a caché en memoria
         else:
-            logger.info("ℹ️ Caché Redis deshabilitado (REDIS_ENABLED=false)")
+            logger.info("ℹ️ Caché Redis deshabilitado, usando caché en memoria")
+            self._memory_cache = {}  # Fallback a caché en memoria
     
     def _generate_cache_key(self, tenant_id: str, query: str, intent: str = None) -> str:
         """

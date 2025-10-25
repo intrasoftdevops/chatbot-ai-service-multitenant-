@@ -204,14 +204,21 @@ class DocumentContextService:
             # Crear documentos de LlamaIndex
             logger.info(f"📖 Procesando {len(documents)} documentos...")
             
-            # Procesar todos los documentos disponibles
-            logger.info(f"📚 Procesando todos los {len(documents)} documentos encontrados")
+            # 🚀 OPTIMIZACIÓN LOCAL: Procesar TODOS los documentos incluso en desarrollo LOCAL
+            import os
+            # Detectar si estamos en desarrollo local usando variable específica
+            is_local_dev = os.getenv("LOCAL_DEVELOPMENT", "false").lower() == "true"
+            # Procesar TODOS los documentos disponibles para máximo contexto
+            max_docs = len(documents)  # Sin límites - procesar todo
+            documents_to_process = documents[:max_docs]
+            
+            logger.info(f"📚 Procesando {len(documents_to_process)} documentos (máximo {max_docs} - {'LOCAL DEV' if is_local_dev else 'REMOTE/PROD'})")
             
             llama_documents = []
             total_chars = 0
-            for idx, doc_info in enumerate(documents, 1):
+            for idx, doc_info in enumerate(documents_to_process, 1):
                 try:
-                    logger.info(f"📥 [{idx}/{len(documents)}] Descargando {doc_info['filename']}...")
+                    logger.info(f"📥 [{idx}/{len(documents_to_process)}] Descargando {doc_info['filename']}...")
                     content = await self._download_document_content(doc_info["url"])
                     if content:
                         document = Document(
@@ -225,9 +232,9 @@ class DocumentContextService:
                         )
                         llama_documents.append(document)
                         total_chars += len(content)
-                        logger.info(f"✅ [{idx}/{len(documents)}] {doc_info['filename']} - {len(content):,} chars")
+                        logger.info(f"✅ [{idx}/{len(documents_to_process)}] {doc_info['filename']} - {len(content):,} chars")
                     else:
-                        logger.warning(f"⚠️ [{idx}/{len(documents)}] {doc_info['filename']} - contenido vacío")
+                        logger.warning(f"⚠️ [{idx}/{len(documents_to_process)}] {doc_info['filename']} - contenido vacío")
                 except Exception as e:
                     logger.error(f"❌ Error cargando documento {doc_info['filename']}: {str(e)}")
                     continue

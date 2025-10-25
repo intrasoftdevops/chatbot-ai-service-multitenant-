@@ -5,6 +5,7 @@ Este servicio NO maneja Firebase directamente, sino que recibe la configuración
 del proyecto Political Referrals via HTTP cuando es necesario.
 """
 import logging
+import time
 from typing import Optional, Dict, Any
 import httpx
 import os
@@ -17,7 +18,11 @@ class ConfigurationService:
     def __init__(self):
         self.java_service_url = os.getenv("POLITICAL_REFERRALS_SERVICE_URL", "http://localhost:8080")
         logger.info(f"ConfigurationService inicializado con URL: {self.java_service_url}")
-        self._config_cache = {}  # Cache simple de configuraciones
+        # 🚀 OPTIMIZACIÓN: Cache más agresivo con TTL
+        self._config_cache = {}
+        self._cache_timestamps = {}  # Para TTL
+        self._cache_ttl = 300  # 5 minutos TTL
+        self._max_cache_size = 100  # Máximo 100 tenants en cache
     
     def get_tenant_config(self, tenant_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -30,10 +35,17 @@ class ConfigurationService:
             Configuración del tenant como dict o None si no existe
         """
         try:
-            # Verificar cache
+            # 🚀 OPTIMIZACIÓN: Verificar cache con TTL
             if tenant_id in self._config_cache:
-                logger.debug(f"Retornando configuración de tenant {tenant_id} desde cache")
-                return self._config_cache[tenant_id]
+                cache_time = self._cache_timestamps.get(tenant_id, 0)
+                current_time = time.time()
+                if current_time - cache_time < self._cache_ttl:
+                    logger.debug(f"✅ Configuración obtenida desde cache para tenant: {tenant_id}")
+                    return self._config_cache[tenant_id]
+                else:
+                    # Cache expirado, limpiar
+                    del self._config_cache[tenant_id]
+                    del self._cache_timestamps[tenant_id]
             
             logger.info(f"Obteniendo configuración desde servicio Java para tenant: {tenant_id}")
             
@@ -46,17 +58,22 @@ class ConfigurationService:
             url = f"{self.java_service_url}/api/tenants/{tenant_id}/config"
             logger.info(f"Llamando a URL: {url}")
             
-            with httpx.Client(timeout=30.0, headers=headers) as client:
+            with httpx.Client(timeout=10.0, headers=headers) as client:  # 🚀 Reducido timeout
                 response = client.get(url)
-                logger.info(f"Respuesta recibida: status={response.status_code}, headers={dict(response.headers)}")
+                logger.info(f"Respuesta recibida: status={response.status_code}")
                 
                 if response.status_code == 200:
                     config = response.json()
                     # Normalizar configuración del Java a Python
                     config = self._normalize_java_config(config)
-                    # Guardar en cache
+                    # Guardar en cache con timestamp
                     self._config_cache[tenant_id] = config
-                    logger.info(f"Configuración obtenida exitosamente para tenant: {tenant_id}")
+                    self._cache_timestamps[tenant_id] = time.time()
+                    
+                    # Limpiar cache si excede tamaño máximo
+                    self._cleanup_cache()
+                    
+                    logger.info(f"✅ Configuración obtenida exitosamente para tenant: {tenant_id}")
                     return config
                 else:
                     logger.warning(f"No se pudo obtener configuración para tenant {tenant_id}: {response.status_code}")
@@ -155,6 +172,21 @@ class ConfigurationService:
             "welcomeMessage": "¡Hola! ¿En qué puedo ayudarte?",
             "contactName": "Asistente"
         }
+    
+    def _cleanup_cache(self):
+        """Limpia el cache si excede el tamaño máximo"""
+        if len(self._config_cache) > self._max_cache_size:
+            # Eliminar entradas más antiguas
+            sorted_items = sorted(self._cache_timestamps.items(), key=lambda x: x[1])
+            items_to_remove = len(self._config_cache) - self._max_cache_size + 10  # Limpiar 10 extras
+            
+            for tenant_id, _ in sorted_items[:items_to_remove]:
+                if tenant_id in self._config_cache:
+                    del self._config_cache[tenant_id]
+                if tenant_id in self._cache_timestamps:
+                    del self._cache_timestamps[tenant_id]
+            
+            logger.debug(f"Cache limpiado: {items_to_remove} entradas eliminadas")
 
 
 # Instancia global para compatibilidad

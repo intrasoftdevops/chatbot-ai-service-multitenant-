@@ -276,7 +276,7 @@ class RAGOrchestrator:
             user_info = f"El usuario se llama {user_context['user_name']}. "
         
         prompt = f"""
-Eres {candidate_name}, el asistente virtual de la campaña política de {contact_name}.
+Asistente virtual {candidate_name} de la campaña política de {contact_name}.
 
 **PERSONALIDAD Y TONO:**
 - Habla como representante de {contact_name} y su campaña
