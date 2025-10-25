@@ -1373,7 +1373,7 @@ Respuesta:
     #         return None, None
     
     async def _fast_rag_search(self, tenant_id: str, query: str, ai_config: Dict[str, Any], branding_config: Dict[str, Any] = None) -> Optional[str]:
-        """RAG rápido usando documentos precargados"""
+        """RAG ultra-rápido usando documentos precargados - OPTIMIZADO"""
         try:
             # Obtener contact_name del branding config
             contact_name = "el candidato"
@@ -1382,13 +1382,13 @@ Respuesta:
             
             logger.info(f"[RAG] Buscando en documentos precargados para tenant {tenant_id}")
             
-            # 🚀 USAR DOCUMENTOS PRECARGADOS en lugar de descargarlos cada vez
+            # 🚀 OPTIMIZACIÓN: Usar documentos precargados directamente
             from chatbot_ai_service.services.document_context_service import document_context_service
             
-            # Verificar si los documentos ya están precargados
+            # 🚀 OPTIMIZACIÓN: Verificar cache primero sin cargar
             doc_info = document_context_service.get_tenant_document_info(tenant_id)
             if not doc_info or doc_info.get('document_count', 0) == 0:
-                # Solo reportar warning si NO hay documentos precargados
+                # Solo cargar si realmente no están disponibles
                 documentation_bucket_url = ai_config.get("documentation_bucket_url")
                 if not documentation_bucket_url:
                     logger.warning(f"[ADVERTENCIA] No hay URL de bucket de documentos para tenant {tenant_id}")
@@ -1400,33 +1400,32 @@ Respuesta:
                         logger.warning(f"[ADVERTENCIA] No se pudieron cargar documentos para tenant {tenant_id}")
                         return None
             
-            # Obtener contexto relevante de documentos precargados
-            document_content = await document_context_service.get_relevant_context(tenant_id, query, max_results=3)
+            # 🚀 OPTIMIZACIÓN: Obtener contexto relevante más rápido
+            document_content = await document_context_service.get_relevant_context(tenant_id, query, max_results=2)  # Reducido de 3 a 2
             
             if document_content:
                 logger.info(f"[LIBROS] Contenido de documentos precargados obtenido: {len(document_content)} caracteres")
                 print(f"📄 DOCUMENTOS PRECARGADOS: {len(document_content)} caracteres")
-                # Usar el contenido real de los documentos con prompt optimizado
+                # 🚀 OPTIMIZACIÓN: Prompt más corto y directo
                 prompt = f"""Eres {contact_name}. Usuario pregunta: "{query}"
 
-INFORMACIÓN DE DOCUMENTOS: {document_content}
+INFORMACIÓN: {document_content}
 
-Responde específicamente usando esta información. Máximo 999 caracteres."""
+Responde específicamente usando esta información. Máximo 500 caracteres."""
             else:
                 logger.info("[RAG] No se pudo obtener contenido de documentos precargados")
                 return None
             
-            # Procesar con Gemini usando el contenido precargado
+            # 🚀 OPTIMIZACIÓN: Usar configuración ultra-rápida para RAG
             try:
-                response = await self._generate_content(prompt, task_type="rag_search")
+                response = await self._generate_content_ultra_fast(prompt)  # Usar método ultra-rápido
                 result = response.strip()
                 
-                if len(result) < 50:
+                if len(result) < 30:  # Reducido de 50 a 30
                     logger.info(f"[RAG] Respuesta muy corta para '{query}'")
                     return None
                 
                 logger.info(f"[RAG] Respuesta generada: {len(result)} caracteres")
-                logger.info(f"🔍 DEBUG: RESPUESTA RAG COMPLETA: {result}")
                 return result
                 
             except Exception as e:
@@ -2937,19 +2936,20 @@ Responde solo el JSON estricto sin comentarios:
     # Métodos privados para procesamiento de IA
     
     async def _ensure_tenant_documents_loaded(self, tenant_id: str, ai_config: Dict[str, Any]):
-        """Asegura que los documentos del tenant estén cargados"""
+        """Asegura que los documentos del tenant estén cargados - OPTIMIZADO"""
         try:
-            # Verificar si ya tenemos documentos cargados
+            # 🚀 OPTIMIZACIÓN: Verificar cache primero
             doc_info = document_context_service.get_tenant_document_info(tenant_id)
-            if doc_info:
+            if doc_info and doc_info.get('document_count', 0) > 0:
                 logger.debug(f"[LIBROS] Documentos ya cargados para tenant {tenant_id}: {doc_info.get('document_count', 0)} docs")
                 return
             
-            # Obtener URL del bucket de documentación
+            # 🚀 OPTIMIZACIÓN: Solo cargar si no están en cache
             documentation_bucket_url = ai_config.get("documentation_bucket_url")
             
             if documentation_bucket_url:
-                logger.info(f"📥 Iniciando carga de documentos para tenant {tenant_id} desde: {documentation_bucket_url}")
+                logger.info(f"📥 Cargando documentos para tenant {tenant_id} desde: {documentation_bucket_url}")
+                # 🚀 OPTIMIZACIÓN: Usar carga asíncrona más rápida
                 success = await document_context_service.load_tenant_documents(tenant_id, documentation_bucket_url)
                 if success:
                     doc_info = document_context_service.get_tenant_document_info(tenant_id)
@@ -2974,8 +2974,10 @@ Responde solo el JSON estricto sin comentarios:
         # [COHETE] FASE 6: Usar RAGOrchestrator si está habilitado
         if self.use_rag_orchestrator and self.rag_orchestrator:
             try:
-                # 🔧 FIX: Asegurar que documentos estén cargados ANTES de usar RAG
-                await self._ensure_tenant_documents_loaded(tenant_id, ai_config)
+                # 🚀 OPTIMIZACIÓN: Solo cargar documentos si no están en cache
+                doc_info = document_context_service.get_tenant_document_info(tenant_id)
+                if not doc_info or doc_info.get('document_count', 0) == 0:
+                    await self._ensure_tenant_documents_loaded(tenant_id, ai_config)
                 
                 logger.info(f"[OBJETIVO] Usando RAGOrchestrator | tenant_id={tenant_id} | session_id={session_id} | query='{query[:50]}...'")
                 response = await self.rag_orchestrator.process_query_simple(
@@ -2998,14 +3000,16 @@ Responde solo el JSON estricto sin comentarios:
             return "Lo siento, el servicio de IA no está disponible."
         
         try:
-            # 🔧 FIX: Asegurar que documentos estén cargados antes de buscar contexto
-            await self._ensure_tenant_documents_loaded(tenant_id, ai_config)
+            # 🚀 OPTIMIZACIÓN: Solo cargar documentos si no están en cache
+            doc_info = document_context_service.get_tenant_document_info(tenant_id)
+            if not doc_info or doc_info.get('document_count', 0) == 0:
+                await self._ensure_tenant_documents_loaded(tenant_id, ai_config)
             
             # Obtener contexto relevante de documentos del cliente
             relevant_context = ""
             try:
                 relevant_context = await document_context_service.get_relevant_context(
-                    tenant_id, query, max_results=3
+                    tenant_id, query, max_results=2  # Reducido de 3 a 2 para mayor velocidad
                 )
                 if relevant_context:
                     logger.info(f"Contexto relevante obtenido para tenant {tenant_id}: {len(relevant_context)} caracteres")
@@ -3015,8 +3019,8 @@ Responde solo el JSON estricto sin comentarios:
             # Construir prompt con contexto de documentos
             prompt = self._build_chat_prompt(query, user_context, branding_config, relevant_context)
             
-            # [COHETE] FASE 2: Usar configuración optimizada para chat conversacional
-            response_text = await self._generate_content(prompt, task_type="chat_conversational")
+            # 🚀 OPTIMIZACIÓN: Usar configuración ultra-rápida para chat conversacional
+            response_text = await self._generate_content_ultra_fast(prompt, max_tokens=200)  # Usar método ultra-rápido
             
             return response_text
             
