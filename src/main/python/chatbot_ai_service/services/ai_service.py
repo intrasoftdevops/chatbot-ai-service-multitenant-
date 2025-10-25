@@ -4458,7 +4458,7 @@ Responde ÚNICAMENTE "VALIDO" o "INVALIDO" seguido de la razón si es inválido.
             )
             
             # Determinar respuesta según el nivel de malicia
-            if confidence >= 0.8:
+            if confidence >= 0.9:
                 # Comportamiento muy malicioso - bloquear usuario
                 await user_blocking_service.block_user(tenant_id, user_id, reason="Comportamiento malicioso durante registro")
                 user_context["user_state"] = "BLOCKED"
@@ -4467,7 +4467,7 @@ Responde ÚNICAMENTE "VALIDO" o "INVALIDO" seguido de la razón si es inválido.
                 response = "Tu mensaje contiene contenido inapropiado. Has sido bloqueado del sistema."
                 logger.warning(f"🚫 Usuario {user_id} bloqueado por comportamiento malicioso durante registro")
                 
-            elif confidence >= 0.6:
+            elif confidence >= 0.7:
                 # Comportamiento moderadamente malicioso - advertencia
                 response = "Por favor, mantén un tono respetuoso. Este es un espacio para el diálogo constructivo sobre la campaña política."
                 
