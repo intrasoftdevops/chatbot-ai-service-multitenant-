@@ -69,11 +69,11 @@ async def preload_documents_on_startup_optimized():
         from chatbot_ai_service.services.document_preprocessor_service import document_preprocessor_service
         from chatbot_ai_service.services.tenant_memory_service import tenant_memory_service
         
-        # Obtener configuración de tenants desde Java
-        response_data = await get_tenant_configs_from_java()
+        # Obtener configuración de tenants desde Firestore
+        response_data = await get_tenant_configs_from_firestore()
         
         if not response_data or not isinstance(response_data, dict):
-            print("⚠️ No se pudieron obtener configuraciones de tenants desde Java")
+            print("⚠️ No se pudieron obtener configuraciones de tenants desde Firestore")
             return
         
         # Extraer la lista de tenants de la respuesta
@@ -129,19 +129,37 @@ async def preload_documents_on_startup_optimized():
         print(f"❌ Error durante precarga optimizada de documentos: {e}")
         # No fallar el startup si hay error en la precarga
 
-async def get_tenant_configs_from_java():
-    """Obtener configuración de todos los tenants desde el servicio Java"""
+async def get_tenant_configs_from_firestore():
+    """Obtener configuración de todos los tenants directamente desde Firestore"""
     try:
-        import httpx
-        java_service_url = os.getenv("POLITICAL_REFERRALS_SERVICE_URL", "http://localhost:8080")
+        from chatbot_ai_service.services.firestore_tenant_service import firestore_tenant_service
         
-        async with httpx.AsyncClient() as client:
-            response = await client.get(f"{java_service_url}/debug/tenant/all/config", timeout=30.0)
-            response.raise_for_status()
-            return response.json()
+        print("🔍 Obteniendo configuraciones de tenants desde Firestore...")
+        tenant_configs = await firestore_tenant_service.get_all_tenant_configs()
+        
+        if tenant_configs:
+            print(f"✅ Configuraciones obtenidas desde Firestore: {len(tenant_configs)} tenants")
+            return {
+                "status": "success",
+                "tenants": tenant_configs,
+                "total_tenants": len(tenant_configs)
+            }
+        else:
+            print("⚠️ No se encontraron configuraciones de tenants en Firestore")
+            return {
+                "status": "success",
+                "tenants": {},
+                "total_tenants": 0
+            }
+            
     except Exception as e:
-        print(f"❌ Error obteniendo configuración de tenants desde Java: {e}")
-        return []
+        print(f"❌ Error obteniendo configuración de tenants desde Firestore: {e}")
+        return {
+            "status": "error",
+            "tenants": {},
+            "total_tenants": 0,
+            "error": str(e)
+        }
 
 # Configuración de la aplicación
 app = FastAPI(
@@ -171,23 +189,11 @@ app.include_router(preprocessing_router)
 from chatbot_ai_service.controllers.intent_classification_controller import router as intent_classification_router
 app.include_router(intent_classification_router)
 
-# 🚀 INICIALIZACIÓN INMEDIATA: Precargar documentos automáticamente
-import asyncio
-import threading
-
-def run_startup_in_background():
-    """Ejecutar inicialización en un hilo separado"""
-    try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(preload_documents_on_startup_optimized())
-    except Exception as e:
-        print(f"❌ Error en inicialización en background: {e}")
-
-# Iniciar inmediatamente en un hilo separado
-startup_thread = threading.Thread(target=run_startup_in_background, daemon=True)
-startup_thread.start()
-print("🚀 Inicialización iniciada en background thread")
+# 🚀 EVENTO DE STARTUP: Precargar documentos automáticamente
+@app.on_event("startup")
+async def startup_event():
+    """Evento de startup para precargar documentos automáticamente"""
+    await preload_documents_on_startup_optimized()
 
 @app.get("/")
 async def root():
