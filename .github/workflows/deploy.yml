@@ -80,7 +80,7 @@ jobs:
             --timeout=900s \
             --concurrency=100 \
             --port=8000 \
-            --http2
+            --use-http2
           
           # Esperar un momento para que el servicio se inicie
           echo "⏳ Esperando que el servicio se inicie..."
