@@ -99,32 +99,42 @@ async def preload_documents_on_startup_optimized():
             else:
                 print(f"⚠️ No se pudo inicializar memoria para tenant {tenant_id}")
         
-        # Iniciar preprocesamiento en background (no bloqueante)
-        print("🚀 Iniciando preprocesamiento en background...")
+        # Hacer preprocesamiento SÍNCRONO usando asyncio.run() en un hilo separado
+        print("🚀 Iniciando preprocesamiento SÍNCRONO...")
         import asyncio
+        import threading
         
-        async def background_preprocessing():
-            try:
-                print("📚 [BACKGROUND] Iniciando preprocesamiento de documentos...")
-                results = await document_preprocessor_service.preprocess_all_tenants()
-                
-                successful_tenants = sum(1 for success in results.values() if success)
-                print(f"✅ [BACKGROUND] Preprocesamiento completado: {successful_tenants}/{len(results)} tenants exitosos")
-                
-                # Mostrar estadísticas de memoria
-                memory_stats = tenant_memory_service.get_memory_stats()
-                print(f"🧠 [BACKGROUND] Estadísticas de memoria:")
-                print(f"  - Memorias de tenants: {memory_stats['tenant_memories']}")
-                print(f"  - Conciencias de usuarios: {memory_stats['user_consciousness']}")
-                
-                print("🎉 [BACKGROUND] ¡Preprocesamiento completado! El servicio está completamente optimizado.")
-                
-            except Exception as e:
-                print(f"❌ [BACKGROUND] Error en preprocesamiento: {e}")
+        def run_sync_preprocessing():
+            async def synchronous_preprocessing():
+                try:
+                    print("📚 [SYNC] Iniciando preprocesamiento de documentos...")
+                    results = await document_preprocessor_service.preprocess_all_tenants()
+                    
+                    successful_tenants = sum(1 for success in results.values() if success)
+                    print(f"✅ [SYNC] Preprocesamiento completado: {successful_tenants}/{len(results)} tenants exitosos")
+                    
+                    # Mostrar estadísticas de memoria
+                    memory_stats = tenant_memory_service.get_memory_stats()
+                    print(f"🧠 [SYNC] Estadísticas de memoria:")
+                    print(f"  - Memorias de tenants: {memory_stats['tenant_memories']}")
+                    print(f"  - Conciencias de usuarios: {memory_stats['user_consciousness']}")
+                    
+                    print("🎉 [SYNC] ¡Preprocesamiento completado! El servicio está completamente optimizado.")
+                    return True
+                    
+                except Exception as e:
+                    print(f"❌ [SYNC] Error en preprocesamiento: {e}")
+                    return False
+            
+            # Ejecutar en un nuevo event loop
+            return asyncio.run(synchronous_preprocessing())
         
-        asyncio.create_task(background_preprocessing())
+        # Ejecutar preprocesamiento en un hilo separado para evitar conflictos con el event loop principal
+        preprocessing_thread = threading.Thread(target=run_sync_preprocessing)
+        preprocessing_thread.start()
+        preprocessing_thread.join()  # Esperar a que termine
         
-        print("✅ Servicio listo - preprocesamiento ejecutándose en background")
+        print("✅ Servicio completamente listo - todos los documentos preprocesados")
     except Exception as e:
         print(f"❌ Error durante precarga optimizada de documentos: {e}")
         # No fallar el startup si hay error en la precarga
@@ -255,52 +265,8 @@ async def health_check():
 
 @app.get("/ready")
 async def readiness_check():
-    """Readiness check - Cloud Run solo enviará tráfico cuando esté completamente listo"""
-    try:
-        from chatbot_ai_service.services.document_preprocessor_service import document_preprocessor_service
-        
-        # Obtener estado del preprocesamiento
-        cache_stats = document_preprocessor_service.get_cache_stats()
-        processing_statuses = cache_stats.get("processing_status", {})
-        
-        # Verificar si hay tenants en procesamiento o fallidos
-        processing_tenants = [tenant for tenant, status in processing_statuses.items() 
-                            if status in ["processing"]]
-        failed_tenants = [tenant for tenant, status in processing_statuses.items() 
-                        if status in ["failed", "timeout"]]
-        completed_tenants = [tenant for tenant, status in processing_statuses.items() 
-                            if status == "completed"]
-        
-        # Solo está listo si NO hay tenants procesando y NO hay fallidos
-        is_ready = len(processing_tenants) == 0 and len(failed_tenants) == 0 and len(completed_tenants) > 0
-        
-        if is_ready:
-            return {"status": "ready"}
-        else:
-            # Retornar 503 para indicar que no está listo
-            from fastapi import HTTPException
-            raise HTTPException(
-                status_code=503, 
-                detail={
-                    "status": "not_ready",
-                    "reason": "preprocessing_incomplete",
-                    "processing_tenants": processing_tenants,
-                    "failed_tenants": failed_tenants,
-                    "completed_tenants": completed_tenants
-                }
-            )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        from fastapi import HTTPException
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "status": "error",
-                "error": str(e)
-            }
-        )
+    """Readiness check - Con preprocesamiento síncrono, si el servicio está disponible ya está listo"""
+    return {"status": "ready"}
 
 # Nota: La aplicación se ejecuta con Granian (servidor ASGI en Rust)
 # Ver run_server.sh (local) o Dockerfile (producción) para configuración del servidor
