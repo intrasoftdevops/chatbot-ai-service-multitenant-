@@ -99,32 +99,34 @@ async def preload_documents_on_startup_optimized():
             else:
                 print(f"⚠️ No se pudo inicializar memoria para tenant {tenant_id}")
         
-        # Iniciar preprocesamiento en background (no bloqueante)
-        print("🚀 Iniciando preprocesamiento en background...")
+        # 🚀 OPTIMIZACIÓN: Hacer preprocesamiento SINCRÓNICO antes de estar listo
+        print("🚀 Iniciando preprocesamiento SINCRÓNICO...")
         import asyncio
         
         async def background_preprocessing():
             try:
-                print("📚 [BACKGROUND] Iniciando preprocesamiento de documentos...")
+                print("📚 [SYNC] Iniciando preprocesamiento de documentos...")
                 results = await document_preprocessor_service.preprocess_all_tenants()
                 
                 successful_tenants = sum(1 for success in results.values() if success)
-                print(f"✅ [BACKGROUND] Preprocesamiento completado: {successful_tenants}/{len(results)} tenants exitosos")
+                print(f"✅ [SYNC] Preprocesamiento completado: {successful_tenants}/{len(results)} tenants exitosos")
                 
                 # Mostrar estadísticas de memoria
                 memory_stats = tenant_memory_service.get_memory_stats()
-                print(f"🧠 [BACKGROUND] Estadísticas de memoria:")
+                print(f"🧠 [SYNC] Estadísticas de memoria:")
                 print(f"  - Memorias de tenants: {memory_stats['tenant_memories']}")
                 print(f"  - Conciencias de usuarios: {memory_stats['user_consciousness']}")
                 
-                print("🎉 [BACKGROUND] ¡Preprocesamiento completado! El servicio está completamente optimizado.")
+                print("🎉 [SYNC] ¡Preprocesamiento completado! El servicio está completamente optimizado.")
                 
             except Exception as e:
-                print(f"❌ [BACKGROUND] Error en preprocesamiento: {e}")
+                print(f"❌ [SYNC] Error en preprocesamiento: {e}")
         
-        asyncio.create_task(background_preprocessing())
+        # Ejecutar preprocesamiento de forma síncrona
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(background_preprocessing())
         
-        print("✅ Servicio listo - preprocesamiento ejecutándose en background")
+        print("✅ Servicio listo - preprocesamiento completado")
     except Exception as e:
         print(f"❌ Error durante precarga optimizada de documentos: {e}")
         # No fallar el startup si hay error en la precarga
