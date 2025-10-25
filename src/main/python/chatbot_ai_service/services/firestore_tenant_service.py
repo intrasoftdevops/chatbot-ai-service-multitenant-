@@ -26,32 +26,33 @@ class FirestoreTenantService:
                 # Configurar credenciales de Firebase
                 project_id = os.getenv("FIRESTORE_PROJECT_ID", "political-referrals")
                 database_id = os.getenv("FIRESTORE_DATABASE_ID", "(default)")
-                
+
                 logger.info(f"🔧 Inicializando Firestore con project={project_id}, database={database_id}")
-                
+
                 # Verificar si estamos en Cloud Run
                 if os.getenv("K_SERVICE"):
                     logger.info("🌩️ Detectado Cloud Run - usando credenciales automáticas")
                     self.db = firestore.Client(project=project_id, database=database_id)
                 else:
-                    logger.info("💻 Modo desarrollo local - usando Application Default Credentials")
-                    # Para desarrollo local, usar Application Default Credentials
+                    logger.info("💻 Modo desarrollo local - detectando credenciales de gcloud...")
+                    
+                    # Usar Application Default Credentials (detecta automáticamente gcloud login)
                     try:
-                        # Intentar obtener credenciales por defecto
                         credentials, project = default()
-                        logger.info(f"✅ Credenciales obtenidas para proyecto: {project}")
+                        logger.info(f"✅ Credenciales de gcloud detectadas para proyecto: {project}")
                         self.db = firestore.Client(project=project_id, database=database_id, credentials=credentials)
-                    except Exception as cred_error:
-                        logger.warning(f"⚠️ Error obteniendo credenciales por defecto: {cred_error}")
-                        # Fallback: usar cliente sin credenciales específicas
-                        self.db = firestore.Client(project=project_id, database=database_id)
-                
+                    except Exception as gcloud_error:
+                        logger.warning(f"⚠️ No se detectaron credenciales de gcloud: {gcloud_error}")
+                        logger.info("💡 Para desarrollo local, ejecuta: gcloud auth application-default login")
+                        raise Exception(f"Credenciales de gcloud no disponibles: {gcloud_error}")
+
                 self._initialized = True
                 logger.info(f"✅ Firestore inicializado correctamente")
-                
+
             except Exception as e:
                 logger.error(f"❌ Error inicializando Firestore: {e}")
-                logger.error(f"💡 Asegúrate de haber ejecutado: gcloud auth application-default login")
+                logger.error(f"💡 Para desarrollo local, ejecuta: gcloud auth application-default login")
+                logger.error(f"💡 O configura GOOGLE_APPLICATION_CREDENTIALS con la ruta al archivo JSON")
                 raise
     
     async def get_all_tenant_configs(self) -> Dict[str, Any]:
@@ -89,6 +90,7 @@ class FirestoreTenantService:
             
         except Exception as e:
             logger.error(f"❌ Error obteniendo configuraciones desde Firestore: {e}")
+            logger.error("💡 Asegúrate de haber ejecutado: gcloud auth application-default login")
             return {}
     
     def _convert_to_optimized_config(self, data: Dict[str, Any]) -> Dict[str, Any]:
