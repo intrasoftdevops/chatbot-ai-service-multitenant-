@@ -7,6 +7,7 @@ import logging
 from typing import Dict, Any, Optional, List
 import asyncio
 from google.cloud import firestore
+from google.auth import default
 import os
 
 logger = logging.getLogger(__name__)
@@ -22,16 +23,35 @@ class FirestoreTenantService:
         """Asegurar que Firestore esté inicializado"""
         if not self._initialized:
             try:
-                # Inicializar cliente de Firestore
+                # Configurar credenciales de Firebase
                 project_id = os.getenv("FIRESTORE_PROJECT_ID", "political-referrals")
                 database_id = os.getenv("FIRESTORE_DATABASE_ID", "(default)")
                 
-                self.db = firestore.Client(project=project_id, database=database_id)
+                logger.info(f"🔧 Inicializando Firestore con project={project_id}, database={database_id}")
+                
+                # Verificar si estamos en Cloud Run
+                if os.getenv("K_SERVICE"):
+                    logger.info("🌩️ Detectado Cloud Run - usando credenciales automáticas")
+                    self.db = firestore.Client(project=project_id, database=database_id)
+                else:
+                    logger.info("💻 Modo desarrollo local - usando Application Default Credentials")
+                    # Para desarrollo local, usar Application Default Credentials
+                    try:
+                        # Intentar obtener credenciales por defecto
+                        credentials, project = default()
+                        logger.info(f"✅ Credenciales obtenidas para proyecto: {project}")
+                        self.db = firestore.Client(project=project_id, database=database_id, credentials=credentials)
+                    except Exception as cred_error:
+                        logger.warning(f"⚠️ Error obteniendo credenciales por defecto: {cred_error}")
+                        # Fallback: usar cliente sin credenciales específicas
+                        self.db = firestore.Client(project=project_id, database=database_id)
+                
                 self._initialized = True
-                logger.info(f"✅ Firestore inicializado: project={project_id}, database={database_id}")
+                logger.info(f"✅ Firestore inicializado correctamente")
                 
             except Exception as e:
                 logger.error(f"❌ Error inicializando Firestore: {e}")
+                logger.error(f"💡 Asegúrate de haber ejecutado: gcloud auth application-default login")
                 raise
     
     async def get_all_tenant_configs(self) -> Dict[str, Any]:
@@ -42,7 +62,7 @@ class FirestoreTenantService:
             logger.info("🔍 Obteniendo configuraciones de tenants desde Firestore...")
             
             # Obtener todas las configuraciones de tenants
-            tenants_ref = self.db.collection('TenantConfigs')
+            tenants_ref = self.db.collection('clientes')
             docs = tenants_ref.stream()
             
             tenant_configs = {}
@@ -51,7 +71,7 @@ class FirestoreTenantService:
             for doc in docs:
                 try:
                     data = doc.to_dict()
-                    tenant_id = data.get('tenantId')
+                    tenant_id = data.get('tenant_id')
                     
                     if tenant_id:
                         # Convertir a formato esperado por el servicio de IA
@@ -76,40 +96,40 @@ class FirestoreTenantService:
         try:
             # Extraer campos principales
             optimized_config = {
-                "tenant_id": data.get("tenantId"),
-                "contact_name": data.get("contactName"),
-                "tenant_type": data.get("tenantType", "dev"),
+                "tenant_id": data.get("tenant_id"),
+                "contact_name": data.get("branding", {}).get("contact_name"),
+                "tenant_type": data.get("tenant_type", "dev"),
                 "status": data.get("status", "active"),
-                "wati_tenant_id": data.get("watiTenantId"),
-                "client_project_id": data.get("clientProjectId"),
-                "client_database_id": data.get("clientDatabaseId"),
-                "link_calendly": data.get("linkCalendly"),
-                "link_forms": data.get("linkForms"),
-                "welcome_message": data.get("welcomeMessage"),
-                "wati_api_token": data.get("watiApiToken"),
+                "wati_tenant_id": data.get("wati_tenant_id"),
+                "client_project_id": data.get("client_project_id"),
+                "client_database_id": data.get("client_database_id"),
+                "link_calendly": data.get("link_calendly"),
+                "link_forms": data.get("link_forms"),
+                "welcome_message": data.get("branding", {}).get("welcome_message"),
+                "wati_api_token": data.get("wati_api_token"),
             }
             
             # Extraer aiConfig si existe
-            ai_config = data.get("aiConfig", {})
+            ai_config = data.get("ai_config", {})
             if ai_config:
                 optimized_config["aiConfig"] = {
-                    "documentation_bucket_url": ai_config.get("documentationBucketUrl")
+                    "documentation_bucket_url": ai_config.get("documentation_bucket_url")
                 }
             
             # Extraer branding si existe
             branding = data.get("branding", {})
             if branding:
                 optimized_config["branding"] = {
-                    "candidate_name": branding.get("candidateName"),
-                    "campaign_name": branding.get("campaignName"),
-                    "contact_name": branding.get("contactName")
+                    "candidate_name": branding.get("contact_name"),
+                    "campaign_name": branding.get("contact_name"),
+                    "contact_name": branding.get("contact_name")
                 }
             
             return optimized_config
             
         except Exception as e:
             logger.error(f"❌ Error convirtiendo configuración: {e}")
-            return {"tenant_id": data.get("tenantId", "unknown")}
+            return {"tenant_id": data.get("tenant_id", "unknown")}
     
     async def get_tenant_config(self, tenant_id: str) -> Optional[Dict[str, Any]]:
         """Obtener configuración de un tenant específico"""
@@ -119,7 +139,7 @@ class FirestoreTenantService:
             logger.info(f"🔍 Obteniendo configuración para tenant: {tenant_id}")
             
             # Buscar configuración específica
-            doc_ref = self.db.collection('TenantConfigs').where('tenantId', '==', tenant_id).limit(1)
+            doc_ref = self.db.collection('clientes').where('tenant_id', '==', tenant_id).limit(1)
             docs = list(doc_ref.stream())
             
             if docs:

@@ -38,19 +38,20 @@ class DocumentPreprocessorService:
             print(f"📚 [BACKGROUND] Procesando tenant {tenant_id}...")
             start_time = time.time()
             
-            # Obtener configuración del tenant
-            config = configuration_service.get_tenant_config(tenant_id)
+            # Obtener configuración del tenant desde Firestore
+            from chatbot_ai_service.services.firestore_tenant_service import firestore_tenant_service
+            config = await firestore_tenant_service.get_tenant_config(tenant_id)
             if not config:
                 logger.error(f"❌ No se pudo obtener configuración para tenant {tenant_id}")
                 return False
                 
             # Obtener URL del bucket de documentos
-            ai_config = config.get("ai_config", {})
+            ai_config = config.get("aiConfig", {})
             if ai_config is None:
                 ai_config = {}
             documentation_bucket_url = ai_config.get("documentation_bucket_url")
             if not documentation_bucket_url or documentation_bucket_url.strip() == "":
-                logger.warning(f"⚠️ Tenant {tenant_id} no tiene documentation_bucket_url válido en ai_config")
+                logger.warning(f"⚠️ Tenant {tenant_id} no tiene documentation_bucket_url válido en aiConfig")
                 return False
                 
             # Marcar como procesando
@@ -102,11 +103,12 @@ class DocumentPreprocessorService:
         logger.info("🚀 Iniciando preprocesamiento masivo de documentos")
         results = {}
         
-        # Obtener lista de tenants desde el servicio Java
+        # Obtener lista de tenants desde Firestore
         try:
-            from chatbot_ai_service.services.configuration_service import configuration_service
-            # Por ahora, usar solo el tenant que tiene documentos configurados
-            known_tenants = ["473173"]  # Solo el tenant con documentos
+            from chatbot_ai_service.services.firestore_tenant_service import firestore_tenant_service
+            # Obtener todos los tenants desde Firestore
+            all_configs = await firestore_tenant_service.get_all_tenant_configs()
+            known_tenants = list(all_configs.keys())
             
             tasks = []
             for tenant_id in known_tenants:
