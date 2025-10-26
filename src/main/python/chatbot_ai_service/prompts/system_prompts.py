@@ -347,6 +347,12 @@ class PromptBuilder:
             parts.append(user_context["session_context"])
             parts.append("")
         
+        # 🔧 FIX: Incluir historial de conversación si está disponible
+        if user_context.get("conversation_history"):
+            parts.append("=== HISTORIAL DE CONVERSACIÓN ===")
+            parts.append(user_context["conversation_history"])
+            parts.append("")
+        
         # Contexto básico del usuario
         if user_context.get("user_name"):
             parts.append(f"- Nombre del usuario: {user_context['user_name']}")

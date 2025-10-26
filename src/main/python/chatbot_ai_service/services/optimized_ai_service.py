@@ -18,16 +18,18 @@ class OptimizedAIService:
     async def process_chat_message_optimized(self, tenant_id: str, query: str, 
                                            user_context: Dict[str, Any], 
                                            session_id: str = None, 
-                                           tenant_config: Dict[str, Any] = None) -> Dict[str, Any]:
+                                           tenant_config: Dict[str, Any] = None,
+                                           conversation_history: str = None) -> Dict[str, Any]:
         """
         Procesa mensaje de chat con optimizaciones simplificadas
         
         Args:
             tenant_id: ID del tenant
-            query: Mensaje del usuario
+            query: Mensaje del usuario (SIN historial - solo para clasificación)
             user_context: Contexto del usuario
             session_id: ID de la sesión
             tenant_config: Configuración del tenant
+            conversation_history: Historial de conversación (para procesamiento, NO para clasificación)
             
         Returns:
             Respuesta optimizada
@@ -46,27 +48,51 @@ class OptimizedAIService:
                     return self._create_error_response("Tenant no encontrado", start_time)
             
             # 2. CLASIFICAR INTENCIÓN
+            print(f"🎯 [OPTIMIZED] Clasificando intención...")
             self.logger.info(f"🎯 [OPTIMIZED] Clasificando intención...")
-            intent_result = await self._classify_intent_optimized(tenant_id, query, user_context)
-            intent = intent_result.get("category", "saludo_apoyo")
-            confidence = intent_result.get("confidence", 0.0)
-            
-            # 📊 IMPRIMIR CLASIFICACIÓN DETALLADA
-            self.logger.info(f"📊 [CLASIFICACIÓN] Mensaje: '{query[:100]}...'")
-            self.logger.info(f"📊 [CLASIFICACIÓN] Categoría: '{intent}'")
-            self.logger.info(f"📊 [CLASIFICACIÓN] Confianza: {confidence:.2f}")
-            self.logger.info(f"📊 [CLASIFICACIÓN] Tenant: {tenant_id}")
-            self.logger.info(f"📊 [CLASIFICACIÓN] Session: {session_id}")
-            self.logger.info(f"📊 [CLASIFICACIÓN] {'='*50}")
+            try:
+                intent_result = await self._classify_intent_optimized(tenant_id, query, user_context)
+                intent = intent_result.get("category", "saludo_apoyo")
+                confidence = intent_result.get("confidence", 0.0)
+                
+                # 📊 IMPRIMIR CLASIFICACIÓN DETALLADA
+                print(f"📊 [CLASIFICACIÓN] Mensaje: '{query[:100]}...'")
+                self.logger.info(f"📊 [CLASIFICACIÓN] Mensaje: '{query[:100]}...'")
+                print(f"📊 [CLASIFICACIÓN] Categoría: '{intent}'")
+                self.logger.info(f"📊 [CLASIFICACIÓN] Categoría: '{intent}'")
+                print(f"📊 [CLASIFICACIÓN] Confianza: {confidence:.2f}")
+                self.logger.info(f"📊 [CLASIFICACIÓN] Confianza: {confidence:.2f}")
+                print(f"📊 [CLASIFICACIÓN] Tenant: {tenant_id}")
+                self.logger.info(f"📊 [CLASIFICACIÓN] Tenant: {tenant_id}")
+                print(f"📊 [CLASIFICACIÓN] Session: {session_id}")
+                self.logger.info(f"📊 [CLASIFICACIÓN] Session: {session_id}")
+                print(f"📊 [CLASIFICACIÓN] {'='*50}")
+                self.logger.info(f"📊 [CLASIFICACIÓN] {'='*50}")
+            except Exception as classify_error:
+                print(f"❌ [CLASIFICACIÓN] ERROR EN CLASIFICACIÓN: {classify_error}")
+                self.logger.error(f"❌ [CLASIFICACIÓN] ERROR EN CLASIFICACIÓN: {classify_error}")
+                self.logger.exception(classify_error)
+                intent = "saludo_apoyo"
+                confidence = 0.5
             
             # 3. PROCESAR CON SERVICIO BASE (con timeout)
             self.logger.info(f"📚 [OPTIMIZED] Procesando con servicio base...")
             import asyncio
             
+            # 🔧 FIX: Pasar historial en user_context en lugar de incluirlo en el query
+            processing_user_context = user_context.copy() if user_context else {}
+            processing_query = query
+            
+            if conversation_history:
+                # Agregar historial al contexto para que esté disponible en el prompt
+                processing_user_context['conversation_history'] = conversation_history
+                self.logger.info(f"📚 [OPTIMIZED] Agregando historial al user_context (NO al query)")
+                self.logger.info(f"📚 [OPTIMIZED] Query puro: '{query}'")
+            
             try:
                 result = await asyncio.wait_for(
                     self.base_ai_service.process_chat_message(
-                        tenant_id, query, user_context, session_id, tenant_config
+                        tenant_id, processing_query, processing_user_context, session_id, tenant_config
                     ),
                     timeout=optimization_config.AI_RESPONSE_TIMEOUT
                 )

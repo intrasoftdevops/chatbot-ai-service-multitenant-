@@ -273,6 +273,21 @@ class RAGOrchestrator:
             session_context = user_context["session_context"]
             logger.debug(f"Contexto de sesión incluido en prompt: {len(session_context)} chars")
         
+        # 🔧 FIX: Incluir historial de conversación si está disponible
+        if user_context and "conversation_history" in user_context:
+            conversation_history = user_context["conversation_history"]
+            logger.debug(f"Historial de conversación incluido en prompt: {len(conversation_history)} chars")
+            # Extraer solo la pregunta actual del usuario, eliminando el historial del query si está presente
+            if conversation_history and query.startswith("Historial de conversación:"):
+                # El query incluyó historial por error, limpiarlo
+                lines = query.split('\n')
+                # Buscar "Pregunta actual del usuario:" y tomar todo lo que viene después
+                for i, line in enumerate(lines):
+                    if "Pregunta actual del usuario:" in line or "Pregunta actual:" in line:
+                        query = '\n'.join(lines[i+1:]).strip()
+                        logger.info(f"Query limpiado de historial: '{query[:100]}...'")
+                        break
+        
         # 🛡️ FASE 5: Usar PromptBuilder con guardrails
         if self.enable_guardrails:
             # Detectar automáticamente el tipo de prompt

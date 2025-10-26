@@ -673,7 +673,7 @@ RESPUESTA:"""
                     print(f"🤖 ANTES de llamar a _generate_immediate_document_response")
                     print(f"🤖 query: '{query[:100]}...'")
                     print(f"🤖 document_content: {len(document_content)} caracteres")
-                    response = await self._generate_immediate_document_response(query, document_content, contact_name)
+                    response = await self._generate_immediate_document_response(query, document_content, contact_name, {})
                     print(f"🤖 DESPUÉS de llamar a _generate_immediate_document_response")
                     print(f"🤖 RESPUESTA INMEDIATA GENERADA: {response[:200]}...")
                     return response
@@ -722,12 +722,22 @@ RESPUESTA:"""
             logger.error(f"Error en generación ultra-rápida: {e}")
             return "saludo_apoyo"  # Fallback seguro
 
-    async def _generate_immediate_document_response(self, query: str, document_content: str, contact_name: str) -> str:
+    async def _generate_immediate_document_response(self, query: str, document_content: str, contact_name: str, user_context: Dict[str, Any] = None) -> str:
         """
         Genera respuesta inmediata basada en documentos usando IA
         Respeta la conciencia individual de cada tenant
         """
         try:
+            # 🔧 FIX: Incluir historial de conversación si está disponible
+            conversation_context = query
+            
+            if user_context and "conversation_history" in user_context:
+                history = user_context["conversation_history"]
+                if history and len(history.strip()) > 0:
+                    # Combinar historial con pregunta actual para dar contexto completo
+                    conversation_context = f"Historial de conversación:\n{history}\n\nPregunta actual: {query}"
+                    print(f"🔍 DEBUG IMMEDIATE: Incluyendo historial ({len(history)} chars) en contexto")
+            
             # 🔧 PRIMERO: Asegurar que gemini_client existe
             if self.use_gemini_client and self.gemini_client is None:
                 print("🚀 DEBUG IMMEDIATE: gemini_client es None, inicializando...")
@@ -738,6 +748,7 @@ RESPUESTA:"""
             query_lower = query.lower()
             
             print(f"🔍 DEBUG IMMEDIATE: query_lower = '{query_lower}'")
+            print(f"🔍 DEBUG IMMEDIATE: conversation_context = '{conversation_context[:200]}...'")
             print(f"🔍 DEBUG IMMEDIATE: content_lower preview = '{content_lower[:200]}...'")
             
             # Limpiar el contenido para la IA (remover nombres de archivos y caracteres especiales)
@@ -749,14 +760,17 @@ RESPUESTA:"""
             # Crear prompt para que la IA genere respuesta corta y natural
             print(f"🔍 DEBUG: Creando summary_prompt con contact_name={contact_name}...")
             
-            # 🔧 NUEVO: Extraer la última pregunta del usuario
+            # 🔧 NUEVO: Extraer la última pregunta del usuario del contexto completo
             last_user_input = query
-            if "Pregunta actual del usuario:" in query:
-                parts = query.split("Pregunta actual del usuario:")
+            if "Pregunta actual del usuario:" in conversation_context:
+                parts = conversation_context.split("Pregunta actual del usuario:")
                 last_user_input = parts[-1].strip()
-            elif "Usuario:" in query:
+            elif "Pregunta actual:" in conversation_context:
+                parts = conversation_context.split("Pregunta actual:")
+                last_user_input = parts[-1].strip()
+            elif "Usuario:" in conversation_context:
                 # Extraer la última línea que empieza con "Usuario:"
-                user_lines = [line for line in query.split('\n') if line.strip().startswith('Usuario:')]
+                user_lines = [line for line in conversation_context.split('\n') if line.strip().startswith('Usuario:')]
                 if user_lines:
                     last_user_input = user_lines[-1].replace('Usuario:', '').strip()
             
@@ -765,7 +779,7 @@ RESPUESTA:"""
             try:
                 summary_prompt = f"""
 Contexto de la conversación:
-{query}
+{conversation_context}
 
 Información relevante sobre el tema:
 {clean_content[:2000]}
@@ -1054,7 +1068,7 @@ Respuesta:"""
                         contact_name = tenant_config["branding_config"].get("contactName", "el candidato")
                     
                     # Usar el query completo (con historial) para que la IA tenga contexto
-                    response = await self._generate_immediate_document_response(query, document_content, contact_name)
+                    response = await self._generate_immediate_document_response(query, document_content, contact_name, user_context)
                     logger.info(f"🤖 RESPUESTA INMEDIATA GENERADA: {response[:200]}...")
                     
                     return {
@@ -1964,7 +1978,7 @@ RESPUESTA BASADA EN LA INFORMACIÓN ESPECÍFICA:"""
                     print(f"🔍 DEBUG: document_content preview: {document_content[:200] if document_content else 'None'}...")
                     
                     if document_content:
-                        response = await self._generate_immediate_document_response(query, document_content, contact_name)
+                        response = await self._generate_immediate_document_response(query, document_content, contact_name, user_context)
                         print(f"🤖 RESPUESTA INMEDIATA GENERADA: {response[:200]}...")
                     else:
                         # Fallback si no hay documentos
@@ -3584,10 +3598,31 @@ Responde solo el JSON estricto sin comentarios:
                     return cached_result
             
             # 🚀 OPTIMIZACIÓN: Prompt ultra-corto para velocidad máxima
-            prompt = f"""Clasifica: "{message}" en UNA categoría:
-saludo_apoyo|cita_campaña|conocer_candidato|publicidad_info|colaboracion_voluntariado|quejas|malicioso|registration_response|solicitud_funcional
+            prompt = f"""Analiza este mensaje y clasifícalo en UNA sola categoría:
 
-Respuesta:"""
+CATEGORÍAS:
+- saludo_apoyo: Solo saludos/agradecimientos SIN pregunta
+- conocer_candidato: CUALQUIER pregunta sobre candidato o temas políticos
+- solicitud_funcional: Preguntas sobre app (referidos, puntos)
+- cita_campaña: Solicita cita/reunión
+- publicidad_info: Pide material
+- colaboracion_voluntariado: Ofrece ayudar
+- quejas: Reclama o critica
+- malicioso: Ofensivo/amenazante
+
+MENSAJE: "{message}"
+
+CLASIFICACIÓN PASO A PASO:
+1. ¿Tiene palabras de pregunta? (qué, quién, cuál, cómo, quién, quiénes, cuándo, dónde, por qué)
+   - SI: Si pregunta sobre candidato/temas políticos → conocer_candidato
+   - SI: Si pregunta sobre app → solicitud_funcional
+2. ¿Es SOLO "ok", "sí", "gracias" sin pregunta? → saludo_apoyo
+3. Si NO tiene pregunta clara, mira el CONTENIDO:
+   - "quien es X", "quienes son X", "cual es X" → conocer_candidato
+   - "ok y que es X" → conocer_candidato (IGNORA el "ok")
+   - "ok y quien es X" → conocer_candidato (IGNORA el "ok")
+
+RESPUESTA:"""
             
             # 🔧 OPTIMIZACIÓN: Timeout ultra-agresivo (2 segundos)
             import asyncio
