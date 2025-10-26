@@ -171,7 +171,7 @@ class GeminiClient:
         if not LLAMA_INDEX_AVAILABLE or LlamaGemini is None:
             logger.error("❌ LlamaIndex Gemini no disponible")
             self.model = None
-            self._initialized = True
+            self._initialized = False  # NO marcar como inicializado si no hay librería
             return
             
         if self.api_key:
@@ -202,14 +202,18 @@ class GeminiClient:
                 logger.info(f"✅ Modelo LlamaIndex Gemini {model_name} inicializado correctamente")
                 logger.info(f"🔍 Configuración: temp={temperature}, max_tokens={max_tokens}")
                 
+                # Solo marcar como inicializado si el modelo se creó correctamente
+                self._initialized = True
+                
             except Exception as e:
                 logger.error(f"❌ Error inicializando LlamaIndex Gemini: {str(e)}")
                 self.model = None
+                # NO marcar como inicializado si hubo error
+                self._initialized = False
         else:
             logger.warning("⚠️ GEMINI_API_KEY no configurado")
             self.model = None
-            
-        self._initialized = True
+            self._initialized = False
     
     def _extract_text_from_response(self, response) -> str:
         """

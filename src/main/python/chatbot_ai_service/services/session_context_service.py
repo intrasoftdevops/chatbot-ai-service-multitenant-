@@ -221,6 +221,25 @@ class SessionContextService:
         logger.info(f"Sesiones limpiadas para tenant {tenant_id}: {len(sessions_to_remove)}")
         return len(sessions_to_remove)
     
+    def clear_user_sessions(self, tenant_id: str, user_id: str) -> int:
+        """Limpia todas las sesiones de un usuario específico"""
+        sessions_to_remove = [
+            session_id for session_id, session in self._sessions.items()
+            if session.tenant_id == tenant_id and session.user_id == user_id
+        ]
+        
+        for session_id in sessions_to_remove:
+            del self._sessions[session_id]
+            # También limpiar la advertencia si existe
+            self._warning_sent.pop(session_id, None)
+        
+        if sessions_to_remove:
+            logger.info(f"✅ Sesiones limpiadas para tenant {tenant_id} user {user_id}: {len(sessions_to_remove)}")
+        else:
+            logger.debug(f"No se encontraron sesiones para limpiar: tenant {tenant_id} user {user_id}")
+        
+        return len(sessions_to_remove)
+    
     def _cleanup_expired_sessions(self):
         """Limpia sesiones expiradas"""
         current_time = time.time()

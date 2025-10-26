@@ -170,6 +170,38 @@ async def preload_tenant_documents(tenant_id: str, request: Dict[str, Any]) -> D
         logger.error(f"❌ Error precargando documentos para tenant {tenant_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error precargando documentos: {str(e)}")
 
+@router.post("/tenants/{tenant_id}/sessions/clear")
+async def clear_user_sessions(tenant_id: str, request: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Limpia todas las sesiones de un usuario específico
+    Útil cuando se borra un usuario y no se quiere que recupere sesiones anteriores
+    """
+    try:
+        user_id = request.get("user_id")
+        
+        if not user_id:
+            raise HTTPException(status_code=400, detail="user_id is required")
+        
+        logger.info(f"🧹 Limpiando sesiones para tenant: {tenant_id}, user: {user_id}")
+        
+        from chatbot_ai_service.services.session_context_service import session_context_service
+        cleared_count = session_context_service.clear_user_sessions(tenant_id, user_id)
+        
+        logger.info(f"✅ Sesiones limpiadas: {cleared_count}")
+        
+        return {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "cleared_sessions": cleared_count,
+            "status": "success"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error limpiando sesiones: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error limpiando sesiones: {str(e)}")
+
 def process_followup_markers(response_text: str) -> Dict[str, str]:
     """
     Procesa los marcadores FOLLOWUP_MESSAGE_START y FOLLOWUP_MESSAGE_END
@@ -347,13 +379,19 @@ async def generate_all_initial_messages(tenant_id: str, request: Dict[str, Any])
     Genera los 3 mensajes iniciales de una vez para optimizar el tiempo de respuesta
     """
     try:
+        # 🔍 DEBUG: Log completo del request
+        logger.info(f"🔍 DEBUG: Request completo recibido: {request}")
+        
         # 🔧 FIX: Extraer configuración del tenant del campo correcto
         tenant_config = request.get("tenant_config", {})
+        logger.info(f"🔍 DEBUG: tenant_config extraído: {tenant_config}")
+        
         if not tenant_config and "branding" in request:
             # Si no hay tenant_config pero sí branding, usar branding directamente
             tenant_config = {"branding": request["branding"]}
+            logger.info(f"🔍 DEBUG: Usando branding del request: {tenant_config}")
         
-        logger.info(f"🔍 Configuración recibida: {tenant_config}")
+        logger.info(f"🔍 Configuración final: {tenant_config}")
         
         # Generar los 3 mensajes con IA
         ai_service = AIService()

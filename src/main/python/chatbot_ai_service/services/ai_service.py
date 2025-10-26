@@ -53,6 +53,15 @@ class AIService:
         # 🔧 FIX: Inicializar _intent_cache y _intent_cache_max_size
         self._intent_cache = {}
         self._intent_cache_max_size = 1000
+        
+        # 🔧 FIX: Inicializar _precomputed_initial_messages
+        self._precomputed_initial_messages = {
+            "default": {
+                'welcome': "¡Bienvenido/a! Soy tu candidato. ¡Juntos construimos el futuro!",
+                'contact': "Por favor, guarda este número como 'Mi Candidato' para recibir actualizaciones importantes de la campaña.",
+                'name': "¿Me confirmas tu nombre para guardarte en mis contactos y personalizar tu experiencia?"
+            }
+        }
     
     def _get_safety_settings(self):
         """
@@ -587,9 +596,25 @@ RESPUESTA:"""
             print(f"🚀 DEBUG ULTRA-FAST - gemini_client: {self.gemini_client is not None}")
             
             # 🚀 DEBUG: Verificar si necesitamos reinicializar el cliente
-            if self.use_gemini_client and self.gemini_client is None:
-                print("🚀 DEBUG ULTRA-FAST: gemini_client es None, reinicializando...")
-                self._ensure_gemini_client()
+            if self.use_gemini_client:
+                print(f"🚀 DEBUG ULTRA-FAST - Entrando en bloque de verificación de gemini_client")
+                if self.gemini_client is None:
+                    print("🚀 DEBUG ULTRA-FAST: gemini_client es None, reinicializando...")
+                    self._ensure_gemini_client()
+                else:
+                    print(f"🚀 DEBUG ULTRA-FAST - gemini_client existe, verificando modelo...")
+                    print(f"🚀 DEBUG ULTRA-FAST - model existe: {self.gemini_client.model is not None}")
+                    print(f"🚀 DEBUG ULTRA-FAST - _initialized: {self.gemini_client._initialized}")
+                    if self.gemini_client.model is None:
+                        print("🚀 DEBUG ULTRA-FAST: modelo es None, forzando reinicialización...")
+                        # Si el modelo es None pero ya se inicializó antes (con error), forzar reinicialización
+                        if self.gemini_client._initialized:
+                            print("🚀 DEBUG ULTRA-FAST: _initialized=True pero model=None, reseteando...")
+                            self.gemini_client._initialized = False
+                        self.gemini_client._ensure_model_initialized()
+                    else:
+                        print("🚀 DEBUG ULTRA-FAST - modelo ya existe, no necesita reinicialización")
+                
                 print(f"🚀 DEBUG ULTRA-FAST - gemini_client después de reinicializar: {self.gemini_client is not None}")
                 
                 # 🚀 DEBUG: Verificar configuración del modelo después de reinicializar
@@ -615,6 +640,19 @@ RESPUESTA:"""
                     print(f"🔍 DEBUG: Extraída pregunta actual: '{current_query}'")
                 else:
                     print(f"🔍 DEBUG: No hay historial, usando query completa")
+                
+                # 🔧 NUEVO: Detectar respuestas de confirmación (ok, sí, entiendo, etc.)
+                confirmation_phrases = [
+                    'ok', 'okay', 'vale', 'sí', 'si', 'claro', 'entendido', 
+                    'entendida', 'perfecto', 'perfecta', 'de acuerdo', 'bien', 
+                    'gracias', 'thank you', 'yes', 'yep'
+                ]
+                query_lower = current_query.lower().strip()
+                is_confirmation = any(phrase in query_lower for phrase in confirmation_phrases) and len(query_lower.split()) <= 3
+                
+                if is_confirmation:
+                    print(f"🔍 DEBUG: Detectada respuesta de confirmación '{current_query}', no buscando documentos")
+                    return "Gracias. ¿En qué más puedo ayudarte?"
                 
                 # Mejorar la query para mejor recuperación de documentos
                 enhanced_query = self._enhance_query_for_document_search(current_query)
@@ -644,7 +682,7 @@ RESPUESTA:"""
                     return "No tengo información suficiente sobre ese tema. Puedo ayudarte con otros temas de la campaña."
             
             # 🚀 FALLBACK: Usar Gemini si no hay documentos o no es ultra-fast mode
-            if self.use_gemini_client and self.gemini_client:
+            if self.use_gemini_client and self.gemini_client and self.gemini_client.model:
                 if ultra_fast_mode:
                     # 🚀 MODO ULTRA-RÁPIDO: Sin timeout para permitir procesamiento completo
                     print("🚀 ULTRA-FAST MODE: Generando sin timeout")
@@ -690,6 +728,11 @@ RESPUESTA:"""
         Respeta la conciencia individual de cada tenant
         """
         try:
+            # 🔧 PRIMERO: Asegurar que gemini_client existe
+            if self.use_gemini_client and self.gemini_client is None:
+                print("🚀 DEBUG IMMEDIATE: gemini_client es None, inicializando...")
+                self._ensure_gemini_client()
+            
             # Extraer información relevante del documento
             content_lower = document_content.lower()
             query_lower = query.lower()
@@ -705,29 +748,36 @@ RESPUESTA:"""
             
             # Crear prompt para que la IA genere respuesta corta y natural
             print(f"🔍 DEBUG: Creando summary_prompt con contact_name={contact_name}...")
+            
+            # 🔧 NUEVO: Extraer la última pregunta del usuario
+            last_user_input = query
+            if "Pregunta actual del usuario:" in query:
+                parts = query.split("Pregunta actual del usuario:")
+                last_user_input = parts[-1].strip()
+            elif "Usuario:" in query:
+                # Extraer la última línea que empieza con "Usuario:"
+                user_lines = [line for line in query.split('\n') if line.strip().startswith('Usuario:')]
+                if user_lines:
+                    last_user_input = user_lines[-1].replace('Usuario:', '').strip()
+            
+            print(f"🔍 DEBUG: Última entrada del usuario: '{last_user_input}'")
+            
             try:
                 summary_prompt = f"""
-Responde la siguiente pregunta de forma breve y concisa (máximo 800 caracteres):
+Contexto de la conversación:
+{query}
 
-Pregunta: {query}
-
-Información disponible:
+Información relevante sobre el tema:
 {clean_content[:2000]}
 
-INSTRUCCIONES CRÍTICAS: 
-- NO menciones nombres de archivos o documentos
-- NO digas "según el documento" o "en el documento"
-- NO uses la frase genérica "el candidato" bajo ninguna circunstancia
-- Si en la información hay nombres específicos (personas, entidades), ÚSALOS directamente
-- Si la pregunta menciona "el responsable", "el candidato" o similares, busca el NOMBRE ESPECÍFICO en la información y úsalo
-- Responde como si fueras un experto en el tema que conoce la información de primera mano
-- Sé específico: usa nombres reales, fechas, lugares exactos
+INSTRUCCIONES:
+- Si el usuario escribió una confirmación breve (ok, sí, entendido, claro, gracias, bien, etc.), responde EXACTAMENTE: "Gracias. ¿En qué más puedo ayudarte?"
+- Si es una pregunta real sobre el tema, responde de forma breve (máximo 800 caracteres) usando la información disponible
+- NO menciones archivos, documentos, o frases genéricas como "el candidato"
+- Usa nombres reales y específicos si están en la información
 - Máximo 800 caracteres
-- Responde la pregunta directamente y con precisión
 
-Ejemplo de lo que NO debes hacer:
-❌ "El candidato propuso..."
-✅ "Federico Gutiérrez propuso..." (si ese es el nombre en la información)
+Última entrada del usuario: "{last_user_input}"
 
 Respuesta:"""
                 print(f"🔍 DEBUG: summary_prompt creado exitosamente: {len(summary_prompt)} caracteres")
@@ -740,7 +790,25 @@ Respuesta:"""
             # Usar IA disponible para generar respuesta
             print(f"🔍 DEBUG: ¿use_gemini_client? {self.use_gemini_client}")
             print(f"🔍 DEBUG: ¿gemini_client disponible? {self.gemini_client is not None}")
+            
+            # Verificar si necesitamos reinicializar el modelo
             if self.use_gemini_client and self.gemini_client:
+                print(f"🚀 DEBUG IMMEDIATE: Verificando modelo...")
+                model_available = self.gemini_client.model is not None if self.gemini_client else False
+                print(f"🔍 DEBUG: ¿modelo disponible? {model_available}")
+                
+                if not model_available and not self.gemini_client._initialized:
+                    print("🚀 DEBUG IMMEDIATE: Modelo no inicializado, inicializando...")
+                    self.gemini_client._ensure_model_initialized()
+                elif not model_available and self.gemini_client._initialized:
+                    print("🚀 DEBUG IMMEDIATE: _initialized=True pero model=None, reseteando e inicializando...")
+                    self.gemini_client._initialized = False
+                    self.gemini_client._ensure_model_initialized()
+            
+            model_available = self.gemini_client.model is not None if (self.gemini_client and hasattr(self.gemini_client, 'model')) else False
+            print(f"🔍 DEBUG: ¿modelo disponible después de verificación? {model_available}")
+            
+            if self.use_gemini_client and self.gemini_client and model_available:
                 try:
                     print(f"🤖 Llamando a generate_content con prompt de {len(summary_prompt)} caracteres")
                     ai_response = await self.gemini_client.generate_content(summary_prompt)
@@ -761,7 +829,7 @@ Respuesta:"""
                     logger.warning(f"Error generando respuesta con IA: {e}")
             
             # Fallback: Si falló la IA, intentar generar respuesta básica con IA una vez más
-            if self.use_gemini_client and self.gemini_client:
+            if self.use_gemini_client and self.gemini_client and model_available:
                 try:
                     simple_prompt = f"Responde brevemente a: {query}. Máximo 200 caracteres."
                     ai_response = await self.gemini_client.generate_content(simple_prompt)
@@ -786,7 +854,7 @@ Respuesta:"""
         Con timeout ultra-agresivo para desarrollo local
         """
         try:
-            if self.use_gemini_client and self.gemini_client:
+            if self.use_gemini_client and self.gemini_client and self.gemini_client.model:
                 # 🚀 OPTIMIZACIÓN: Sin timeout para permitir procesamiento completo
                 try:
                     response = await self.gemini_client.generate_content(prompt)
@@ -811,7 +879,7 @@ Respuesta:"""
         Generación optimizada de contenido para máxima velocidad
         """
         try:
-            if self.use_gemini_client and self.gemini_client:
+            if self.use_gemini_client and self.gemini_client and self.gemini_client.model:
                 # Usar configuración optimizada (ya pre-cargado al startup)
                 response = await self.gemini_client.generate_content(prompt)
                 # 🔒 GARANTIZAR: No exceder 1000 caracteres
@@ -5303,15 +5371,20 @@ Mensaje:"""
             Diccionario con los 3 mensajes generados
         """
         try:
+            # 🔍 DEBUG: Log para ver qué se recibe
+            logger.info(f"🔍 DEBUG generate_all_initial_messages: tenant_config recibido: {tenant_config}")
+            
             # 🚀 OPTIMIZACIÓN: Usar respuestas precomputadas para casos comunes
             candidate_name = ""
             contact_name = "Mi Candidato"
             
             if tenant_config:
                 branding = tenant_config.get('branding', {})
+                logger.info(f"🔍 DEBUG: branding extraído: {branding}")
                 if branding:
                     candidate_name = branding.get('candidate_name', '')
                     config_contact_name = branding.get('contact_name', '')
+                    logger.info(f"🔍 DEBUG: candidate_name='{candidate_name}', contact_name='{config_contact_name}'")
                     if config_contact_name and config_contact_name.strip():
                         contact_name = config_contact_name.strip()
             
