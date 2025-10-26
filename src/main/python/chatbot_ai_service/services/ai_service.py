@@ -138,9 +138,10 @@ class AIService:
         # (Ya inicializado arriba, no duplicar)
         
         # 🚀 OPTIMIZACIÓN: Respuestas precomputadas genéricas para casos comunes
+        # (Se personalizarán con el nombre del candidato si está disponible)
         self._precomputed_initial_messages = {
             "default": {
-                'welcome': "¡Bienvenido/a! Soy tu candidato. ¡Juntos construimos el futuro!",
+                'welcome': "¡Bienvenido/a! Soy tu representante. ¡Juntos construimos el futuro!",
                 'contact': "Por favor, guarda este número como 'Mi Candidato' para recibir actualizaciones importantes de la campaña.",
                 'name': "¿Me confirmas tu nombre para guardarte en mis contactos y personalizar tu experiencia?"
             }
@@ -5412,9 +5413,10 @@ Mensaje:"""
             # 🚀 OPTIMIZACIÓN: Usar respuestas precomputadas para casos comunes
             candidate_name = ""
             contact_name = "Mi Candidato"
+            branding = {}
             
             if tenant_config:
-                branding = tenant_config.get('branding', {})
+                branding = tenant_config.get('branding', {}) or {}
                 logger.info(f"🔍 DEBUG: branding extraído: {branding}")
                 if branding:
                     candidate_name = branding.get('candidate_name', '')
@@ -5423,60 +5425,48 @@ Mensaje:"""
                     if config_contact_name and config_contact_name.strip():
                         contact_name = config_contact_name.strip()
             
-            # Verificar si podemos usar respuestas precomputadas genéricas
-            if not candidate_name or candidate_name.strip() == "":
-                logger.info("🚀 Usando respuestas precomputadas genéricas")
-                return self._precomputed_initial_messages["default"].copy()
+            # 🚀 PERSONALIZACIÓN: Usar mensajes del branding si están disponibles
+            personalized_messages = self._precomputed_initial_messages["default"].copy()
             
-            # Si necesitamos personalización específica, usar IA
-            logger.info(f"🔄 Generando mensajes personalizados para candidato: {candidate_name}")
-            
-            # Obtener información del tenant para personalización
-            tenant_info = ""
-            if tenant_config:
-                branding = tenant_config.get('branding', {})
-                if branding:
+            # Verificar si hay un mensaje de bienvenida personalizado en el branding
+            if branding and isinstance(branding, dict):
+                welcome_message = branding.get('welcome_message', '')
+                if welcome_message and welcome_message.strip():
+                    logger.info(f"✅ Usando mensaje de bienvenida personalizado del branding")
+                    # Reemplazar variables en el mensaje
+                    welcome_message = welcome_message.strip()
+                    # Reemplazar {candidate_name} o {CANDIDATE_NAME} con el nombre del candidato
+                    if candidate_name and candidate_name.strip():
+                        welcome_message = welcome_message.replace("{candidate_name}", candidate_name)
+                        welcome_message = welcome_message.replace("{CANDIDATE_NAME}", candidate_name)
+                    # Reemplazar {campaign_name} si está disponible
                     campaign_name = branding.get('campaign_name', '')
-                    
-                    if candidate_name:
-                        tenant_info += f"Candidato: {candidate_name}. "
-                    if campaign_name:
-                        tenant_info += f"Campaña: {campaign_name}. "
+                    if campaign_name and campaign_name.strip():
+                        welcome_message = welcome_message.replace("{campaign_name}", campaign_name)
+                        welcome_message = welcome_message.replace("{CAMPAIGN_NAME}", campaign_name)
+                    # Reemplazar \n por saltos de línea reales
+                    welcome_message = welcome_message.replace("\\n", "\n")
+                    welcome_message = welcome_message.replace("\\t", "\t")
+                    personalized_messages['welcome'] = welcome_message
+                elif candidate_name and candidate_name.strip():
+                    # Si no hay welcome_message pero sí candidate_name, personalizar el mensaje genérico
+                    logger.info(f"🚀 Personalizando mensaje genérico con nombre del candidato: {candidate_name}")
+                    personalized_messages['welcome'] = personalized_messages['welcome'].replace("tu candidato", candidate_name)
+                    personalized_messages['welcome'] = personalized_messages['welcome'].replace("tu representante", candidate_name)
             
-            # 🚀 OPTIMIZACIÓN: Prompt ultra-optimizado para velocidad
-            prompt = f"""Genera 3 mensajes WhatsApp campaña política.
-
-Info: {tenant_info}
-Contacto: {contact_name}
-
-1. Bienvenida (100 chars): BIENVENIDA:
-2. Guardar contacto (150 chars): CONTACTO:  
-3. Pedir nombre (120 chars): NOMBRE:"""
-
-            try:
-                # 🚀 OPTIMIZACIÓN: Usar configuración ultra-rápida para mensajes iniciales
-                response = await self._generate_content_ultra_fast(prompt)
-                if response and len(response.strip()) > 0:
-                    # Parsear la respuesta
-                    lines = response.strip().split('\n')
-                    messages = {}
-                    
-                    for line in lines:
-                        if line.startswith('BIENVENIDA:'):
-                            messages['welcome'] = line.replace('BIENVENIDA:', '').strip()
-                        elif line.startswith('CONTACTO:'):
-                            messages['contact'] = line.replace('CONTACTO:', '').strip()
-                        elif line.startswith('NOMBRE:'):
-                            messages['name'] = line.replace('NOMBRE:', '').strip()
-                    
-                    if len(messages) == 3:
-                        return messages
-            except Exception as e:
-                logger.warning(f"Error generando mensajes con IA: {e}")
+            # Verificar si hay un mensaje de contacto personalizado
+            if branding and isinstance(branding, dict):
+                contact_message = branding.get('greeting_message', '')
+                # Si no hay greeting_message, personalizar el genérico con contact_name
+                if not contact_message or not contact_message.strip():
+                    if contact_name and contact_name.strip() and contact_name != "Mi Candidato":
+                        logger.info(f"📝 Personalizando mensaje de contacto con: {contact_name}")
+                        personalized_messages['contact'] = personalized_messages['contact'].replace("Mi Candidato", contact_name)
+                else:
+                    # Si hay greeting_message, usarlo (aunque no es exactamente el mismo propósito)
+                    logger.info(f"✅ Usando mensaje de saludo del branding")
             
-            # 🚀 FALLBACK ULTRA-RÁPIDO: Usar respuestas precomputadas si IA falla
-            logger.warning("⚠️ IA falló, usando respuestas precomputadas como fallback")
-            return self._precomputed_initial_messages["default"].copy()
+            return personalized_messages
                 
         except Exception as e:
             logger.error(f"Error generando mensajes iniciales: {str(e)}")
