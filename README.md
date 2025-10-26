@@ -2,7 +2,7 @@
 
 ## 📋 Descripción
 
-**Chatbot AI Service Multi-Tenant** es el servicio de IA genérico que proporciona capacidades conversacionales avanzadas para múltiples campañas políticas. Integra clasificación de intenciones, análisis de contexto y respuestas personalizadas usando Gemini AI y LlamaIndex. **El sistema es completamente genérico y no contiene referencias específicas a clientes particulares.**
+**Chatbot AI Service Multi-Tenant** es el servicio de IA genérico que proporciona capacidades conversacionales avanzadas para múltiples campañas políticas. Integra clasificación de intenciones, análisis de contexto y respuestas personalizadas usando Gemini AI y LlamaIndex para RAG. **El sistema es completamente genérico y no contiene referencias específicas a clientes particulares.**
 
 ## ✨ Funcionalidades Principales
 
@@ -11,7 +11,8 @@
 - **Contexto de Documentos**: Información específica por candidato desde Google Cloud Storage
 - **Sesiones Persistentes**: Historial y contexto de conversación por usuario
 - **Multi-Tenancy**: Configuración independiente por cliente político
-- **Cache Inteligente**: Redis para optimizar rendimiento
+- **Sistema de Historial**: Procesamiento inteligente de preguntas de seguimiento
+- **Precarga de Documentos**: Carga al inicio del servicio para máximo rendimiento
 - **APIs RESTful**: Integración completa con Political Referrals Service
 
 ## 🏗️ Arquitectura
@@ -266,30 +267,74 @@ python run_tests.py --type integration
 }
 ```
 
-## 🧠 Sistema RAG Avanzado
+## 🧠 Sistema RAG con LlamaIndex
 
-### RAG Orchestrator (SMART MODE)
-El sistema incluye un **RAG Orchestrator completo** que proporciona respuestas basadas en documentos específicos del candidato:
+### Implementación Actual
+El sistema utiliza **LlamaIndex** con Gemini para búsqueda semántica y generación de respuestas:
 
-#### Componentes Implementados:
-- **HybridRetriever**: Búsqueda híbrida (semántica + keywords)
-- **SourceVerifier**: Verificación de respuestas contra documentos
-- **RAGOrchestrator**: Orquestación completa del flujo RAG
+#### Componentes:
+- **Vector Store**: Índice vectorial por tenant usando LlamaIndex
+- **Query Engine**: Motor de búsqueda optimizado con similarity search
+- **Document Loader**: Carga automática desde Google Cloud Storage
+- **Text Splitter**: División inteligente de documentos en chunks
 
 #### Flujo RAG:
-1. **Query Rewriting**: Mejora la consulta del usuario
-2. **Hybrid Retrieval**: Busca documentos relevantes
-3. **Context Building**: Construye contexto con documentos
-4. **Response Generation**: Genera respuesta con Gemini
-5. **Source Verification**: Verifica claims contra documentos
-6. **Citation Generation**: Agrega citas y fuentes
+1. **Precarga**: Documentos se cargan al inicio del servicio
+2. **Indexación**: Creado índice vectorial por tenant
+3. **Query**: Usuario envía mensaje con historial de conversación
+4. **Búsqueda**: Sistema extrae pregunta actual y busca documentos relevantes
+5. **Generación**: Gemini genera respuesta basada en documentos
+6. **Post-procesamiento**: Sistema garantiza respuesta concisa y sin referencias a archivos
 
-#### Ejemplo de Respuesta RAG:
-```json
-{
-  "response": "💡 *Respuesta basada en documentos de la campaña:*\n\nEl candidato propone para educación:\n\n1. Construcción de nuevas escuelas en zonas rurales [Documento 1]\n2. Inversión en infraestructura educativa [Documento 1]\n\n📚 **Fuentes:**\n[1] Plan de Gobierno - Educación (relevancia: 95%)"
-}
+#### Optimizaciones:
+- **Precarga al inicio**: Documentos listos para búsqueda inmediata
+- **Cache de índices**: Índices vectoriales se mantienen en memoria
+- **Búsqueda optimizada**: Solo pregunta actual para búsqueda de documentos
+- **Contexto completo**: Historial completo para generación de respuesta
+
+### Sistema de Historial de Conversación
+
+El sistema implementa un **sistema inteligente de procesamiento de historial** que permite que el chatbot entienda referencias y contexto:
+
+#### Funcionamiento:
+1. **Envío de historial**: Java Service envía últimos 3 mensajes de la conversación
+2. **Formato del historial**:
+   ```
+   Historial de conversación:
+   Usuario: mensaje1
+   Bot: respuesta1
+   Usuario: mensaje2
+   
+   Pregunta actual del usuario: mensaje3
+   ```
+3. **Extracción automática**: Python extrae la pregunta actual para búsqueda de documentos
+4. **Generación con contexto**: Sistema usa el historial completo para entender referencias
+5. **Respuesta contextual**: La respuesta tiene en cuenta toda la conversación previa
+
+#### Ejemplo de Uso:
 ```
+Usuario: "¿Qué es el cartel de los lotes?"
+Bot: "El Cartel de los Lotes fue un esquema..."
+
+Usuario: "¿Quién es el responsable?"
+Bot: "Los responsables fueron..." [Contexto: entiende que pregunta sobre el cartel]
+```
+
+### Respuestas Optimizadas
+
+El sistema genera respuestas que cumplen con los siguientes requisitos:
+
+#### Requisitos de Respuesta:
+- **Máximo 1000 caracteres**: Sistema garantiza respuestas concisas
+- **Sin referencias a archivos**: Las respuestas no mencionan nombres de documentos
+- **Lenguaje natural**: Respuestas en coloquial, como si hablara un humano
+- **Contexto relevante**: Solo información directamente relacionada con la pregunta
+
+#### Proceso de Generación:
+1. **Prompt especializado**: Instrucciones para generar respuesta concisa
+2. **Post-procesamiento**: Verificación de longitud y contenido
+3. **Limpieza**: Remoción de referencias a archivos si existen
+4. **Truncado inteligente**: Si excede 1000 caracteres, corta en punto final
 
 ## 🔒 Guardrails de Seguridad
 

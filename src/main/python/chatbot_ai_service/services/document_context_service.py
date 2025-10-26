@@ -296,66 +296,52 @@ class DocumentContextService:
             
             doc_info = self._document_cache[tenant_id]
             
-            # 🚀 OPTIMIZACIÓN: Usar búsqueda simple si hay documentos en cache
-            if "documents" in doc_info and doc_info["documents"]:
-                logger.info(f"🔍 DEBUG: Usando búsqueda simple optimizada para tenant {tenant_id}")
-                documents = doc_info["documents"]
-                
-                # Búsqueda simple por palabras clave en el contenido
-                query_words = query.lower().split()
-                scored_docs = []
-                
-                for doc in documents:
-                    content = doc.get('content', '').lower()
-                    score = sum(1 for word in query_words if word in content)
-                    if score > 0:
-                        scored_docs.append((doc, score))
-                
-                # Ordenar por score y tomar los mejores
-                scored_docs.sort(key=lambda x: x[1], reverse=True)
-                top_docs = scored_docs[:max_results]
-                
-                if top_docs:
-                    context_parts = []
-                    for i, (doc, score) in enumerate(top_docs):
-                        filename = doc.get('filename', f'Documento {i+1}')
-                        content = doc.get('content', '')
-                        # Truncar contenido para respuestas más rápidas
-                        truncated_content = content[:800] + "..." if len(content) > 800 else content
-                        context_parts.append(f"[Documento {i+1}] {filename}:\n{truncated_content}")
-                    
-                    context = "\n\n".join(context_parts)
-                    logger.info(f"🔍 DEBUG: Contexto simple generado: {len(context)} chars de {len(top_docs)} documentos")
-                    return context
-                else:
-                    logger.warning(f"No se encontraron documentos relevantes para la consulta")
-                    return ""
+            # 🚀 PRIORIDAD 1: Usar índice vectorial si está disponible (búsqueda semántica)
+            print(f"🔍 DEBUG: ¿Tenant en index_cache? {tenant_id in self._index_cache}")
+            print(f"🔍 DEBUG: ¿LLAMA_INDEX_SUPPORT? {LLAMA_INDEX_SUPPORT}")
+            print(f"🔍 DEBUG: ¿VectorStoreIndex disponible? {VectorStoreIndex is not None}")
+            print(f"🔍 DEBUG: Keys en _index_cache: {list(self._index_cache.keys())}")
             
-            # Si tenemos índice vectorial, usar RAG (solo si es necesario)
             if tenant_id in self._index_cache and LLAMA_INDEX_SUPPORT and VectorStoreIndex is not None:
+                print(f"🔍 DEBUG: ✅ USANDO ÍNDICE VECTORIAL para tenant {tenant_id}")
                 logger.info(f"🔍 DEBUG: Usando índice vectorial para tenant {tenant_id}")
                 index = self._index_cache[tenant_id]
+                print(f"🔍 DEBUG: Creando query_engine...")
                 query_engine = index.as_query_engine(
                     similarity_top_k=max_results,
                     response_mode="compact"
                 )
-                
-                response = query_engine.query(query)
-                logger.info(f"🔍 DEBUG: Respuesta del índice vectorial: {response}")
+                print(f"🔍 DEBUG: Haciendo query con: '{query[:100]}...'")
+                try:
+                    response = query_engine.query(query)
+                    print(f"🔍 DEBUG: Respuesta obtenida de query_engine")
+                    logger.info(f"🔍 DEBUG: Respuesta del índice vectorial: {response}")
+                except Exception as query_error:
+                    print(f"🔍 DEBUG: ERROR en query_engine.query: {query_error}")
+                    logger.error(f"Error en query_engine.query: {query_error}")
+                    import traceback
+                    traceback.print_exc()
+                    return ""
                 
                 # Extraer contexto relevante de la respuesta
                 if hasattr(response, 'source_nodes'):
+                    print(f"🔍 DEBUG: Encontrados {len(response.source_nodes)} nodos en la respuesta vectorial")
                     context_parts = []
-                    for node in response.source_nodes[:max_results]:
-                        context_parts.append(f"**{node.metadata.get('filename', 'Documento')}**:\n{node.text}")
+                    for i, node in enumerate(response.source_nodes[:max_results]):
+                        filename = node.metadata.get('filename', 'Documento')
+                        score = getattr(node, 'score', 'N/A')
+                        print(f"🔍 DEBUG: Nodo {i+1}: {filename} (score: {score})")
+                        context_parts.append(f"**{filename}**:\n{node.text}")
                     
                     context = "\n\n".join(context_parts)
+                    print(f"🔍 DEBUG: Contexto vectorial generado: {len(context)} caracteres, {len(context_parts)} nodos")
                     logger.info(f"🔍 DEBUG: Contexto vectorial generado: {len(context)} caracteres")
                     return context
                 else:
                     logger.info(f"🔍 DEBUG: No hay source_nodes en la respuesta vectorial")
                     return ""
             else:
+                print(f"🔍 DEBUG: ❌ NO HAY ÍNDICE VECTORIAL - usando SmartRetriever como fallback")
                 logger.info(f"🔍 DEBUG: No hay índice vectorial, usando SmartRetriever")
                 # Usar SmartRetriever como fallback
                 from chatbot_ai_service.retrievers.smart_retriever import SmartRetriever
@@ -378,15 +364,9 @@ class DocumentContextService:
                     logger.info(f"🔍 DEBUG: SmartRetriever no encontró resultados relevantes")
                     return ""
             
-            # Si no hay índice, usar búsqueda simple por palabras clave
-            if "documents" in doc_info:
-                context = self._simple_search(doc_info["documents"], query, max_results)
-                logger.info(f"Contexto relevante obtenido (simple) para tenant {tenant_id}: {len(context)} caracteres")
-                return context
-            
-            else:
-                logger.warning(f"No hay documentos disponibles para tenant {tenant_id}")
-                return ""
+            # FALLBACK: Si no hay índice vectorial, usar búsqueda simple
+            logger.warning(f"🔍 DEBUG: No hay índice vectorial disponible para tenant {tenant_id}")
+            return ""
                 
         except Exception as e:
             logger.error(f"Error obteniendo contexto para tenant {tenant_id}: {str(e)}")

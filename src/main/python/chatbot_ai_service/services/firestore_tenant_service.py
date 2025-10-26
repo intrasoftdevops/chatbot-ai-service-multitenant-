@@ -125,10 +125,12 @@ class FirestoreTenantService:
             # Extraer branding si existe
             branding = data.get("branding", {})
             if branding:
+                contact_name = branding.get("contact_name")
                 optimized_config["branding"] = {
-                    "candidate_name": branding.get("contact_name"),
-                    "campaign_name": branding.get("contact_name"),
-                    "contact_name": branding.get("contact_name")
+                    "candidate_name": contact_name,
+                    "campaign_name": contact_name,
+                    "contact_name": contact_name,
+                    "contactName": contact_name  # Formato camelCase para compatibilidad
                 }
             
             return optimized_config

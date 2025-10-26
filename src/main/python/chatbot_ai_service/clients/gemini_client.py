@@ -1,9 +1,8 @@
 """
-Cliente dedicado para interactuar con Gemini AI
+Cliente dedicado para interactuar con Gemini AI usando LlamaIndex
 
-Este cliente fue extraído de AIService para separar responsabilidades:
-- AIService: Lógica de negocio y orquestación
-- GeminiClient: Comunicación con Gemini AI
+Este cliente usa LlamaIndex Gemini (como chatbotIA-original) para evitar bloqueos
+de safety filters que ocurren con google.generativeai directo.
 
 Extraído de: src/main/python/chatbot_ai_service/services/ai_service.py
 Líneas de referencia: 24-33, 39-56, 150-217
@@ -12,8 +11,19 @@ import logging
 import time
 import os
 from typing import Optional, Dict, Any
-import google.generativeai as genai
 import httpx
+
+# Intentar importar LlamaIndex Gemini (como chatbotIA-original)
+LLAMA_INDEX_AVAILABLE = False
+try:
+    from llama_index.llms.gemini import Gemini as LlamaGemini
+    LLAMA_INDEX_AVAILABLE = True
+    logger_import = logging.getLogger(__name__)
+    logger_import.info("✅ LlamaIndex Gemini cargado correctamente")
+except ImportError as e:
+    logger_import = logging.getLogger(__name__)
+    logger_import.error(f"❌ Error cargando LlamaIndex Gemini: {e}")
+    LlamaGemini = None
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +65,7 @@ class GeminiClient:
     
     def preload_models(self):
         """
-        Pre-carga los modelos más comunes para mejorar el tiempo de respuesta
+        Pre-carga los modelos usando LlamaIndex Gemini (como chatbotIA-original)
         
         Este método inicializa los modelos que se usan frecuentemente
         para evitar la latencia de inicialización en tiempo real.
@@ -64,10 +74,15 @@ class GeminiClient:
             logger.warning("⚠️ No se puede pre-cargar modelos: GEMINI_API_KEY no configurado")
             return
             
-        logger.info("🚀 Pre-cargando modelos de IA para optimizar tiempo de respuesta...")
-        print("🚀 DEBUG PRELOAD: Iniciando preload_models()")
+        if not LLAMA_INDEX_AVAILABLE or LlamaGemini is None:
+            logger.error("❌ LlamaIndex Gemini no disponible - no se puede pre-cargar modelos")
+            logger.error("❌ Instala llama-index-llms-gemini para usar esta funcionalidad")
+            return
+            
+        logger.info("🚀 Pre-cargando modelos de IA usando LlamaIndex Gemini...")
+        print("🚀 DEBUG PRELOAD: Iniciando preload_models() con LlamaIndex")
         
-        # 🚀 OPTIMIZACIÓN: Usar configuración ultra-rápida con safety settings desactivados
+        # 🚀 OPTIMIZACIÓN: Usar LlamaIndex Gemini como chatbotIA-original
         import os
         ultra_fast_mode = os.getenv("ULTRA_FAST_MODE", "false").lower() == "true"
         logger.info(f"🚀 ULTRA_FAST_MODE detectado en preload: {ultra_fast_mode}")
@@ -140,14 +155,12 @@ class GeminiClient:
     
     def _ensure_model_initialized(self):
         """
-        Inicializa el modelo de forma lazy
-        
-        COPIADO de AIService línea 150-169
+        Inicializa el modelo usando LlamaIndex Gemini (como chatbotIA-original)
         
         Solo se ejecuta una vez, en el primer uso del modelo.
         Esto mejora el tiempo de startup del servicio.
         """
-        logger.info("🚀 _ensure_model_initialized() llamado")
+        logger.info("🚀 _ensure_model_initialized() llamado con LlamaIndex")
         logger.info(f"🔍 _initialized: {self._initialized}")
         logger.info(f"🔍 api_key disponible: {self.api_key is not None}")
         
@@ -155,79 +168,42 @@ class GeminiClient:
             logger.info("✅ Modelo ya inicializado, saltando")
             return
             
+        if not LLAMA_INDEX_AVAILABLE or LlamaGemini is None:
+            logger.error("❌ LlamaIndex Gemini no disponible")
+            self.model = None
+            self._initialized = True
+            return
+            
         if self.api_key:
             try:
-                # Configuración básica para Gemini AI
-                genai.configure(api_key=self.api_key)
-                
-                # 🚀 OPTIMIZACIÓN MÁXIMA: Configuración ultra-rápida para clasificación
-                from google.generativeai.types import HarmCategory, HarmBlockThreshold
-                
-                # 🚀 CONFIGURACIÓN SIMPLE: Sin safety settings explícitos (como versión anterior)
-                # La versión anterior NO tenía safety settings explícitos y funcionaba
-                safety_settings = None
-                
-                generation_config = {
-                    "temperature": 0.8,  # Temperatura moderada como versión anterior
-                    "top_p": 0.9,        # Configuración moderada
-                    "top_k": 20,         # Configuración moderada
-                    "max_output_tokens": 1000,  # Como versión anterior
-                    "candidate_count": 1
-                }
-                
-                print("🚀 DEBUG PRELOAD: Configurando safety settings...")
-                logger.info("✅ Safety settings configurados con BLOCK_NONE para contenido político")
-                print("🚀 DEBUG PRELOAD: Safety settings configurados")
-                logger.info(f"🔍 Safety settings aplicados: {safety_settings}")
-                print(f"🚀 DEBUG PRELOAD: Safety settings = {safety_settings}")
-                
-                # 🚀 OPTIMIZACIÓN CRÍTICA: Usar solo el modelo más rápido cuando ULTRA_FAST_MODE está activo
+                # 🚀 CONFIGURACIÓN: Usar LlamaIndex Gemini como chatbotIA-original
                 import os
                 ultra_fast_mode = os.getenv("ULTRA_FAST_MODE", "false").lower() == "true"
-                is_local_dev = os.getenv("LOCAL_DEVELOPMENT", "false").lower() == "true"
                 
-                logger.info(f"🚀 ULTRA_FAST_MODE detectado: {ultra_fast_mode}")
-                logger.info(f"🚀 LOCAL_DEVELOPMENT detectado: {is_local_dev}")
-                print(f"🚀 DEBUG PRELOAD: ULTRA_FAST_MODE = {ultra_fast_mode}")
-                print(f"🚀 DEBUG PRELOAD: LOCAL_DEVELOPMENT = {is_local_dev}")
+                # Usar gemini-2.5-flash (rápido y moderno) como chatbotIA-original
+                model_name = "gemini-2.5-flash"
                 
-                if ultra_fast_mode:
-                    # Usar el modelo más moderno y rápido disponible en 2025
-                    models_to_try = ['gemini-2.5-flash']  # Modelo más moderno y rápido
-                    logger.info("🚀 ULTRA-RÁPIDO: Usando modelo más moderno gemini-2.5-flash (ULTRA_FAST_MODE activo)")
-                else:
-                    # Probar modelos desde el más moderno hacia el más antiguo
-                    models_to_try = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro']
-                    logger.info("🚀 NORMAL: Usando múltiples modelos modernos (ULTRA_FAST_MODE inactivo)")
+                logger.info(f"🚀 Inicializando LlamaIndex Gemini con modelo: {model_name}")
                 
-                print(f"🚀 DEBUG PRELOAD: Modelos a probar = {models_to_try}")
-                for model_name in models_to_try:
-                    print(f"🚀 DEBUG PRELOAD: Intentando inicializar modelo: {model_name}")
-                    try:
-                        print(f"🚀 DEBUG PRELOAD: Dentro del try para {model_name}")
-                        logger.info(f"🚀 Intentando inicializar modelo: {model_name}")
-                        logger.info(f"🔍 Safety settings a aplicar: {safety_settings}")
-                        logger.info(f"🔍 Generation config a aplicar: {generation_config}")
-                        print(f"🚀 DEBUG PRELOAD: Creando GenerativeModel para {model_name}")
-                        
-                        self.model = genai.GenerativeModel(
-                            model_name,
-                            safety_settings=safety_settings,
-                            generation_config=generation_config
-                        )
-                        print(f"🚀 DEBUG PRELOAD: GenerativeModel creado exitosamente para {model_name}")
-                        logger.info(f"✅ Modelo {model_name} inicializado correctamente en GeminiClient con safety settings")
-                        logger.info(f"🔍 Safety settings aplicados durante inicialización: {safety_settings}")
-                        break
-                    except Exception as model_error:
-                        logger.warning(f"⚠️ Modelo {model_name} no disponible: {str(model_error)}")
-                        import traceback
-                        logger.warning(f"⚠️ Traceback: {traceback.format_exc()}")
-                        if model_name == models_to_try[-1]:  # Si es el último modelo
-                            logger.error(f"❌ Ningún modelo de Gemini está disponible")
-                            self.model = None
+                # Configurar temperatura según modo
+                temperature = 0.1 if ultra_fast_mode else 0.8
+                max_tokens = 256 if ultra_fast_mode else 1000
+                
+                # Inicializar modelo con LlamaIndex (como chatbotIA-original)
+                self.model = LlamaGemini(
+                    model_name=f"models/{model_name}",
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    request_timeout=30.0,  # Timeout de 30 segundos como chatbotIA-original
+                    api_key=self.api_key
+                )
+                
+                print(f"🚀 DEBUG PRELOAD: LlamaIndex Gemini inicializado exitosamente")
+                logger.info(f"✅ Modelo LlamaIndex Gemini {model_name} inicializado correctamente")
+                logger.info(f"🔍 Configuración: temp={temperature}, max_tokens={max_tokens}")
+                
             except Exception as e:
-                logger.error(f"❌ Error inicializando modelo Gemini: {str(e)}")
+                logger.error(f"❌ Error inicializando LlamaIndex Gemini: {str(e)}")
                 self.model = None
         else:
             logger.warning("⚠️ GEMINI_API_KEY no configurado")
@@ -389,30 +365,19 @@ class GeminiClient:
     
     def _get_or_create_model(self, config: Dict[str, Any]):
         """
-        Obtiene o crea un modelo con configuración específica (Fase 2)
+        NOTA: Este método ya no se usa con LlamaIndex.
+        Se mantiene para compatibilidad pero siempre retorna None.
         
-        Usa cache para evitar recrear modelos con la misma configuración.
-        
-        Args:
-            config: Diccionario con configuración del modelo
-            
-        Returns:
-            Instancia del modelo configurado
+        Con LlamaIndex, usamos solo un modelo principal pre-cargado.
         """
-        # Crear hash único para esta configuración
-        config_items = sorted(config.items())
-        config_hash = str(config_items)
-        
-        # Si ya existe en cache, retornarlo (modelo + config)
-        if config_hash in self.models_cache:
-            logger.debug(f"📦 Usando modelo cacheado")
-            return self.models_cache[config_hash]
-        
-        # Asegurar que tenemos API key configurada
-        if not self.api_key:
-            logger.warning("⚠️ GEMINI_API_KEY no configurado")
-            return None
-        
+        logger.debug("⚠️ _get_or_create_model llamado pero no usado con LlamaIndex")
+        return None
+    
+    def _get_or_create_model_old(self, config: Dict[str, Any]):
+        """
+        MÉTODO DEPRECADO: Usado solo con google.generativeai.
+        Ahora usamos LlamaIndex en su lugar.
+        """
         try:
             # Configurar Gemini AI
             genai.configure(api_key=self.api_key)
@@ -445,8 +410,14 @@ class GeminiClient:
                 }
                 logger.info("🚀 CONFIGURACIÓN NORMAL ACTIVADA (ULTRA_FAST_MODE inactivo)")
             
-            # 🚀 CONFIGURACIÓN SIMPLE: Sin safety settings explícitos (como versión anterior)
-            safety_settings = None
+            # 🚀 CONFIGURACIÓN: Desactivar safety filters explícitamente
+            from google.generativeai.types import HarmCategory, HarmBlockThreshold
+            safety_settings = {
+                HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+            }
             logger.info("🚀 FILTROS DE SEGURIDAD DESACTIVADOS para contenido político")
             
             # Agregar response_mime_type si está presente (para JSON)
@@ -457,10 +428,6 @@ class GeminiClient:
             # Crear modelo SIN generation_config (siguiendo recomendación de comunidad)
             # Los configs se pasarán directamente en generate_content()
             model_name = config.get("model_name", "gemini-2.5-flash")
-            
-            # 🚀 CONFIGURACIÓN SIMPLE: Sin safety settings explícitos (como versión anterior)
-            safety_settings = None
-            logger.info("🚀 FILTROS DE SEGURIDAD DESACTIVADOS para contenido político")
             
             # Crear modelo con safety settings, probando desde el más moderno
             models_to_try = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro']
@@ -536,50 +503,38 @@ class GeminiClient:
         # Aplicar rate limiting
         self._check_rate_limit()
         
-        # Intentar con configuración personalizada (Fase 2)
-        if use_custom_config:
-            try:
-                from chatbot_ai_service.config.model_configs import get_config_for_task
-                
-                config = get_config_for_task(task_type)
-                logger.debug(f"📋 Config obtenida para {task_type}: model={config.get('model_name')}, temp={config.get('temperature')}")
-                model_data = self._get_or_create_model(config)
-                
-                if model_data:
-                    logger.debug(f"🚀 Usando modelo configurado para task_type='{task_type}'")
-                    # Extraer modelo y config del dict
-                    model = model_data["model"]
-                    generation_config = model_data["generation_config"]
-                    # Pasar config directamente a generate_content (recomendación de comunidad)
-                    # 🚀 CRÍTICO: Aplicar safety settings para permitir contenido político
-                    from google.generativeai.types import HarmCategory, HarmBlockThreshold
-                    # 🚀 CONFIGURACIÓN SIMPLE: Sin safety settings explícitos (como versión anterior)
-                    safety_settings = None
-                    print(f"🚀 DEBUG SAFETY: Aplicando safety_settings: {safety_settings}")
-                    print(f"🚀 DEBUG PROMPT: Prompt enviado: {prompt[:200]}...")  # Mostrar primeros 200 caracteres
-                    response = model.generate_content(prompt, generation_config=generation_config, safety_settings=safety_settings)
-                    print(f"🚀 DEBUG SAFETY: Response finish_reason: {response.candidates[0].finish_reason if response.candidates else 'No candidates'}")
-                    return self._extract_text_from_response(response)
-                else:
-                    logger.debug("⚠️ No se pudo crear modelo con config personalizada, usando modelo por defecto")
-            except Exception as e:
-                logger.warning(f"⚠️ Config personalizada falló, usando modelo por defecto: {str(e)}")
-        # Fallback 1: Modelo por defecto (comportamiento original)
+        # Usar LlamaIndex como comportamiento principal (como chatbotIA-original)
         try:
             # Asegurar que el modelo esté inicializado
             self._ensure_model_initialized()
             
             if self.model:
-                logger.debug("🚀 Usando modelo por defecto (gRPC)")
-                # 🚀 CONFIGURACIÓN SIMPLE: Sin safety settings explícitos (como versión anterior)
-                safety_settings = None
-                print(f"🚀 DEBUG SAFETY FALLBACK: Aplicando safety_settings: {safety_settings}")
-                print(f"🚀 DEBUG PROMPT FALLBACK: Prompt enviado: {prompt[:200]}...")  # Mostrar primeros 200 caracteres
-                response = self.model.generate_content(prompt, safety_settings=safety_settings)
-                print(f"🚀 DEBUG SAFETY FALLBACK: Response finish_reason: {response.candidates[0].finish_reason if response.candidates else 'No candidates'}")
-                return self._extract_text_from_response(response)
+                logger.debug("🚀 Usando modelo LlamaIndex Gemini")
+                print(f"🚀 DEBUG PROMPT: Prompt enviado: {prompt[:200]}...")
+                
+                # LlamaIndex model.complete() retorna la respuesta directa
+                response = self.model.complete(prompt)
+                
+                print(f"🚀 DEBUG RESPONSE: Respuesta recibida de LlamaIndex")
+                
+                # La respuesta de LlamaIndex es un objeto con atributo .text
+                response_text = None
+                if hasattr(response, 'text'):
+                    response_text = response.text
+                elif hasattr(response, 'response'):
+                    response_text = response.response
+                else:
+                    response_text = str(response)
+                
+                # 🔒 GARANTIZAR: No exceder 1000 caracteres bajo ninguna circunstancia
+                if response_text and len(response_text) > 1000:
+                    last_space = response_text[:1000].rfind(' ')
+                    response_text = response_text[:last_space] if last_space > 900 else response_text[:1000]
+                
+                return response_text
+                    
         except Exception as e:
-            logger.warning(f"⚠️ gRPC falló, usando REST API: {str(e)}")
+            logger.warning(f"⚠️ LlamaIndex falló: {str(e)}")
         
         # Fallback 2: REST API como último recurso
         logger.debug("🔄 Usando REST API como fallback")

@@ -28,6 +28,7 @@ async def process_chat_message(tenant_id: str, request: Dict[str, Any]) -> Dict[
         
         # Extraer datos del request
         query = request.get("query", "").strip()
+        conversation_history = request.get("conversation_history", "")
         user_context = request.get("user_context", {})
         tenant_config = request.get("tenant_config", {})
         session_id = request.get("session_id")
@@ -64,8 +65,19 @@ async def process_chat_message(tenant_id: str, request: Dict[str, Any]) -> Dict[
         
         try:
             logger.info(f"🚀 [CONTROLLER] Llamando a process_chat_message_optimized...")
+            # 🔧 MEJORA: Mejorar query con historial de conversación si existe
+            enhanced_query = query
+            if conversation_history:
+                logger.info(f"🔧 [CONTROLLER] conversation_history presente, longitud: {len(conversation_history)}")
+                logger.info(f"🔧 [CONTROLLER] Primeros 200 caracteres de historial: '{conversation_history[:200]}...'")
+                enhanced_query = f"Historial de conversación:\n{conversation_history}\n\nPregunta actual del usuario: {query}"
+                logger.info(f"🔧 [CONTROLLER] enhanced_query construido, longitud: {len(enhanced_query)}")
+                logger.info(f"🔧 [CONTROLLER] Primeros 200 caracteres de enhanced_query: '{enhanced_query[:200]}...'")
+            else:
+                logger.info(f"🔧 [CONTROLLER] No hay conversation_history, usando query original")
+            
             ai_response = await optimized_ai_service.process_chat_message_optimized(
-                tenant_id, query, user_context, session_id, tenant_config
+                tenant_id, enhanced_query, user_context, session_id, tenant_config
             )
             logger.info(f"✅ [CONTROLLER] OptimizedAIService completado exitosamente")
         except Exception as e:

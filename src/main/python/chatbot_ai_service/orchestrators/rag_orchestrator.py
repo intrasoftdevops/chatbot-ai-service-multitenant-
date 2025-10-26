@@ -233,18 +233,39 @@ class RAGOrchestrator:
             Prompt formateado con guardrails y personalidad
         """
         # Extraer información de branding del tenant
-        contact_name = "el candidato"
+        # Primero intentar obtener de branding_config (si existe)
+        contact_name = None
         candidate_name = "Asistente"
         
         if tenant_config:
+            # Intentar obtener de branding_config primero (formato común)
+            branding_config = tenant_config.get('branding_config', {})
+            if isinstance(branding_config, dict):
+                contact_name = branding_config.get('contactName') or branding_config.get('contact_name')
+            
+            # Si no se encontró, intentar desde branding directo
+            if not contact_name:
+                branding = tenant_config.get('branding', {})
+                if isinstance(branding, dict):
+                    contact_name = branding.get('contact_name') or branding.get('contactName')
+            
+            # Si aún no se encontró, buscar en nivel raíz
+            if not contact_name:
+                contact_name = tenant_config.get('contact_name') or tenant_config.get('contactName')
+            
+            # Si branding existe, obtener candidate_name
             branding = tenant_config.get('branding', {})
             if isinstance(branding, dict):
-                contact_name = branding.get('contact_name', tenant_config.get('contact_name', 'el candidato'))
-                candidate_name = branding.get('candidate_name', tenant_config.get('candidate_name', 'Asistente'))
-            else:
-                # Si branding es un string o None, usar valores por defecto
-                contact_name = tenant_config.get('contact_name', 'el candidato')
-                candidate_name = tenant_config.get('candidate_name', 'Asistente')
+                candidate_name = branding.get('candidate_name', candidate_name)
+        
+        # Si NO se encontró ningún contact_name, usar valor por defecto
+        if not contact_name:
+            contact_name = "el candidato"
+        
+        # Log para debug
+        logger.info(f"👤 [RAG] contact_name extraído: '{contact_name}'")
+        if contact_name == "el candidato":
+            logger.warning(f"⚠️ [RAG] Usando valor por defecto 'el candidato'. tenant_config keys: {list(tenant_config.keys()) if tenant_config else 'None'}")
         
         # 🔧 FIX: Incluir contexto de sesión si está disponible
         session_context = ""
@@ -326,22 +347,35 @@ Asistente virtual {candidate_name} de la campaña política de {contact_name}.
         Returns:
             Respuesta generada
         """
+        logger.info(f"🔍 [GENERATE_RESPONSE] Iniciando generación de respuesta...")
+        logger.info(f"🔍 [GENERATE_RESPONSE] ¿gemini_client disponible? {self.gemini_client is not None}")
+        logger.info(f"🔍 [GENERATE_RESPONSE] Longitud del prompt: {len(prompt)} caracteres")
+        logger.info(f"🔍 [GENERATE_RESPONSE] Primeros 500 chars del prompt: {prompt[:500]}")
+        
         if not self.gemini_client:
-            logger.error("GeminiClient no disponible")
+            logger.error("❌ [GENERATE_RESPONSE] GeminiClient no disponible")
             return "Lo siento, el servicio de IA no está disponible en este momento."
         
         try:
+            logger.info(f"🔍 [GENERATE_RESPONSE] Llamando a gemini_client.generate_content...")
             response = await self.gemini_client.generate_content(
                 prompt=prompt,
                 task_type=task_type,
                 use_custom_config=True
             )
             
-            logger.info(f"✅ Respuesta generada ({len(response)} caracteres)")
-            return response
+            logger.info(f"✅ [GENERATE_RESPONSE] Respuesta generada ({len(response) if response else 0} caracteres)")
+            if response:
+                logger.info(f"✅ [GENERATE_RESPONSE] Primeros 200 chars: {response[:200]}")
+            else:
+                logger.warning(f"⚠️ [GENERATE_RESPONSE] Respuesta vacía o None")
+            
+            return response if response else "No pude generar una respuesta. Por favor intenta de nuevo."
             
         except Exception as e:
-            logger.error(f"Error generando respuesta: {str(e)}")
+            logger.error(f"❌ [GENERATE_RESPONSE] Error generando respuesta: {str(e)}")
+            import traceback
+            logger.error(f"❌ [GENERATE_RESPONSE] Traceback: {traceback.format_exc()}")
             return f"Lo siento, hubo un error al procesar tu consulta: {str(e)}"
     
     async def process_query(
@@ -418,7 +452,11 @@ Asistente virtual {candidate_name} de la campaña política de {contact_name}.
         
         # 5. Generate Response
         logger.info("5️⃣ Generando respuesta...")
+        logger.info(f"🔍 [PROCESS_QUERY] Prompt length: {len(prompt)} chars")
+        logger.info(f"🔍 [PROCESS_QUERY] Prompt first 500 chars: {prompt[:500]}")
         response = await self._generate_response(prompt)
+        logger.info(f"🔍 [PROCESS_QUERY] Response received: {len(response) if response else 0} chars")
+        logger.info(f"🔍 [PROCESS_QUERY] Response content: {response[:200] if response else 'None'}")
         
         # 🛡️ FASE 5: Verificación con Guardrails
         guardrail_result = None
@@ -559,10 +597,19 @@ Asistente virtual {candidate_name} de la campaña política de {contact_name}.
             except Exception as e:
                 logger.warning(f"⚠️ Error obteniendo contexto de sesión: {str(e)}")
         
+        logger.info(f"🔍 [RAG_SIMPLE] Procesando query: '{query[:100]}...'")
         rag_response = await self.process_query(query, tenant_id, user_context, tenant_config=tenant_config)
         
+        logger.info(f"🔍 [RAG_SIMPLE] Respuesta recibida: {len(rag_response.response) if rag_response.response else 0} caracteres")
+        if rag_response.response:
+            logger.info(f"🔍 [RAG_SIMPLE] Primeros 200 chars: {rag_response.response[:200]}")
+        else:
+            logger.warning(f"🔍 [RAG_SIMPLE] Respuesta vacía o None")
+        
         if self.enable_citations:
+            logger.info(f"🔍 [RAG_SIMPLE] Devolviendo respuesta con citas")
             return rag_response.response_with_citations
         else:
+            logger.info(f"🔍 [RAG_SIMPLE] Devolviendo respuesta sin citas")
             return rag_response.response
 

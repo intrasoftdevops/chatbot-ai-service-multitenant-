@@ -22,7 +22,6 @@ from chatbot_ai_service.controllers.preprocessing_controller import router as pr
 import pathlib
 project_root = pathlib.Path(__file__).parent.parent.parent.parent.parent
 env_path = project_root / ".env"
-print(f"🔍 Buscando archivo .env en: {env_path}")
 print(f"📁 Archivo .env existe: {env_path.exists()}")
 load_dotenv(env_path)
 
@@ -45,7 +44,7 @@ logging.getLogger(__name__).info(f"Logging configurado en nivel: {log_level_str}
 # Verificar que la API key se cargó correctamente
 api_key = os.getenv("GEMINI_API_KEY")
 if api_key:
-    print(f"✅ GEMINI_API_KEY cargada correctamente: {api_key[:10]}...")
+    print(f"✅ GEMINI_API_KEY cargada correctamente")
 else:
     print("❌ GEMINI_API_KEY no encontrada")
 

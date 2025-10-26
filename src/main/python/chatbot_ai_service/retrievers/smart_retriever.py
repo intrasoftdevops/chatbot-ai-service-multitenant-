@@ -235,22 +235,21 @@ class SmartRetriever:
         """
         Extrae consultas mejoradas de una consulta original
         
-        Para "que es lo de aguas vivas?" extrae:
-        - "aguas vivas" (frase clave)
-        - "aguas" (palabra individual)
-        - "vivas" (palabra individual)
-        - "que es aguas vivas" (versión simplificada)
+        Ejemplo: Para "que es lo de las propuestas?" extrae:
+        - "las propuestas" (frase clave)
+        - "propuestas" (palabra individual)
+        - "que es las propuestas" (versión simplificada)
         """
         enhanced_queries = [query]  # Incluir consulta original
         
         # Patrones comunes de preguntas en español
         patterns = [
-            r'que es lo de (.+)',  # "que es lo de aguas vivas?"
-            r'que es (.+)',        # "que es aguas vivas?"
-            r'qué es (.+)',        # "qué es aguas vivas?"
-            r'habla sobre (.+)',   # "habla sobre aguas vivas"
-            r'información sobre (.+)',  # "información sobre aguas vivas"
-            r'cuéntame sobre (.+)',     # "cuéntame sobre aguas vivas"
+            r'que es lo de (.+)',  # "que es lo de las propuestas?"
+            r'que es (.+)',        # "que es las propuestas?"
+            r'qué es (.+)',        # "qué es las propuestas?"
+            r'habla sobre (.+)',   # "habla sobre las propuestas"
+            r'información sobre (.+)',  # "información sobre las propuestas"
+            r'cuéntame sobre (.+)',     # "cuéntame sobre las propuestas"
         ]
         
         for pattern in patterns:

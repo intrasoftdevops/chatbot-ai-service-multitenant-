@@ -267,9 +267,7 @@ class TenantMemoryService:
             "cita": f"Puedes agendar una cita para conocer más sobre {contact_name} y sus propuestas.",
             "referidos": "El sistema de referidos te permite invitar amigos y familiares a conocer la campaña. Cada referido registrado suma puntos.",
             "hola": f"¡Hola! Soy el asistente virtual de la campaña de {contact_name}. ¿En qué puedo ayudarte?",
-            "gracias": f"¡De nada! Estoy aquí para ayudarte con cualquier pregunta sobre {contact_name} y la campaña.",
-            "aguas vivas": f"Las Aguas Vivas es una propuesta específica de {contact_name} enfocada en la gestión del agua y recursos hídricos. ¿Te interesa conocer más detalles?",
-            "agua": f"El tema del agua es una prioridad para {contact_name}. ¿Te interesa conocer las propuestas específicas sobre gestión hídrica?"
+            "gracias": f"¡De nada! Estoy aquí para ayudarte con cualquier pregunta sobre {contact_name} y la campaña."
         })
         
         return responses
@@ -285,7 +283,7 @@ class TenantMemoryService:
         # Patrones de intención precomputados
         intent_patterns = {
             "saludo_apoyo": ["hola", "hi", "hello", "hey", "buenos días", "buenas tardes", "buenas noches", "qué tal", "que tal", "quien eres", "quien es"],
-            "propuestas_campaña": ["propuestas", "propuesta", "plan", "planes", "proyecto", "proyectos", "agua", "aguas vivas", "educación", "salud", "trabajo"],
+            "propuestas_campaña": ["propuestas", "propuesta", "plan", "planes", "proyecto", "proyectos", "educación", "salud", "trabajo"],
             "voluntariado": ["voluntario", "voluntarios", "ayudar", "participar", "colaborar", "trabajar", "unirme"],
             "cita_campaña": ["cita", "citas", "agendar", "reunión", "reuniones", "conocer", "hablar"],
             "referidos": ["referido", "referidos", "invitar", "invitar amigos", "compartir", "recomendar"],

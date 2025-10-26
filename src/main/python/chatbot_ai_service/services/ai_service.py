@@ -38,10 +38,7 @@ class AIService:
         self._initialized = False
         # 🔧 FIX: Inicializar api_key en el constructor para evitar AttributeError
         self.api_key = os.getenv("GEMINI_API_KEY")
-        if self.api_key:
-            logger.info(f"[OK] GEMINI_API_KEY cargada en constructor")
-        else:
-            logger.warning("⚠️ GEMINI_API_KEY no configurado en constructor")
+        
         
         # 🔧 FIX: Inicializar atributos faltantes
         self.use_gemini_client = True
@@ -52,6 +49,10 @@ class AIService:
         self.strict_guardrails = False
         self._common_responses = {}
         self._response_cache = {}
+        
+        # 🔧 FIX: Inicializar _intent_cache y _intent_cache_max_size
+        self._intent_cache = {}
+        self._intent_cache_max_size = 1000
     
     def _get_safety_settings(self):
         """
@@ -125,11 +126,7 @@ class AIService:
             logger.warning("POLITICAL_REFERRALS_SERVICE_URL no configurado - funcionalidad de bloqueo limitada")
         
         # 🔧 OPTIMIZACIÓN: Cache local para respuestas comunes
-        self._response_cache = {}
-        
-        # 🚀 OPTIMIZACIÓN: Caché de intenciones para respuestas ultra-rápidas
-        self._intent_cache = {}
-        self._intent_cache_max_size = 1000
+        # (Ya inicializado arriba, no duplicar)
         
         # 🚀 OPTIMIZACIÓN: Respuestas precomputadas genéricas para casos comunes
         self._precomputed_initial_messages = {
@@ -298,8 +295,10 @@ class AIService:
             
             # 🚀 DEBUG: Verificar que el modelo principal esté configurado correctamente
             if self.gemini_client and self.gemini_client.model:
-                logger.info(f"🔍 Modelo principal configurado: {self.gemini_client.model.model_name}")
-                logger.info("🔍 Safety settings aplicados durante inicialización del modelo")
+                # LlamaIndex Gemini no tiene model_name, usa __class__.__name__ en su lugar
+                model_name = getattr(self.gemini_client.model, 'model_name', 'LlamaIndex-Gemini')
+                logger.info(f"🔍 Modelo principal configurado: {model_name}")
+                logger.info("🔍 LlamaIndex Gemini inicializado correctamente")
             else:
                 logger.warning("⚠️ Modelo principal no está configurado correctamente")
             
@@ -595,8 +594,9 @@ RESPUESTA:"""
                 
                 # 🚀 DEBUG: Verificar configuración del modelo después de reinicializar
                 if self.gemini_client and self.gemini_client.model:
-                    print(f"🔍 Modelo reinicializado: {self.gemini_client.model.model_name}")
-                    print("🔍 Safety settings deberían estar aplicados")
+                    model_name = getattr(self.gemini_client.model, 'model_name', 'LlamaIndex-Gemini')
+                    print(f"🔍 Modelo reinicializado: {model_name}")
+                    print("🔍 LlamaIndex Gemini reinicializado correctamente")
                 else:
                     print("⚠️ Modelo no disponible después de reinicializar")
             
@@ -605,19 +605,43 @@ RESPUESTA:"""
                 print("🚀 DEBUG ULTRA-FAST: Usando sistema de documentos")
                 from chatbot_ai_service.services.document_context_service import document_context_service
                 
-                # Obtener contenido de documentos
-                document_content = await document_context_service.get_relevant_context(tenant_id, query, max_results=1)
+                # Extraer solo la pregunta actual si viene en formato de historial
+                print(f"🔍 DEBUG: Query recibida: '{query[:200]}...'")
+                current_query = query
+                if "Pregunta actual del usuario:" in query:
+                    # Extraer solo la pregunta actual para la búsqueda
+                    parts = query.split("Pregunta actual del usuario:")
+                    current_query = parts[-1].strip()
+                    print(f"🔍 DEBUG: Extraída pregunta actual: '{current_query}'")
+                else:
+                    print(f"🔍 DEBUG: No hay historial, usando query completa")
+                
+                # Mejorar la query para mejor recuperación de documentos
+                enhanced_query = self._enhance_query_for_document_search(current_query)
+                print(f"🔍 DEBUG: Query mejorada para búsqueda: '{enhanced_query}'")
+                
+                # Obtener contenido de documentos (usar solo la pregunta actual)
+                print(f"🔍 DEBUG: ANTES de llamar a get_relevant_context con tenant_id={tenant_id}")
+                document_content = await document_context_service.get_relevant_context(tenant_id, enhanced_query, max_results=1)
+                print(f"🔍 DEBUG: DESPUÉS de llamar a get_relevant_context")
                 print(f"🔍 DEBUG: document_content obtenido: {len(document_content) if document_content else 0} caracteres")
+                if document_content:
+                    print(f"🔍 DEBUG: Primera línea de document_content: {document_content.split(chr(10))[0][:100]}")
                 
                 if document_content:
                     # Usar respuesta inmediata basada en documentos
+                    # La IA se encarga de entender el contexto y responder apropiadamente
                     contact_name = "el candidato"  # Valor por defecto
-                    response = self._generate_immediate_document_response(query, document_content, contact_name)
+                    print(f"🤖 ANTES de llamar a _generate_immediate_document_response")
+                    print(f"🤖 query: '{query[:100]}...'")
+                    print(f"🤖 document_content: {len(document_content)} caracteres")
+                    response = await self._generate_immediate_document_response(query, document_content, contact_name)
+                    print(f"🤖 DESPUÉS de llamar a _generate_immediate_document_response")
                     print(f"🤖 RESPUESTA INMEDIATA GENERADA: {response[:200]}...")
                     return response
                 else:
                     print("🔍 DEBUG: No hay documentos disponibles, usando fallback")
-                    return "Sobre este tema, tengo información específica que te puede interesar. Te puedo ayudar a conectarte con nuestro equipo para obtener más detalles."
+                    return "No tengo información suficiente sobre ese tema. Puedo ayudarte con otros temas de la campaña."
             
             # 🚀 FALLBACK: Usar Gemini si no hay documentos o no es ultra-fast mode
             if self.use_gemini_client and self.gemini_client:
@@ -626,6 +650,10 @@ RESPUESTA:"""
                     print("🚀 ULTRA-FAST MODE: Generando sin timeout")
                     try:
                         response = await self.gemini_client.generate_content(prompt)
+                        # 🔒 GARANTIZAR: No exceder 1000 caracteres
+                        if response and len(response) > 1000:
+                            last_space = response[:1000].rfind(' ')
+                            response = response[:last_space] if last_space > 900 else response[:1000]
                         print(f"🚀 ULTRA-FAST MODE: Respuesta generada: {response[:100]}...")
                         return response
                     except Exception as e:
@@ -640,6 +668,10 @@ RESPUESTA:"""
                             self.gemini_client.generate_content(prompt),
                             timeout=5.0  # Timeout normal de 5 segundos
                         )
+                        # 🔒 GARANTIZAR: No exceder 1000 caracteres
+                        if response and len(response) > 1000:
+                            last_space = response[:1000].rfind(' ')
+                            response = response[:last_space] if last_space > 900 else response[:1000]
                         return response
                     except asyncio.TimeoutError:
                         logger.warning(f"⚠️ Timeout en generación normal para prompt: {prompt[:50]}...")
@@ -652,9 +684,9 @@ RESPUESTA:"""
             logger.error(f"Error en generación ultra-rápida: {e}")
             return "saludo_apoyo"  # Fallback seguro
 
-    def _generate_immediate_document_response(self, query: str, document_content: str, contact_name: str) -> str:
+    async def _generate_immediate_document_response(self, query: str, document_content: str, contact_name: str) -> str:
         """
-        Genera respuesta inmediata basada en documentos sin usar Gemini
+        Genera respuesta inmediata basada en documentos usando IA
         Respeta la conciencia individual de cada tenant
         """
         try:
@@ -665,33 +697,88 @@ RESPUESTA:"""
             print(f"🔍 DEBUG IMMEDIATE: query_lower = '{query_lower}'")
             print(f"🔍 DEBUG IMMEDIATE: content_lower preview = '{content_lower[:200]}...'")
             
-            # Respuestas predefinidas basadas en palabras clave
-            if "aguas vivas" in query_lower:
-                print("🔍 DEBUG IMMEDIATE: Detectado 'aguas vivas' en query")
-                if "cartel de los lotes" in content_lower:
-                    return f"Estimado/a ciudadano/a, sobre Aguas Vivas, la información disponible indica que es un caso complejo vinculado al 'Cartel de los Lotes'. Este asunto señala irregularidades urbanísticas y tuvo una conciliación que fue anulada por el Consejo de Estado. Además, implicó la terminación de un contrato con compulsa de copias. Es un tema que toca directamente el Plan de Desarrollo, el POT y normativas distritales, exigiendo total claridad y la aplicación de la justicia. Como candidato, mi compromiso es garantizar esa transparencia y el cumplimiento estricto de la ley en casos como este."
+            # Limpiar el contenido para la IA (remover nombres de archivos y caracteres especiales)
+            import re
+            clean_content = document_content.replace('*', '').replace('\n', ' ')
+            clean_content = re.sub(r'\s*\([^)]*\.pdf\)\s*', ' ', clean_content, flags=re.IGNORECASE)
+            clean_content = re.sub(r'\.pdf', ' ', clean_content, flags=re.IGNORECASE)
             
-            elif "responsable" in query_lower or "quien" in query_lower:
-                if "gea" in content_lower and "epm" in content_lower:
-                    return f"Comprendo perfectamente su pregunta y la seriedad del asunto. Según la información específica que se nos ha proporcionado, los responsables identificados son claros: El GEA, por esconder informes clave. El Gobierno Corporativo de EPM, con nombres como Manuel Santiago Mejía, Andrés Bernal y Carlos Raúl Yepes, por favorecer intereses particulares y evitar demandas. También, Fajardo y Juan Felipe Gaviria por Orbitel, y Bruce Mac Master por su valoración. Todo ello, como se indica, forma una red de intereses ocultos que perjudicó a Medellín. Mi compromiso es con la transparencia y la verdad para nuestra ciudad."
+            # Crear prompt para que la IA genere respuesta corta y natural
+            print(f"🔍 DEBUG: Creando summary_prompt con contact_name={contact_name}...")
+            try:
+                summary_prompt = f"""
+Responde la siguiente pregunta de forma breve y concisa (máximo 800 caracteres):
+
+Pregunta: {query}
+
+Información disponible:
+{clean_content[:2000]}
+
+INSTRUCCIONES CRÍTICAS: 
+- NO menciones nombres de archivos o documentos
+- NO digas "según el documento" o "en el documento"
+- NO uses la frase genérica "el candidato" bajo ninguna circunstancia
+- Si en la información hay nombres específicos (personas, entidades), ÚSALOS directamente
+- Si la pregunta menciona "el responsable", "el candidato" o similares, busca el NOMBRE ESPECÍFICO en la información y úsalo
+- Responde como si fueras un experto en el tema que conoce la información de primera mano
+- Sé específico: usa nombres reales, fechas, lugares exactos
+- Máximo 800 caracteres
+- Responde la pregunta directamente y con precisión
+
+Ejemplo de lo que NO debes hacer:
+❌ "El candidato propuso..."
+✅ "Federico Gutiérrez propuso..." (si ese es el nombre en la información)
+
+Respuesta:"""
+                print(f"🔍 DEBUG: summary_prompt creado exitosamente: {len(summary_prompt)} caracteres")
+            except Exception as prompt_error:
+                print(f"🔍 DEBUG: ERROR creando summary_prompt: {prompt_error}")
+                import traceback
+                traceback.print_exc()
+                raise
             
-            elif "hidroituango" in query_lower:
-                if "hidroituango" in content_lower:
-                    return f"Sobre Hidroituango, la información disponible indica que hubo ocultación de información vital por parte del GEA, incluyendo a Manuel Santiago Mejía y Andrés Bernal, miembros de la junta de EPM. El Gobierno Corporativo de EPM no actuó adecuadamente. Mi compromiso es garantizar transparencia total en estos asuntos críticos para Medellín."
+            # Usar IA disponible para generar respuesta
+            print(f"🔍 DEBUG: ¿use_gemini_client? {self.use_gemini_client}")
+            print(f"🔍 DEBUG: ¿gemini_client disponible? {self.gemini_client is not None}")
+            if self.use_gemini_client and self.gemini_client:
+                try:
+                    print(f"🤖 Llamando a generate_content con prompt de {len(summary_prompt)} caracteres")
+                    ai_response = await self.gemini_client.generate_content(summary_prompt)
+                    print(f"🤖 Respuesta recibida de IA: {len(ai_response) if ai_response else 0} caracteres")
+                    if ai_response:
+                        print(f"🤖 Pre-tratamiento respuesta: {ai_response[:500]}")
+                        # 🔒 GARANTIZAR: No exceder 1000 caracteres bajo ninguna circunstancia
+                        if len(ai_response) > 1000:
+                            # Truncar de forma inteligente en el último espacio antes de 1000
+                            last_space = ai_response[:1000].rfind(' ')
+                            if last_space > 900:
+                                ai_response = ai_response[:last_space]
+                            else:
+                                ai_response = ai_response[:1000]
+                        print(f"🤖 Respuesta final después de truncamiento: {ai_response}")
+                        return ai_response
+                except Exception as e:
+                    logger.warning(f"Error generando respuesta con IA: {e}")
             
-            # Respuesta genérica basada en el contenido
-            if len(document_content) > 100:
-                # Tomar las primeras 200 palabras del documento como respuesta
-                words = document_content.split()[:200]
-                response_text = " ".join(words)
-                return f"Estimado/a ciudadano/a, sobre su consulta, la información disponible indica: {response_text}. Mi compromiso es con la transparencia y la verdad en todos estos asuntos."
+            # Fallback: Si falló la IA, intentar generar respuesta básica con IA una vez más
+            if self.use_gemini_client and self.gemini_client:
+                try:
+                    simple_prompt = f"Responde brevemente a: {query}. Máximo 200 caracteres."
+                    ai_response = await self.gemini_client.generate_content(simple_prompt)
+                    if ai_response and len(ai_response) > 50:
+                        if len(ai_response) > 1000:
+                            last_space = ai_response[:1000].rfind(' ')
+                            ai_response = ai_response[:last_space] if last_space > 900 else ai_response[:1000]
+                        return ai_response
+                except Exception as e2:
+                    logger.warning(f"Error en fallback de IA: {e2}")
             
-            # Fallback final
-            return f"Sobre este tema, {contact_name} tiene información específica que te puede interesar. Te puedo ayudar a conectarte con nuestro equipo para obtener más detalles."
+            # Último fallback: mensaje genérico muy corto
+            return "No tengo información suficiente sobre ese tema. Puedo ayudarte con otros temas de la campaña."
             
         except Exception as e:
             logger.error(f"Error generando respuesta inmediata: {e}")
-            return f"Sobre este tema, {contact_name} tiene información específica que te puede interesar. Te puedo ayudar a conectarte con nuestro equipo para obtener más detalles."
+            return "No tengo información suficiente sobre ese tema. Puedo ayudarte con otros temas de la campaña."
 
     async def _generate_content_with_documents(self, prompt: str, max_tokens: int = 200) -> str:
         """
@@ -703,6 +790,10 @@ RESPUESTA:"""
                 # 🚀 OPTIMIZACIÓN: Sin timeout para permitir procesamiento completo
                 try:
                     response = await self.gemini_client.generate_content(prompt)
+                    # 🔒 GARANTIZAR: No exceder 1000 caracteres
+                    if response and len(response) > 1000:
+                        last_space = response[:1000].rfind(' ')
+                        response = response[:last_space] if last_space > 900 else response[:1000]
                     return response
                 except Exception as e:
                     logger.warning(f"⚠️ Error en generación con documentos: {e}")
@@ -723,6 +814,10 @@ RESPUESTA:"""
             if self.use_gemini_client and self.gemini_client:
                 # Usar configuración optimizada (ya pre-cargado al startup)
                 response = await self.gemini_client.generate_content(prompt)
+                # 🔒 GARANTIZAR: No exceder 1000 caracteres
+                if response and len(response) > 1000:
+                    last_space = response[:1000].rfind(' ')
+                    response = response[:last_space] if last_space > 900 else response[:1000]
                 return response
             else:
                 # Fallback al método original
@@ -769,6 +864,11 @@ RESPUESTA:"""
                     task_type=task_type,
                     use_custom_config=use_custom_config
                 )
+                
+                # 🔒 GARANTIZAR: No exceder 1000 caracteres
+                if response and len(response) > 1000:
+                    last_space = response[:1000].rfind(' ')
+                    response = response[:last_space] if last_space > 900 else response[:1000]
                 
                 # 🔧 OPTIMIZACIÓN: Guardar en cache
                 self._cache_response(cache_key, response)
@@ -850,13 +950,34 @@ RESPUESTA:"""
             logger.info(f"🔍 DEBUG: Iniciando process_chat_message - query: '{query}', tenant_id: {tenant_id}")
             
             # 🚀 NUEVO: Usar directamente el sistema de documentos que funciona
+            logger.info(f"🔍 DEBUG: ¿Entrando en ultra_fast_mode? {ultra_fast_mode}")
             if ultra_fast_mode:
                 logger.info(f"🚀 ULTRA-FAST MODE: Usando sistema de documentos directo")
                 from chatbot_ai_service.services.document_context_service import document_context_service
                 
-                # Obtener contenido de documentos
-                document_content = await document_context_service.get_relevant_context(tenant_id, query, max_results=1)
+                # Extraer solo la pregunta actual si viene en formato de historial
+                logger.info(f"🔍 DEBUG: Query recibida en process_chat_message: '{query[:200]}...'")
+                logger.info(f"🔍 DEBUG: Longitud total del query: {len(query)}")
+                logger.info(f"🔍 DEBUG: ¿Contiene 'Pregunta actual del usuario:'? {('Pregunta actual del usuario:' in query)}")
+                current_query = query
+                if "Pregunta actual del usuario:" in query:
+                    # Extraer solo la pregunta actual para la búsqueda
+                    parts = query.split("Pregunta actual del usuario:")
+                    current_query = parts[-1].strip()
+                    logger.info(f"🔍 DEBUG: Extraída pregunta actual: '{current_query}'")
+                    logger.info(f"🔍 DEBUG: Longitud de current_query: {len(current_query)}")
+                else:
+                    logger.info(f"🔍 DEBUG: No hay historial, usando query completa")
+                
+                # Obtener contenido de documentos (usar solo la pregunta actual)
+                logger.info(f"🔍 DEBUG: ANTES de get_relevant_context con current_query='{current_query}'")
+                document_content = await document_context_service.get_relevant_context(tenant_id, current_query, max_results=1)
+                logger.info(f"🔍 DEBUG: DESPUÉS de get_relevant_context")
                 logger.info(f"🔍 DEBUG: document_content obtenido: {len(document_content) if document_content else 0} caracteres")
+                if document_content:
+                    logger.info(f"🔍 DEBUG: Primera línea de document_content: {document_content.split(chr(10))[0][:100]}")
+                else:
+                    logger.warning(f"🔍 DEBUG: document_content está vacío o None")
                 
                 if document_content:
                     # Usar respuesta inmediata basada en documentos
@@ -864,7 +985,8 @@ RESPUESTA:"""
                     if tenant_config and tenant_config.get("branding_config"):
                         contact_name = tenant_config["branding_config"].get("contactName", "el candidato")
                     
-                    response = self._generate_immediate_document_response(query, document_content, contact_name)
+                    # Usar el query completo (con historial) para que la IA tenga contexto
+                    response = await self._generate_immediate_document_response(query, document_content, contact_name)
                     logger.info(f"🤖 RESPUESTA INMEDIATA GENERADA: {response[:200]}...")
                     
                     return {
@@ -1614,31 +1736,9 @@ Responde como asistente virtual oficial de {contact_name}, usando la informació
             # Análisis inteligente del contenido del documento
             content_lower = document_content.lower()
             
-            # Detectar temas específicos mencionados en el documento
-            topics_found = []
-            topic_responses = {
-                "aguas vivas": f"El programa 'Aguas Vivas' es una iniciativa de {contact_name} para mejorar el acceso al agua potable en Medellín. Este programa busca garantizar que todas las familias tengan acceso a agua limpia y segura, especialmente en las zonas más vulnerables de la ciudad.",
-                "medellín": f"{contact_name} tiene propuestas específicas para el desarrollo de Medellín, incluyendo mejoras en infraestructura, educación y servicios públicos.",
-                "pandemia": f"Durante la pandemia, {contact_name} implementó medidas de apoyo a las familias más vulnerables, incluyendo ayudas alimentarias y programas de protección social.",
-                "hambre": f"{contact_name} trabaja en programas para combatir el hambre y mejorar la seguridad alimentaria, con iniciativas como comedores comunitarios y apoyo a familias vulnerables.",
-                "cuidado": f"El programa 'Medellín me cuida' es una propuesta clave de {contact_name} que busca proteger y apoyar a las familias más necesitadas.",
-                "familia": f"{contact_name} tiene políticas específicas para el apoyo a las familias, incluyendo programas de vivienda, educación y bienestar social."
-            }
-            
-            # Buscar temas en el contenido
-            for topic, response in topic_responses.items():
-                if topic in content_lower:
-                    topics_found.append(response)
-            
-            # Generar respuesta contextual específica
-            if topics_found:
-                response = f"Hola! Soy el asistente virtual de {contact_name}. "
-                response += topics_found[0] + " "
-                response += "¿Te gustaría conocer más detalles sobre esta propuesta o tienes alguna pregunta específica?"
-                return response
-            else:
-                # Respuesta genérica pero útil
-                return f"Hola! Soy el asistente virtual de {contact_name}. Sobre este tema, tenemos información específica que puede interesarte. ¿Te gustaría que te conecte con nuestro equipo para obtener más detalles?"
+            # NO usar respuestas hardcodeadas - dejar que la IA genere todo
+            # Respuesta genérica que no asume contenido específico
+            return f"Hola! Soy el asistente virtual de {contact_name}. Tengo información sobre este tema. ¿Te gustaría que profundice en algún aspecto específico?"
                 
         except Exception as e:
             logger.error(f"[FALLBACK] Error generando respuesta de fallback: {e}")
@@ -1796,7 +1896,7 @@ RESPUESTA BASADA EN LA INFORMACIÓN ESPECÍFICA:"""
                     print(f"🔍 DEBUG: document_content preview: {document_content[:200] if document_content else 'None'}...")
                     
                     if document_content:
-                        response = self._generate_immediate_document_response(query, document_content, contact_name)
+                        response = await self._generate_immediate_document_response(query, document_content, contact_name)
                         print(f"🤖 RESPUESTA INMEDIATA GENERADA: {response[:200]}...")
                     else:
                         # Fallback si no hay documentos
@@ -3252,6 +3352,9 @@ Responde solo el JSON estricto sin comentarios:
         tenant_context = user_context.get('tenant_context', {})
         tenant_config = tenant_context.get('tenant_config', {})
         
+        logger.info(f"🔍 [TENANT_CONFIG] tenant_config keys: {list(tenant_config.keys()) if tenant_config else 'None'}")
+        logger.info(f"🔍 [TENANT_CONFIG] tenant_config content: {tenant_config}")
+        
         # [COHETE] FASE 6: Usar RAGOrchestrator si está habilitado
         if self.use_rag_orchestrator and self.rag_orchestrator:
             try:
@@ -3502,7 +3605,7 @@ Respuesta:"""
                 "gracias", "ok", "okay", "sí", "si", "no", "perfecto", "excelente"
             ],
             "conocer_candidato": [
-                "quien es", "qué es", "cómo funciona", "aguas vivas", "propuestas",
+                "quien es", "qué es", "cómo funciona", "propuestas",
                 "candidato", "políticas", "obras", "programas", "plan de gobierno"
             ],
             "cita_campaña": [
@@ -3600,7 +3703,7 @@ Respuesta:"""
         # Detectar preguntas sobre casos específicos, propuestas, políticas
         political_question_patterns = [
             "que es", "qué es", "quien es", "quién es", "como funciona", "cómo funciona",
-            "aguas vivas", "caso", "propuesta", "política", "obra", "proyecto"
+            "caso", "propuesta", "política", "obra", "proyecto"
         ]
         
         for pattern in political_question_patterns:
@@ -5305,6 +5408,59 @@ Mensaje:"""
         except Exception as e:
             logger.error(f"Error generando mensaje de pedir nombre con IA: {str(e)}")
             return "¿Me confirmas tu nombre para guardarte en mis contactos?"
+    
+    def _enhance_query_for_document_search(self, query: str) -> str:
+        """
+        Mejora la query para mejor recuperación de documentos
+        Añade sinónimos y términos relacionados relevantes
+        """
+        query_lower = query.lower()
+        
+        # Sinónimos y términos relacionados genéricos
+        synonym_map = {
+            "culpable": ["responsable", "autor", "involucrado", "implicado"],
+            "responsable": ["culpable", "autor", "involucrado", "implicado"],
+        }
+        
+        enhanced_query = query
+        
+        # Añadir sinónimos relevantes
+        for key, synonyms in synonym_map.items():
+            if key in query_lower:
+                enhanced_query += " " + " ".join(synonyms)
+                break
+        
+        return enhanced_query
+    
+    def _is_content_relevant(self, query: str, content: str) -> bool:
+        """
+        Verifica si el contenido es relevante para la query
+        """
+        query_lower = query.lower()
+        content_lower = content.lower()
+        
+        # Extraer palabras clave importantes de la query
+        query_words = set(query_lower.split())
+        
+        # Filtrar palabras muy comunes
+        stop_words = {'de', 'la', 'el', 'en', 'y', 'a', 'que', 'es', 'un', 'una', 'por', 'con', 'para', 'su', 'los', 'las', 'le', 'se', 'del', 'al', 'lo', 'como', 'si', 'son', 'están', 'más', 'cuál', 'cuáles', 'qué', 'quién', 'quiénes', 'es', 'son', 'está', 'están', 'hay', 'ser', 'está'}
+        important_words = query_words - stop_words
+        
+        # Verificar si al menos algunas palabras importantes están en el contenido
+        if len(important_words) == 0:
+            return True  # No hay palabras importantes, asumir relevante
+        
+        matches = sum(1 for word in important_words if word in content_lower)
+        relevance_score = matches / len(important_words) if important_words else 0
+        
+        # Considerar relevante si al menos el 20% de las palabras importantes coinciden
+        # Reducido a 20% para ser más permisivo
+        is_relevant = relevance_score >= 0.2
+        
+        logger.info(f"🔍 DEBUG RELEVANCIA: query_words={important_words}, matches={matches}, score={relevance_score:.2f}, relevante={is_relevant}")
+        logger.info(f"🔍 DEBUG RELEVANCIA: Preview content: {content_lower[:200]}...")
+        
+        return is_relevant
 
 # Instancia global para compatibilidad
 ai_service = AIService()
