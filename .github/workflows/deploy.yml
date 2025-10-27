@@ -66,7 +66,7 @@ jobs:
             --source . \
             --allow-unauthenticated \
             --clear-base-image \
-            --set-env-vars "${{ matrix.runtime_env }},FIRESTORE_PROJECT_ID=political-referrals,FIRESTORE_DATABASE_ID=(default),REDIS_ENABLED=true,REDIS_PORT=6379,REDIS_DB=0,REDIS_SOCKET_TIMEOUT=5,CONFIGURATION_SERVICE_URL=https://political-referrals-multitenant-wa-dev-574484297461.us-central1.run.app,USE_GEMINI_CLIENT=true,USE_ADVANCED_MODEL_CONFIGS=true,USE_RAG_ORCHESTRATOR=true,USE_GUARDRAILS=true,STRICT_GUARDRAILS=true,LOG_LEVEL=INFO,LOCAL_DEVELOPMENT=false,ULTRA_FAST_MODE=true" \
+            --set-env-vars "${{ matrix.runtime_env }},FIRESTORE_PROJECT_ID=political-referrals,FIRESTORE_DATABASE_ID=(default),REDIS_ENABLED=true,REDIS_PORT=6379,REDIS_DB=0,REDIS_SOCKET_TIMEOUT=5,CONFIGURATION_SERVICE_URL=https://political-referrals-multitenant-wa-dev-574484297461.us-central1.run.app,USE_GEMINI_CLIENT=true,USE_ADVANCED_MODEL_CONFIGS=true,USE_RAG_ORCHESTRATOR=true,USE_GUARDRAILS=true,STRICT_GUARDRAILS=true,LOG_LEVEL=INFO,LOCAL_DEVELOPMENT=false,ULTRA_FAST_MODE=true,ENABLE_DOCUMENT_PREPROCESSING=true" \
             --set-secrets="GEMINI_API_KEY=gemini-api-key:latest" \
             --set-secrets="REDIS_HOST=redis-host:latest" \
             --set-secrets="REDIS_PASSWORD=redis-password:latest" \

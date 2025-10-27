@@ -62,15 +62,12 @@ class AIService:
                 'name': "¿Me confirmas tu nombre para guardarte en mis contactos y personalizar tu experiencia?"
             }
         }
-    
-    def _get_safety_settings(self):
-        """
-        Obtiene los safety settings configurados para permitir contenido político
-        """
-        # 🚀 CONFIGURACIÓN SIMPLE: Sin safety settings explícitos (como versión anterior)
-        return None
         
-        # 🚀 OPTIMIZACIÓN: Cache para validaciones comunes
+        # 🗄️ NUEVO: Inicializar servicio de persistencia para prompts
+        from chatbot_ai_service.services.document_index_persistence_service import document_index_persistence_service
+        self.persistence_service = document_index_persistence_service
+        
+        # 🔧 FIX: Inicializar _validation_cache
         self._validation_cache = {
             "name": {
                 "santiago": {"is_valid": True, "confidence": 0.95, "reason": "Nombre común válido"},
@@ -121,125 +118,16 @@ class AIService:
                 "neiva": {"is_valid": True, "confidence": 0.95, "reason": "Ciudad colombiana válida"},
                 "villavicencio": {"is_valid": True, "confidence": 0.95, "reason": "Ciudad colombiana válida"},
                 "armenia": {"is_valid": True, "confidence": 0.95, "reason": "Ciudad colombiana válida"},
-                "pastata": {"is_valid": True, "confidence": 0.95, "reason": "Ciudad colombiana válida"},
+                "pasto": {"is_valid": True, "confidence": 0.95, "reason": "Ciudad colombiana válida"},
             }
         }
-        
-        # Servicio para notificar bloqueos
-        self.blocking_notification_service = BlockingNotificationService()
-        # Configurar URL del servicio Java desde variable de entorno
-        java_service_url = os.getenv("POLITICAL_REFERRALS_SERVICE_URL")
-        if java_service_url:
-            self.blocking_notification_service.set_java_service_url(java_service_url)
-        else:
-            logger.warning("POLITICAL_REFERRALS_SERVICE_URL no configurado - funcionalidad de bloqueo limitada")
-        
-        # 🔧 OPTIMIZACIÓN: Cache local para respuestas comunes
-        # (Ya inicializado arriba, no duplicar)
-        
-        # 🚀 OPTIMIZACIÓN: Respuestas precomputadas genéricas para casos comunes
-        # (Se personalizarán con el nombre del candidato si está disponible)
-        self._precomputed_initial_messages = {
-            "default": {
-                'welcome': "¡Bienvenido/a! Soy tu representante. ¡Juntos construimos el futuro!",
-                'contact': "Por favor, guarda este número como 'Mi Candidato' para recibir actualizaciones importantes de la campaña.",
-                'name': "¿Me confirmas tu nombre para guardarte en mis contactos y personalizar tu experiencia?"
-            }
-        }
-        self._common_responses = {
-            # Saludos comunes
-            "hola": "saludo_apoyo",
-            "hi": "saludo_apoyo", 
-            "hello": "saludo_apoyo",
-            "buenos días": "saludo_apoyo", 
-            "buenas tardes": "saludo_apoyo",
-            "buenas noches": "saludo_apoyo",
-            "gracias": "saludo_apoyo",
-            
-            # Confirmaciones comunes
-            "ok": "saludo_apoyo",
-            "okay": "saludo_apoyo",
-            "okey": "saludo_apoyo",
-            "vale": "saludo_apoyo",
-            "listo": "saludo_apoyo",
-            "entendido": "saludo_apoyo",
-            "perfecto": "saludo_apoyo",
-            "bien": "saludo_apoyo",
-            "si": "saludo_apoyo",
-            "sí": "saludo_apoyo",
-            "no": "saludo_apoyo",
-            
-            # Explicaciones sobre datos
-            "solo puedo dar nombre y apellido": "registration_response",
-            "solo puedo dar un nombre y un apellido": "registration_response",
-            "puedo solo un nombre y un apellido": "registration_response",
-            "solo tengo nombre y apellido": "registration_response",
-            "no tengo ciudad": "registration_response",
-            "no sé mi ciudad": "registration_response",
-            "no conozco mi ciudad": "registration_response",
-            
-            # Nombres comunes
-            "santiago": "registration_response",
-            "juan": "registration_response",
-            "maria": "registration_response",
-            "carlos": "registration_response",
-            "ana": "registration_response",
-            "luis": "registration_response",
-            "pedro": "registration_response",
-            
-            # Ciudades comunes
-            "bogotá": "registration_response",
-            "medellín": "registration_response",
-            "cali": "registration_response",
-            "barranquilla": "registration_response",
-            "bogota": "registration_response",
-            "medellin": "registration_response"
-        }
-        
-        # 🔧 OPTIMIZACIÓN: Bypass completo de Gemini para casos comunes
-        self.bypass_gemini = True
-        
-        # 🔧 OPTIMIZACIÓN: Configuración de rendimiento para Gemini
-        self.gemini_performance_config = {
-            "temperature": 0.1,  # Más determinístico y rápido
-            "top_p": 0.8,        # Reducir opciones para velocidad
-            "top_k": 20,         # Limitar tokens para velocidad
-            "max_output_tokens": 100,  # Respuestas más cortas
-            "candidate_count": 1  # Solo una respuesta
-        }
-        
-        # [COHETE] FASE 1: Feature flag para usar GeminiClient
-        # Permite migración gradual sin romper funcionalidad existente
-        # 🚀 OPTIMIZACIÓN: Habilitado por defecto para usar pre-carga de modelos
-        self.use_gemini_client = os.getenv("USE_GEMINI_CLIENT", "true").lower() == "true"
-        self.gemini_client = None
-        
-        if self.use_gemini_client:
-            logger.info("[OK] GeminiClient habilitado via feature flag USE_GEMINI_CLIENT=true")
-            # La inicialización se hace de forma lazy en _ensure_gemini_client()
-            
-        # La pre-carga se hará después de cargar las variables de entorno
-        
-        # [COHETE] FASE 2: Feature flag para usar configuraciones avanzadas por tarea
-        # Permite optimizar temperatura, top_p, etc. según el tipo de tarea
-        # 🚀 OPTIMIZACIÓN: Habilitado por defecto para usar pre-carga optimizada
-        self.use_advanced_model_configs = os.getenv("USE_ADVANCED_MODEL_CONFIGS", "true").lower() == "true"
-        
-        if self.use_advanced_model_configs and self.use_gemini_client:
-            logger.info("[OK] Configuraciones avanzadas de modelo habilitadas (USE_ADVANCED_MODEL_CONFIGS=true)")
-        elif self.use_advanced_model_configs and not self.use_gemini_client:
-            logger.warning("[ADVERTENCIA] USE_ADVANCED_MODEL_CONFIGS=true pero USE_GEMINI_CLIENT=false. Las configs avanzadas requieren GeminiClient.")
-            self.use_advanced_model_configs = False
-        
-        # [COHETE] FASE 6: Feature flag para usar RAGOrchestrator
-        # Habilita el sistema completo de RAG con búsqueda híbrida y verificación
-        self.use_rag_orchestrator = os.getenv("USE_RAG_ORCHESTRATOR", "false").lower() == "true"
-        self.rag_orchestrator = None
-        
-        # [ESCUDO] FASE 5: Feature flag para guardrails estrictos
-        # Habilita prompts especializados y verificación estricta de respuestas
-        self.use_guardrails = os.getenv("USE_GUARDRAILS", "true").lower() == "true"
-        self.strict_guardrails = os.getenv("STRICT_GUARDRAILS", "true").lower() == "true"
+    
+    def _get_safety_settings(self):
+        """
+        Obtiene los safety settings configurados para permitir contenido político
+        """
+        # 🚀 CONFIGURACIÓN SIMPLE: Sin safety settings explícitos (como versión anterior)
+        return None
     
     def preload_models_on_startup(self):
         """
@@ -1016,7 +904,7 @@ Respuesta:"""
         """
         print(f"INICIANDO PROCESAMIENTO: '{query}' para tenant {tenant_id}")
         
-        # 🚀 DEBUG: Verificar variables al inicio del procesamiento
+        # 🚀 Verificar variables al inicio del procesamiento
         import os
         ultra_fast_mode = os.getenv("ULTRA_FAST_MODE", "false").lower() == "true"
         is_local_dev = os.getenv("LOCAL_DEVELOPMENT", "false").lower() == "true"
@@ -1081,9 +969,47 @@ Respuesta:"""
                         "tenant_id": tenant_id
                     }
                 else:
-                    logger.info(f"🔍 DEBUG: No hay documentos disponibles, usando fallback")
+                    logger.info(f"🔍 DEBUG: No hay documentos disponibles, generando con IA")
+                    # Generar respuesta con IA en tiempo real
+                    try:
+                        from chatbot_ai_service.services.tenant_memory_service import tenant_memory_service
+                        tenant_memory = tenant_memory_service._tenant_memories.get(tenant_id)
+                        
+                        # Obtener contexto
+                        campaign_context = tenant_memory.campaign_context if tenant_memory and hasattr(tenant_memory, 'campaign_context') else ""
+                        common_questions = tenant_memory.common_questions[:3] if tenant_memory and hasattr(tenant_memory, 'common_questions') and tenant_memory.common_questions else []
+                        
+                        # Generar prompt
+                        ai_prompt = f"""Soy el asistente de la campaña. El usuario pregunta: "{query}"
+                        
+Contexto: {campaign_context[:200] if campaign_context else "Campaña política"}
+Temas: {', '.join(common_questions[:2]) if common_questions else "Política"}
+                        
+Responde naturalmente y de forma breve (máximo 150 caracteres):"""
+                        
+                        # Generar con IA con timeout
+                        import asyncio
+                        response = await asyncio.wait_for(
+                            self._generate_content_optimized(ai_prompt),
+                            timeout=10.0
+                        )
+                        
+                        if response:
+                            return {
+                                "response": response[:300],  # Limitar longitud
+                                "followup_message": "",
+                                "processing_time": time.time() - start_time,
+                                "intent": "conocer_candidato",
+                                "confidence": 0.7,
+                                "tenant_id": tenant_id
+                            }
+                    except (asyncio.TimeoutError, Exception) as e:
+                        logger.warning(f"⚠️ Error generando con IA: {e}")
+                    
+                    # Fallback si IA falla
+                    logger.info(f"🔍 DEBUG: Usando fallback genérico")
                     return {
-                        "response": "Sobre este tema, tengo información específica que te puede interesar. Te puedo ayudar a conectarte con nuestro equipo para obtener más detalles.",
+                        "response": "¡Claro! Puedo ayudarte con información sobre la campaña. ¿Qué te gustaría saber específicamente?",
                         "followup_message": "",
                         "processing_time": time.time() - start_time,
                         "intent": "general_query",
@@ -1366,14 +1292,22 @@ Respuesta:"""
             
             # 🚀 OPTIMIZACIÓN: Intentar respuesta rápida con IA pero usando contexto precargado
             tenant_context = user_context.get('tenant_context', {})
-            logger.info(f"🔍 DEBUG: tenant_context obtenido: {bool(tenant_context)}")
-            logger.info(f"🔍 DEBUG: intent: '{intent}'")
             if tenant_context and intent in ["saludo_apoyo"]:
-                logger.info(f"🔍 DEBUG: USANDO RESPUESTA RÁPIDA CON IA - saltando RAG")
-                # Solo para casos simples, usar IA rápida con contexto completo del usuario
-                fast_response = await self._generate_fast_ai_response(
-                    query, user_context, tenant_context, session_context, intent
-                )
+                logger.info(f"🔍 Intent es saludo_apoyo - verificando prompts desde DB")
+                
+                # 🗄️ PRIORIDAD 1: Intentar usar prompts desde DB
+                branding_config = tenant_context.get('tenant_config', {}).get('branding', {})
+                prompts_from_db = self.persistence_service.get_tenant_prompts(tenant_id)
+                
+                if prompts_from_db and 'welcome' in prompts_from_db:
+                    logger.info(f"✅ Usando prompt 'welcome' desde DB para tenant {tenant_id}")
+                    fast_response = prompts_from_db['welcome']
+                else:
+                    logger.info(f"🔍 No hay prompts en DB, usando RESPUESTA RÁPIDA CON IA")
+                    # Solo para casos simples, usar IA rápida con contexto completo del usuario
+                    fast_response = await self._generate_fast_ai_response(
+                        query, user_context, tenant_context, session_context, intent
+                    )
                 if fast_response:
                     logger.info(f"🚀 RESPUESTA RÁPIDA CON IA para '{query[:30]}...'")
                     logger.info(f"🔍 DEBUG: RESPUESTA RÁPIDA: {fast_response[:200]}...")
@@ -1421,7 +1355,7 @@ Respuesta:"""
                     response = self._handle_appointment_request_with_context(branding_config, tenant_config, session_context)
                 elif intent == "saludo_apoyo":
                     logger.info(f"[OBJETIVO] RESPUESTA RÁPIDA: saludo_apoyo")
-                    response = self._get_greeting_response_with_context(branding_config, session_context)
+                    response = self._get_greeting_response_with_context(branding_config, session_context, tenant_id=tenant_id)
                 elif intent == "colaboracion_voluntariado":
                     logger.info(f"[OBJETIVO] RESPUESTA RÁPIDA: colaboracion_voluntariado")
                     response = self._get_volunteer_response_with_context(branding_config, session_context)
@@ -1965,7 +1899,29 @@ Te gustaría que alguien del equipo te contacte para brindarte información más
                 logger.info(f"🚀 RESPUESTA CON DOCUMENTOS DESDE CACHÉ para '{query[:30]}...'")
                 return cached_response
             
-            contact_name = branding_config.get("contactName", "el candidato")
+            # 🧠 OBTENER INFORMACIÓN DEL TENANT Y SU CONCIENCIA
+            from chatbot_ai_service.services.tenant_memory_service import tenant_memory_service
+            from chatbot_ai_service.services.document_index_persistence_service import document_index_persistence_service
+            
+            # Obtener nombre del candidato desde tenant_config
+            branding = branding_config or {}
+            contact_name = branding.get("contactName", "el candidato")
+            
+            # Si no está en branding_config, intentar desde tenant_config directamente
+            if contact_name == "el candidato" and tenant_config:
+                tenant_branding = tenant_config.get("branding", {})
+                contact_name = tenant_branding.get("contactName", "el candidato")
+            
+            # Obtener contexto de la campaña desde tenant_memory
+            tenant_memory = tenant_memory_service._tenant_memories.get(tenant_id)
+            campaign_context = ""
+            common_questions = []
+            
+            if tenant_memory:
+                if hasattr(tenant_memory, 'campaign_context') and tenant_memory.campaign_context:
+                    campaign_context = tenant_memory.campaign_context
+                if hasattr(tenant_memory, 'common_questions') and tenant_memory.common_questions:
+                    common_questions = tenant_memory.common_questions[:3]
             
             # 🚀 OPTIMIZACIÓN: Construir contexto completo del usuario
             user_info = ""
@@ -1980,72 +1936,77 @@ Te gustaría que alguien del equipo te contacte para brindarte información más
             if user_context.get("user_phone"):
                 user_info += f"Teléfono: {user_context['user_phone']}. "
             
-            # Mostrar el contenido completo del documento para debugging
-            print(f"📄 CONTENIDO COMPLETO DEL DOCUMENTO:")
-            print(f"📄 {document_context}")
-            print(f"📄 LONGITUD: {len(document_context)} caracteres")
-            
-            # Truncar el contenido para acelerar Gemini (máximo 1500 caracteres para mayor velocidad)
-            if len(document_context) > 1500:
-                document_context = document_context[:1500] + "..."
-                print(f"⚠️ CONTENIDO TRUNCADO para acelerar Gemini: {len(document_context)} caracteres")
-            
             # El document_context ya contiene la información procesada por la IA
             # Solo necesitamos formatearla de manera más natural
             if document_context and document_context != "NO_ENCONTRADO":
-                # Crear prompt ULTRA-OPTIMIZADO con contexto completo del usuario
-                prompt = f"""Asistente virtual de {contact_name}. Responde de manera personalizada y profesional.
+                
+                # 🎯 CARGAR PLANTILLA DE PROMPT DESDE DB (si existe)
+                prompt_template = None
+                stored_prompts = document_index_persistence_service.get_tenant_prompts(tenant_id)
+                if stored_prompts and 'document_response_template' in stored_prompts:
+                    prompt_template = stored_prompts['document_response_template']
+                    logger.info(f"✅ Usando plantilla de prompt desde DB para tenant {tenant_id}")
+                
+                # Si no hay plantilla en DB, usar la por defecto
+                if not prompt_template:
+                    prompt_template = """Eres el asistente virtual de la campaña de {contact_name}.
 
-CONTEXTO COMPLETO DEL USUARIO:
+INFORMACIÓN DEL CANDIDATO:
+{contact_name} es candidato político. {campaign_context_info}
+
+CONTEXTO DEL USUARIO:
 {user_info}
 
-INFORMACIÓN ESPECÍFICA SOBRE LA CONSULTA: {document_context}
+DOCUMENTOS DE LA CAMPAÑA (información específica):
+{document_context}
 
-CONSULTA: "{query}"
+PREGUNTA DEL USUARIO: "{query}"
 
-INSTRUCCIONES CRÍTICAS:
-- **USA EXCLUSIVAMENTE** la información específica proporcionada arriba
-- **NO INVENTES** información que no esté en el contenido proporcionado
-- **RESPONDE DIRECTAMENTE** basándote en los datos específicos del documento
-- **PERSONALIZA** tu respuesta usando el nombre del usuario si está disponible
-- **MENCIÓN** su ciudad si es relevante para la respuesta
-- Máximo 999 caracteres
-- Mantén un tono profesional y cercano
-- Si la información específica no responde completamente la consulta, dilo claramente
+INSTRUCCIONES:
+1. Responde sobre {contact_name} y su campaña de manera natural y empática
+2. USA la información de los documentos proporcionados arriba
+3. Sé específico y concreto, NO uses frases genéricas como "La información disponible"
+4. Si tienes información específica sobre el tema, menciónala directamente
+5. Personaliza tu respuesta usando el nombre del usuario si está disponible
+6. Máximo 250 palabras
+7. Tono: empático, cercano y profesional
 
-RESPUESTA BASADA EN LA INFORMACIÓN ESPECÍFICA:"""
+RESPUESTA:"""
                 
-                # 🚀 OPTIMIZACIÓN CRÍTICA: Respuesta inmediata basada en documentos sin Gemini
-                # Solo cuando ULTRA_FAST_MODE está activo
-                import os
-                ultra_fast_mode = os.getenv("ULTRA_FAST_MODE", "false").lower() == "true"
-                is_local_dev = os.getenv("LOCAL_DEVELOPMENT", "false").lower() == "true"
-                logger.info(f"🚀 ULTRA_FAST_MODE detectado en respuesta: {ultra_fast_mode}")
-                logger.info(f"🚀 LOCAL_DEVELOPMENT detectado en respuesta: {is_local_dev}")
+                # Formatear plantilla con valores dinámicos
+                campaign_context_info = f"Contexto de campaña: {campaign_context[:200]}" if campaign_context else ""
                 
-                if ultra_fast_mode:
-                    # Obtener contenido de documentos para respuesta inmediata
-                    document_content = await document_context_service.get_relevant_context(tenant_id, query, max_results=1)
-                    print(f"🔍 DEBUG: document_content obtenido: {len(document_content) if document_content else 0} caracteres")
-                    print(f"🔍 DEBUG: document_content preview: {document_content[:200] if document_content else 'None'}...")
-                    
-                    if document_content:
-                        response = await self._generate_immediate_document_response(query, document_content, contact_name, user_context)
-                        print(f"🤖 RESPUESTA INMEDIATA GENERADA: {response[:200]}...")
+                prompt = prompt_template.format(
+                    contact_name=contact_name,
+                    campaign_context_info=campaign_context_info,
+                    user_info=user_info if user_info else 'Usuario nuevo sin información adicional',
+                    document_context=document_context,
+                    query=query
+                )
+                
+                # 🧠 Generar respuesta usando el prompt con contexto del tenant y documentos
+                logger.info(f"🤖 Generando respuesta con IA usando prompt de {len(prompt)} caracteres")
+                
+                try:
+                    # Usar el modelo Gemini directamente
+                    if self.model:
+                        response = self.model.generate_content(prompt, safety_settings=self._get_safety_settings())
+                        response_text = response.text.strip()
+                        
+                        logger.info(f"✅ Respuesta generada: {len(response_text)} caracteres")
+                        print(f"🤖 RESPUESTA GENERADA: {response_text[:200]}...")
                     else:
-                        # Fallback si no hay documentos
-                        response = f"Sobre este tema, {contact_name} tiene información específica que te puede interesar. Te puedo ayudar a conectarte con nuestro equipo para obtener más detalles."
-                        print(f"🤖 RESPUESTA FALLBACK GENERADA: {response[:200]}...")
-                else:
-                    # Usar Gemini normal cuando ULTRA_FAST_MODE está inactivo
-                    response = await self._generate_content_with_documents(prompt, document_content)
-                    print(f"🤖 RESPUESTA GEMINI GENERADA: {response[:200]}...")
+                        logger.error("⚠️ Modelo Gemini no disponible")
+                        response_text = f"Sobre este tema, {contact_name} tiene información específica que te puede interesar."
+                except Exception as e:
+                    logger.error(f"❌ Error generando respuesta con IA: {e}")
+                    response_text = f"Sobre este tema, {contact_name} tiene información específica que te puede interesar."
                 
                 # 🚀 OPTIMIZACIÓN: Guardar en caché por tenant (respeta conciencia individual)
                 tenant_cache_key = f"{tenant_id}:{cache_key}"
-                self._response_cache[tenant_cache_key] = response
+                self._response_cache[tenant_cache_key] = response_text
                 
-                return response
+                return response_text
             else:
                 # Si no se encontró información específica, usar respuesta genérica
                 return await self._generate_candidate_response_gemini_direct(
@@ -3042,30 +3003,32 @@ Puedes preguntarme sobre:
         
         # Palabras clave para diferentes intenciones
         keywords = {
-            "saludo_apoyo": ["hola", "buenos", "buenas", "saludo", "hey"],
-            "conocer_candidato": ["quien", "candidato", "propuesta", "plan", "agua", "viva", "hidroituango"],
+            "saludo_apoyo": ["hola", "buenos", "buenas", "saludo", "hey", "hi", "qué tal"],
+            "conocer_candidato": ["quien", "candidato", "propuesta", "propuestas", "plan", "proyecto", "proyectos", "agua", "viva", "hidroituango", "conocer", "saber", "información", "informacion", "programa", "programas"],
             "registro": ["nombre", "apellido", "ciudad", "telefono", "email"],
-            "agendar_cita": ["cita", "reunion", "calendly", "agendar"],
-            "malicioso": ["odio", "violencia", "amenaza", "insulto"]
+            "agendar_cita": ["cita", "reunión", "reunion", "calendly", "agendar"],
+            "malicioso": ["odio", "violencia", "amenaza", "insulto", "matar"]
         }
         
-        # Buscar coincidencias
+        # Buscar coincidencias (orden de prioridad: de más específico a menos)
         for intent, words in keywords.items():
             for word in words:
                 if word in message_lower:
+                    logger.info(f"🎯 FAST FALLBACK: '{word}' encontrado en '{message}' -> {intent}")
                     return {
                         "category": intent,
                         "confidence": 0.8,
                         "original_message": message,
-                        "reason": "Fast fallback - keyword match"
+                        "reason": f"Fast fallback - keyword '{word}'"
                     }
         
-        # Default
+        # Si no coincide con nada, usar "general_query" en lugar de "saludo_apoyo"
+        logger.info(f"🎯 FAST FALLBACK: No encontró keywords, usando 'general_query'")
         return {
-            "category": "saludo_apoyo",
-            "confidence": 0.6,
+            "category": "general_query",
+            "confidence": 0.5,
             "original_message": message,
-            "reason": "Fast fallback - default"
+            "reason": "Fast fallback - no keywords matched"
         }
 
     async def analyze_registration(self, tenant_id: str, message: str, user_context: Dict[str, Any] = None,
@@ -3735,15 +3698,16 @@ Devuelve SOLO el nombre de la categoría:"""
                     "reason": "Pattern-based malicious detection"
                 }
         
-        # Patrones de alta confianza
+        # Patrones de alta confianza (ordenado por especificidad - primero los más específicos)
         patterns = {
+            "conocer_candidato": [
+                "propuestas", "propuesta", "quiero conocer", "conocer", "saber de", "información sobre",
+                "quien es", "qué es", "cómo funciona", "candidato", "políticas", "obras", 
+                "programas", "plan de gobierno", "proyectos", "planes", "que ofrece", "que propone"
+            ],
             "saludo_apoyo": [
                 "hola", "hi", "hello", "buenos días", "buenas tardes", "buenas noches",
                 "gracias", "ok", "okay", "sí", "si", "no", "perfecto", "excelente"
-            ],
-            "conocer_candidato": [
-                "quien es", "qué es", "cómo funciona", "propuestas",
-                "candidato", "políticas", "obras", "programas", "plan de gobierno"
             ],
             "cita_campaña": [
                 "cita", "reunión", "encuentro", "agendar", "visitar", "conocer",
@@ -3771,6 +3735,7 @@ Devuelve SOLO el nombre de la categoría:"""
         for category, pattern_list in patterns.items():
             for pattern in pattern_list:
                 if pattern in message_lower:
+                    logger.info(f"🎯 PATTERN MATCH: '{pattern}' en '{message}' -> {category}")
                     return {
                         "category": category,
                         "confidence": 0.9,
@@ -4735,9 +4700,16 @@ Si tienes alguna pregunta específica sobre la reunión o necesitas ayuda con el
         else:
             return f"""¡Excelente! Para agendar una cita con {contact_name}, puedes usar este enlace: {calendly_link}"""
     
-    def _get_greeting_response_with_context(self, branding_config: Dict[str, Any], session_context: str = "") -> str:
-        """Genera saludo con contexto de sesión inteligente"""
+    def _get_greeting_response_with_context(self, branding_config: Dict[str, Any], session_context: str = "", tenant_id: str = None) -> str:
+        """Genera saludo con contexto de sesión inteligente - USA PROMPTS DESDE DB"""
         contact_name = branding_config.get("contactName", "el candidato")
+        
+        # 🗄️ PRIORIDAD 1: Intentar usar prompts desde DB
+        if tenant_id:
+            prompts_from_db = self.persistence_service.get_tenant_prompts(tenant_id)
+            if prompts_from_db and 'welcome' in prompts_from_db:
+                logger.info(f"✅ Usando prompt 'welcome' desde DB para tenant {tenant_id}")
+                return prompts_from_db['welcome']
         
         # Si hay contexto de sesión, generar respuesta contextual inteligente
         if session_context and len(session_context.strip()) > 50:
@@ -5439,17 +5411,26 @@ Mensaje:"""
             logger.error(f"Error generando mensaje de guardar contacto con IA: {str(e)}")
             return f"Te pido que lo primero que hagas sea guardar este número con el nombre: {contact_name}"
 
-    async def generate_all_initial_messages(self, tenant_config: Dict[str, Any] = None) -> Dict[str, str]:
+    async def generate_all_initial_messages(self, tenant_config: Dict[str, Any] = None, tenant_id: str = None) -> Dict[str, str]:
         """
         Genera los 3 mensajes iniciales de una vez para optimizar el tiempo de respuesta
+        AHORA CARGA DESDE DB SI EXISTEN
         
         Args:
             tenant_config: Configuración del tenant (opcional)
+            tenant_id: ID del tenant para cargar desde DB
             
         Returns:
             Diccionario con los 3 mensajes generados
         """
         try:
+            # 🗄️ PRIORIDAD 1: Intentar cargar prompts desde DB
+            if tenant_id:
+                prompts_from_db = self.persistence_service.get_tenant_prompts(tenant_id)
+                if prompts_from_db:
+                    logger.info(f"✅ Usando prompts desde DB para tenant {tenant_id}: {len(prompts_from_db)} prompts")
+                    return prompts_from_db
+            
             # 🔍 DEBUG: Log para ver qué se recibe
             logger.info(f"🔍 DEBUG generate_all_initial_messages: tenant_config recibido: {tenant_config}")
             

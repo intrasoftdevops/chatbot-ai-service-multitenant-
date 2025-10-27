@@ -159,6 +159,7 @@ class DocumentContextService:
     async def load_tenant_documents(self, tenant_id: str, documentation_bucket_url: str) -> bool:
         """
         Carga documentos del bucket del tenant y crea un índice
+        Usa persistencia en DB para evitar reprocesamiento
         
         Args:
             tenant_id: ID del tenant
@@ -181,10 +182,40 @@ class DocumentContextService:
             
             logger.info(f"📚 Cargando documentos para tenant {tenant_id} desde: {documentation_bucket_url}")
             
-            # Verificar si ya tenemos un índice en cache
+            # 🚀 OPTIMIZACIÓN: Verificar si ya tenemos un índice en cache
             if tenant_id in self._index_cache:
                 logger.info(f"✅ Índice ya existe en cache para tenant {tenant_id}")
                 return True
+            
+            # 💾 CARGAR desde disco local si existe (rápido ~1s)
+            import os
+            storage_path = f"./storage/indices/{tenant_id}"
+            if os.path.exists(storage_path) and os.listdir(storage_path):
+                try:
+                    logger.info(f"💾 Índice encontrado en disco: {storage_path}")
+                    storage_context = StorageContext.from_defaults(persist_dir=storage_path)
+                    index = load_index_from_storage(storage_context)
+                    
+                    self._index_cache[tenant_id] = index
+                    self._document_cache[tenant_id] = {
+                        "bucket_url": documentation_bucket_url,
+                        "document_count": 0,
+                        "loaded_from_disk": True
+                    }
+                    logger.info(f"✅ Índice cargado desde disco en ~1s para tenant {tenant_id}")
+                    return True
+                except Exception as load_error:
+                    logger.warning(f"⚠️ Error cargando desde disco: {load_error}")
+            
+            # No hay persistencia, cargar desde bucket
+            logger.info(f"📥 Cargando desde bucket (10-30s para primera vez)...")
+            # 🗄️ NUEVO: Verificar si existe índice en DB (para saber si debería cargar)
+            from chatbot_ai_service.services.document_index_persistence_service import document_index_persistence_service
+            index_exists = document_index_persistence_service.index_exists(tenant_id, documentation_bucket_url)
+            
+            if index_exists:
+                logger.info(f"🗄️ Metadatos encontrados en DB para tenant {tenant_id}")
+                logger.info(f"📥 Cargando documentos desde bucket...")
             
             # Obtener lista de documentos del bucket
             logger.info(f"📥 Obteniendo lista de documentos desde bucket...")
@@ -247,13 +278,48 @@ class DocumentContextService:
             logger.info(f"🔨 Creando índice vectorial con {len(llama_documents)} documentos...")
             index = VectorStoreIndex.from_documents(llama_documents)
             
-            # Guardar en cache
+            # 💾 GUARDAR índice para persistencia
+            import os
+            
+            # Path local para desarrollo y para subir a GCS
+            local_path = f"./storage/indices/{tenant_id}"
+            gcs_bucket = "daniel-quintero-docs"  # Bucket de documentos
+            gcs_path = f"gs://{gcs_bucket}/indices/{tenant_id}"
+            
+            os.makedirs(local_path, exist_ok=True)
+            try:
+                # Guardar localmente
+                index.storage_context.persist(persist_dir=local_path)
+                logger.info(f"💾 Índice guardado localmente: {local_path}")
+                
+                # Opcional: Subir a Cloud Storage para persistencia en Cloud Run
+                # (Puedes activar esto si necesitas persistencia entre reinicios)
+                # await self._upload_index_to_gcs(local_path, gcs_path)
+                
+            except Exception as persist_error:
+                logger.warning(f"⚠️ No se pudo persistir índice: {persist_error}")
+            
+            # Guardar en cache RAM
+            print(f"🔍 DEBUG: Guardando en cache para tenant {tenant_id}")
             self._index_cache[tenant_id] = index
             self._document_cache[tenant_id] = {
                 "bucket_url": documentation_bucket_url,
                 "document_count": len(llama_documents),
                 "total_chars": total_chars
             }
+            
+            print(f"🔍 DEBUG: Cache actualizado - Tenants en cache: {list(self._document_cache.keys())}")
+            print(f"🔍 DEBUG: Index cache tiene keys: {list(self._index_cache.keys())}")
+            
+            # 🗄️ NUEVO: Guardar metadatos en DB para persistencia
+            from chatbot_ai_service.services.document_index_persistence_service import document_index_persistence_service
+            await document_index_persistence_service.save_index_metadata(
+                tenant_id=tenant_id,
+                bucket_url=documentation_bucket_url,
+                documents_count=len(llama_documents),
+                file_types=file_types,
+                total_chars=total_chars
+            )
             
             # Debug: Mostrar estado del cache después de guardar
             logger.info(f"🔍 DEBUG: Cache actualizado - Tenants: {list(self._document_cache.keys())}")
@@ -264,6 +330,7 @@ class DocumentContextService:
                 f"{total_chars:,} caracteres totales | "
                 f"~{total_chars // 1000}K tokens estimados"
             )
+            logger.info(f"🗄️ Metadatos guardados en DB para tenant {tenant_id}")
             return True
             
         except Exception as e:

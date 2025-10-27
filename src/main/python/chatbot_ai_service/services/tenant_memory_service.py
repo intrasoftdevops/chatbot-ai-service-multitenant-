@@ -3,6 +3,8 @@ Servicio de memoria persistente por tenant-usuario
 
 Mantiene una "conciencia" del tenant para cada usuario, formada al iniciar el servicio
 usando los datos precargados. Esto permite respuestas más rápidas sin buscar cada vez.
+
+AHORA CON PERSISTENCIA EN FIRESTORE
 """
 import logging
 import time
@@ -10,6 +12,8 @@ from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, asdict
 from datetime import datetime
 import json
+from chatbot_ai_service.config.firebase_config import get_firebase_config
+from google.cloud import firestore
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +44,10 @@ class TenantMemoryService:
     """Servicio para gestionar memoria persistente por tenant-usuario"""
     
     def __init__(self):
+        # 🗄️ NUEVO: Conectar con Firestore para persistencia
+        firebase = get_firebase_config()
+        self.db = firebase.get_firestore()
+        
         # Memoria global por tenant (se forma al iniciar el servicio)
         self._tenant_memories: Dict[str, TenantMemory] = {}
         
@@ -50,7 +58,7 @@ class TenantMemoryService:
         self._memory_ttl = 3600  # 1 hora
         self._consciousness_ttl = 1800  # 30 minutos
         
-        logger.info("🧠 TenantMemoryService inicializado")
+        logger.info("🧠 TenantMemoryService inicializado con persistencia Firestore")
     
     def initialize_tenant_memory(self, tenant_id: str, tenant_config: Dict[str, Any], 
                                 document_summary: str = "") -> bool:
@@ -78,6 +86,27 @@ class TenantMemoryService:
             )
             
             self._tenant_memories[tenant_id] = memory
+            
+            # 🗄️ NUEVO: Guardar en Firestore para persistencia
+            try:
+                memory_dict = {
+                    'tenant_id': tenant_id,
+                    'tenant_config': json.dumps(tenant_config),  # Serializar config
+                    'document_summary': document_summary,
+                    'campaign_context': campaign_context,
+                    'common_questions': common_questions,
+                    'precomputed_responses': json.dumps(precomputed_responses),  # Serializar
+                    'last_updated': time.time(),
+                    'created_at': firestore.SERVER_TIMESTAMP,
+                    'version': '2.0'  # Marcar versión del formato
+                }
+                
+                doc_ref = self.db.collection('tenant_memory_cache').document(tenant_id)
+                doc_ref.set(memory_dict)
+                
+                logger.info(f"🗄️ Memoria del tenant {tenant_id} guardada en Firestore")
+            except Exception as e:
+                logger.warning(f"⚠️ No se pudo guardar en Firestore (continuando): {e}")
             
             logger.info(f"🧠 Memoria del tenant {tenant_id} inicializada:")
             logger.info(f"  - Contexto de campaña: {len(campaign_context)} caracteres")
@@ -335,6 +364,118 @@ class TenantMemoryService:
             'memory_ttl': self._memory_ttl,
             'consciousness_ttl': self._consciousness_ttl
         }
+    
+    def load_tenant_memory_from_firestore(self, tenant_id: str) -> bool:
+        """
+        Carga la memoria del tenant desde Firestore al reiniciar el servicio
+        
+        Args:
+            tenant_id: ID del tenant
+            
+        Returns:
+            True si se cargó exitosamente
+        """
+        try:
+            doc_ref = self.db.collection('tenant_memory_cache').document(tenant_id)
+            doc = doc_ref.get()
+            
+            if not doc.exists:
+                logger.warning(f"⚠️ No existe memoria guardada para tenant {tenant_id} en Firestore")
+                return False
+            
+            data = doc.to_dict()
+            
+            # Deserializar campos JSON
+            tenant_config = json.loads(data.get('tenant_config', '{}'))
+            precomputed_responses = json.loads(data.get('precomputed_responses', '{}'))
+            
+            # Reconstruir memoria
+            memory = TenantMemory(
+                tenant_id=tenant_id,
+                tenant_config=tenant_config,
+                document_summary=data.get('document_summary', ''),
+                campaign_context=data.get('campaign_context', ''),
+                common_questions=data.get('common_questions', []),
+                precomputed_responses=precomputed_responses,
+                last_updated=data.get('last_updated', time.time())
+            )
+            
+            # Cargar en memoria RAM
+            self._tenant_memories[tenant_id] = memory
+            
+            logger.info(f"✅ Memoria cargada desde Firestore para tenant {tenant_id}")
+            logger.info(f"  - Preguntas comunes: {len(memory.common_questions)}")
+            logger.info(f"  - Respuestas precomputadas: {len(memory.precomputed_responses)}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error cargando memoria desde Firestore para tenant {tenant_id}: {e}")
+            return False
+    
+    def get_all_tenant_memories_from_firestore(self) -> List[str]:
+        """
+        Obtiene lista de todos los tenant IDs que tienen memoria guardada
+        
+        Returns:
+            Lista de tenant IDs
+        """
+        try:
+            docs = self.db.collection('tenant_memory_cache').get()
+            tenant_ids = [doc.id for doc in docs]
+            logger.info(f"✅ {len(tenant_ids)} memorias de tenant encontradas en Firestore")
+            return tenant_ids
+        except Exception as e:
+            logger.error(f"❌ Error obteniendo memorias desde Firestore: {e}")
+            return []
+    
+    def get_tenant_precomputed_responses(self, tenant_id: str) -> Optional[Dict[str, str]]:
+        """
+        Obtiene las respuestas precomputadas de un tenant
+        
+        Args:
+            tenant_id: ID del tenant
+            
+        Returns:
+            Diccionario con respuestas precomputadas o None
+        """
+        tenant_memory = self._tenant_memories.get(tenant_id)
+        if tenant_memory and tenant_memory.precomputed_responses:
+            logger.info(f"✅ {len(tenant_memory.precomputed_responses)} respuestas precomputadas disponibles para tenant {tenant_id}")
+            return tenant_memory.precomputed_responses
+        
+        logger.warning(f"⚠️ No hay respuestas precomputadas para tenant {tenant_id}")
+        return None
+    
+    def get_tenant_common_questions(self, tenant_id: str) -> List[str]:
+        """
+        Obtiene las preguntas comunes de un tenant
+        
+        Args:
+            tenant_id: ID del tenant
+            
+        Returns:
+            Lista de preguntas comunes
+        """
+        tenant_memory = self._tenant_memories.get(tenant_id)
+        if tenant_memory and tenant_memory.common_questions:
+            return tenant_memory.common_questions
+        return []
+    
+    def get_tenant_campaign_context(self, tenant_id: str) -> str:
+        """
+        Obtiene el contexto de campaña de un tenant
+        
+        Args:
+            tenant_id: ID del tenant
+            
+        Returns:
+            Contexto de campaña como string
+        """
+        tenant_memory = self._tenant_memories.get(tenant_id)
+        if tenant_memory:
+            return tenant_memory.campaign_context
+        return ""
 
 # Instancia global del servicio
 tenant_memory_service = TenantMemoryService()

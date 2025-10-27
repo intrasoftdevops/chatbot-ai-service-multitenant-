@@ -103,6 +103,7 @@ PORT=8000
 LOG_LEVEL=INFO
 FIRESTORE_PROJECT_ID=political-referrals
 FIRESTORE_DATABASE_ID=(default)
+ENABLE_DOCUMENT_PREPROCESSING=false  # true para preprocesar documentos al iniciar
 ```
 
 ### 🚀 Despliegue Automático

@@ -67,7 +67,7 @@ class FirestoreTenantService:
             logger.info("🔍 Obteniendo configuraciones de tenants desde Firestore...")
             
             # Obtener todas las configuraciones de tenants
-            tenants_ref = self.db.collection('clientes')
+            tenants_ref = self.db.collection('tenants')
             docs = tenants_ref.stream()
             
             tenant_configs = {}
@@ -147,7 +147,7 @@ class FirestoreTenantService:
             logger.info(f"🔍 Obteniendo configuración para tenant: {tenant_id}")
             
             # Buscar configuración específica
-            doc_ref = self.db.collection('clientes').where('tenant_id', '==', tenant_id).limit(1)
+            doc_ref = self.db.collection('tenants').where('tenant_id', '==', tenant_id).limit(1)
             docs = list(doc_ref.stream())
             
             if docs:

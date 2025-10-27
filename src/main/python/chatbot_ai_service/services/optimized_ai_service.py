@@ -11,6 +11,9 @@ logger = logging.getLogger(__name__)
 class OptimizedAIService:
     """Servicio de IA optimizado con timeout y logging mejorado"""
     
+    # Cache global de prompts cargados al arrancar
+    _prompts_cache = {}
+    
     def __init__(self, base_ai_service):
         self.base_ai_service = base_ai_service
         self.logger = logging.getLogger(__name__)
@@ -68,6 +71,10 @@ class OptimizedAIService:
                 self.logger.info(f"📊 [CLASIFICACIÓN] Session: {session_id}")
                 print(f"📊 [CLASIFICACIÓN] {'='*50}")
                 self.logger.info(f"📊 [CLASIFICACIÓN] {'='*50}")
+                
+                # 🎯 DEBUG: Verificar si es saludo antes del bloque de malicia
+                print(f"🎯 [DEBUG] Intent después de clasificación: '{intent}'")
+                print(f"🎯 [DEBUG] ¿Es saludo_apoyo? {intent == 'saludo_apoyo'}")
                 
                 # 🚫 PRIORIDAD CRÍTICA: Si es malicioso, BLOQUEAR INMEDIATAMENTE y NO procesar
                 if intent == "malicioso":
@@ -138,6 +145,70 @@ class OptimizedAIService:
                 intent = "saludo_apoyo"
                 confidence = 0.5
             
+            # 🚀 ENFOQUE OPTIMIZADO: Variaciones pre-generadas para saludos (RÁPIDO)
+            # Si es saludo, usar variaciones precargadas desde DB
+            if intent == "saludo_apoyo":
+                self.logger.info(f"🔍 Intent es saludo_apoyo - usando variaciones pre-generadas")
+                print(f"🎯 [DEBUG] Intent detectado como saludo_apoyo")
+                print(f"🎯 [DEBUG] Tenants en cache: {list(OptimizedAIService._prompts_cache.keys())}")
+                try:
+                    # Obtener variaciones desde el cache global
+                    cache_key = f'{tenant_id}_welcome_variations'
+                    variations = OptimizedAIService._prompts_cache.get(cache_key, [])
+                    print(f"🎯 [DEBUG] Cache key: {cache_key}")
+                    print(f"🎯 [DEBUG] Variaciones encontradas: {len(variations)}")
+                    print(f"🎯 [DEBUG] Variaciones: {variations}")
+                    
+                    if variations and len(variations) > 0:
+                        # Seleccionar una variación aleatoria
+                        import random
+                        selected_response = random.choice(variations)
+                        
+                        # Limpiar números al inicio (ej: "2: texto" -> "texto")
+                        import re
+                        selected_response = re.sub(r'^\d+:\s*', '', selected_response).strip()
+                        
+                        # Personalizar con nombre del usuario si está disponible
+                        session_context = user_context.get('session_context', {})
+                        user_name = session_context.get('user_name') or session_context.get('name') or ""
+                        
+                        if user_name and "{user_name}" in selected_response:
+                            selected_response = selected_response.replace("{user_name}", user_name)
+                        
+                        processing_time = time.time() - start_time
+                        self.logger.info(f"✅ Respuesta desde variaciones pre-generadas ({processing_time:.4f}s)")
+                        print(f"🎯 [SALUDO] Variación seleccionada: {selected_response[:100]}")
+                        return {
+                            "response": selected_response,
+                            "followup_message": "",
+                            "from_cache": True,
+                            "processing_time": processing_time,
+                            "tenant_id": tenant_id,
+                            "session_id": session_id,
+                            "intent": intent,
+                            "confidence": confidence,
+                            "user_blocked": False,
+                            "optimized": True
+                        }
+                    else:
+                        # Fallback si no hay variaciones
+                        self.logger.warning(f"⚠️ No hay variaciones para tenant {tenant_id}")
+                        return {
+                            "response": "¡Hola! Bienvenido a la campaña. ¿En qué puedo ayudarte?",
+                            "followup_message": "",
+                            "from_cache": False,
+                            "processing_time": 0.001,
+                            "tenant_id": tenant_id,
+                            "session_id": session_id,
+                            "intent": intent,
+                            "confidence": confidence,
+                            "optimized": True
+                        }
+                        
+                except Exception as e:
+                    self.logger.warning(f"⚠️ Error procesando saludo: {e}")
+                    self.logger.exception(e)
+            
             # 3. PROCESAR CON SERVICIO BASE (con timeout)
             self.logger.info(f"📚 [OPTIMIZED] Procesando con servicio base...")
             import asyncio
@@ -174,8 +245,26 @@ class OptimizedAIService:
                 return result
                 
             except asyncio.TimeoutError:
-                self.logger.error(f"⏰ Timeout generando respuesta para tenant {tenant_id}")
-                return self._create_error_response("Timeout en procesamiento", start_time)
+                self.logger.error(f"⏰ Timeout generando respuesta (>10s) - retornando menú")
+                # Retornar señal de timeout para que Java muestre menú
+                processing_time = time.time() - start_time
+                return {
+                    "response": "",
+                    "followup_message": "",
+                    "from_cache": False,
+                    "processing_time": processing_time,
+                    "timeout": True,
+                    "show_menu": True,
+                    "menu_options": [
+                        {"text": "¿Cómo voy?", "payload": "como_voy"},
+                        {"text": "Compartir mi link", "payload": "compartir_link"}
+                    ],
+                    "tenant_id": tenant_id,
+                    "session_id": session_id,
+                    "intent": intent,
+                    "confidence": confidence,
+                    "optimized": True
+                }
             
         except Exception as e:
             self.logger.error(f"❌ [OPTIMIZED] Error en procesamiento optimizado: {str(e)}")
@@ -191,7 +280,23 @@ class OptimizedAIService:
                 return result
             except Exception as fallback_error:
                 self.logger.error(f"❌ [OPTIMIZED] Error en fallback: {str(fallback_error)}")
-                return self._create_error_response("Error en procesamiento", start_time)
+                # Si todo falla, mostrar menú
+                processing_time = time.time() - start_time
+                return {
+                    "response": "",
+                    "followup_message": "",
+                    "from_cache": False,
+                    "processing_time": processing_time,
+                    "timeout": True,
+                    "show_menu": True,
+                    "menu_options": [
+                        {"text": "¿Cómo voy?", "payload": "como_voy"},
+                        {"text": "Compartir mi link", "payload": "compartir_link"}
+                    ],
+                    "tenant_id": tenant_id,
+                    "session_id": session_id,
+                    "optimized": True
+                }
     
     def _get_tenant_config(self, tenant_id: str) -> Optional[Dict[str, Any]]:
         """Obtiene configuración del tenant"""
@@ -238,3 +343,38 @@ class OptimizedAIService:
             "error": error_message,
             "optimized": True
         }
+    
+    async def _generate_quick_ai_response(self, prompt: str) -> str:
+        """Genera respuesta rápida con IA usando Gemini directamente"""
+        try:
+            print(f"🔍 DEBUG: _generate_quick_ai_response - Iniciando")
+            import time as time_module
+            start_gen = time_module.time()
+            
+            # Usar directamente el modelo Gemini del base_ai_service
+            if hasattr(self.base_ai_service, 'model') and self.base_ai_service.model:
+                response_obj = self.base_ai_service.model.generate_content(prompt)
+                response = response_obj.text.strip()
+            else:
+                # Fallback: generar respuesta simple
+                response = "¡Hola! Bienvenido a la campaña. ¿En qué puedo ayudarte?"
+            
+            elapsed = time_module.time() - start_gen
+            print(f"🔍 DEBUG: _generate_quick_ai_response - Completado en {elapsed:.2f}s")
+            
+            if response:
+                # Limitar longitud
+                response = response.strip()
+                if len(response) > 250:
+                    last_space = response[:250].rfind(' ')
+                    if last_space > 200:
+                        response = response[:last_space]
+                    else:
+                        response = response[:247] + "..."
+            
+            return response if response else ""
+            
+        except Exception as e:
+            print(f"🔍 DEBUG: _generate_quick_ai_response - ERROR: {e}")
+            self.logger.warning(f"⚠️ Error generando con IA: {e}")
+            return ""

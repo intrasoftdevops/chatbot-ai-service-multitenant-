@@ -74,6 +74,11 @@ async def preload_documents_on_startup_optimized():
         from chatbot_ai_service.services.document_preprocessor_service import document_preprocessor_service
         from chatbot_ai_service.services.tenant_memory_service import tenant_memory_service
         
+        # 🗄️ NUEVO: Solo inicializar memoria si no está ya cargada desde Firestore
+        if len(tenant_memory_service._tenant_memories) > 0:
+            print(f"✅ {len(tenant_memory_service._tenant_memories)} memorias ya cargadas desde Firestore - saltando inicialización")
+            return
+        
         # Obtener configuración de tenants desde Firestore
         response_data = await get_tenant_configs_from_firestore()
         
@@ -204,11 +209,224 @@ app.include_router(preprocessing_router)
 from chatbot_ai_service.controllers.intent_classification_controller import router as intent_classification_router
 app.include_router(intent_classification_router)
 
-# 🚀 EVENTO DE STARTUP: Precargar documentos automáticamente
+# 🧠 FUNCIÓN: Generar variaciones con IA si es necesario
+async def _generate_ai_welcome_variations_if_needed(tenant_id: str, tenant_memory):
+    """Genera variaciones de saludo con IA si no existen o son pocas"""
+    try:
+        from chatbot_ai_service.services.optimized_ai_service import OptimizedAIService
+        from chatbot_ai_service.services.document_index_persistence_service import document_index_persistence_service
+        from chatbot_ai_service.services.ai_service import ai_service
+        
+        # Verificar cuántas variaciones hay (cache por tenant)
+        cache_key = f'{tenant_id}_welcome_variations'
+        existing_variations = OptimizedAIService._prompts_cache.get(cache_key, [])
+        num_existing = len(existing_variations) if existing_variations else 0
+        
+        # Si ya hay suficientes variaciones (3+), no generar
+        if num_existing >= 3:
+            return
+        
+        print(f"      • 🧠 Generando {3 - num_existing} variaciones nuevas con IA...")
+        
+        # Obtener contexto del tenant para generar variaciones relevantes
+        campaign_context = tenant_memory.campaign_context if tenant_memory and hasattr(tenant_memory, 'campaign_context') else ""
+        common_questions = tenant_memory.common_questions[:3] if tenant_memory and hasattr(tenant_memory, 'common_questions') and tenant_memory.common_questions else []
+        
+        # Obtener configuración del tenant
+        from chatbot_ai_service.services.firestore_tenant_service import firestore_tenant_service
+        tenant_config = await firestore_tenant_service.get_tenant_config(tenant_id)
+        contact_name = "el candidato"
+        if tenant_config and tenant_config.get('branding'):
+            contact_name = tenant_config['branding'].get('contactName', 'el candidato')
+        
+        # Crear prompt ULTRA CORTO para generación rápida
+        generation_prompt = f"""Genera 3 saludos para campaña política, máximo 100 caracteres cada uno. Separar con "---".
+
+1:
+2:
+3:"""
+        
+        # Generar con IA con TIMEOUT CORTO (3 segundos máximo)
+        try:
+            import asyncio
+            generated_text = await asyncio.wait_for(
+                ai_service._generate_content_optimized(generation_prompt),
+                timeout=3.0
+            )
+        except asyncio.TimeoutError:
+            print(f"      • ⚠️ Timeout generando con IA (3s) - usando variaciones básicas")
+            generated_text = None
+        
+        if generated_text:
+            # Parsear las variaciones (splitting por líneas o separadores)
+            variations = generated_text.split("---")
+            variations = [v.strip() for v in variations if v.strip() and len(v.strip()) > 10]
+            
+            # Si no funcionó, intentar por números
+            if len(variations) < 3:
+                parts = generated_text.split("\n")
+                variations = [p.strip() for p in parts if p.strip() and len(p.strip()) > 10 and not p.strip().isdigit()]
+            
+            # Filtrar por longitud razonable
+            variations = [v for v in variations if 15 <= len(v) <= 200]
+            
+            # Agregar a las existentes
+            if num_existing > 0:
+                all_variations = existing_variations + variations
+            else:
+                all_variations = variations
+            
+            # Limitar a 5 variaciones
+            all_variations = all_variations[:5]
+            
+            # Guardar en cache por tenant
+            OptimizedAIService._prompts_cache[cache_key] = all_variations
+            print(f"      • ✅ Generadas {len(variations)} variaciones nuevas ({len(all_variations)} total)")
+            
+            # Opcional: Guardar en DB para persistencia
+            if tenant_memory:
+                prompts = document_index_persistence_service.get_tenant_prompts(tenant_id)
+                if not prompts:
+                    prompts = {}
+                prompts['welcome_variations'] = all_variations
+                await document_index_persistence_service.save_tenant_prompts(tenant_id, prompts)
+                print(f"      • 💾 Variaciones guardadas en DB para persistencia")
+        else:
+            print(f"      • ⚠️ No se pudieron generar variaciones con IA")
+            
+    except Exception as e:
+        print(f"      • ❌ Error generando variaciones: {e}")
+
+# 🚀 EVENTO DE STARTUP: Carga lazy desde DB
 @app.on_event("startup")
 async def startup_event():
-    """Evento de startup para precargar documentos automáticamente"""
-    await preload_documents_on_startup_optimized()
+    """Evento de startup - carga lazy desde DB"""
+    # 🗄️ NUEVO: Cargar metadatos de índices desde DB
+    from chatbot_ai_service.services.document_index_persistence_service import document_index_persistence_service
+    
+    print("🗄️ Cargando metadatos de índices desde Firestore...")
+    
+    try:
+        # Obtener todos los índices guardados
+        all_indexes = []
+        indexes_ref = document_index_persistence_service.db.collection("document_indexes").get()
+        for doc in indexes_ref:
+            index_data = doc.to_dict()
+            if index_data:
+                all_indexes.append(index_data)
+        
+        if all_indexes:
+            print(f"✅ {len(all_indexes)} índices encontrados en DB:")
+            for idx in all_indexes:
+                print(f"  - Tenant {idx.get('tenant_id')}: {idx.get('documents_count', 0)} documentos")
+                
+                # 🚀 Carga SINCRÓNICA al inicio con persistencia en disco
+                tenant_id = idx.get('tenant_id')
+                bucket_url = idx.get('bucket_url')
+                if bucket_url:
+                    print(f"      • ✅ URL configurada: {bucket_url[:50]}...")
+                    
+                    # Importar servicio de documentos
+                    from chatbot_ai_service.services.document_context_service import document_context_service
+                    
+                    try:
+                        print(f"      • 📚 Cargando índice (desde disco si existe, sino desde bucket)...")
+                        # Este método ahora carga desde disco si existe (rápido ~1s)
+                        # Si no existe, carga desde bucket y guarda en disco (lento ~10-30s la primera vez)
+                        success = await document_context_service.load_tenant_documents(tenant_id, bucket_url)
+                        if success:
+                            print(f"      • ✅ Índice listo - {idx.get('documents_count', 0)} documentos disponibles")
+                        else:
+                            print(f"      • ⚠️ No se pudo cargar índice")
+                    except Exception as e:
+                        print(f"      • ❌ Error cargando: {e}")
+        else:
+            print("ℹ️ No hay índices guardados en DB aún")
+        
+        # 🧠 NUEVO: Cargar memorias de tenants desde Firestore
+        from chatbot_ai_service.services.tenant_memory_service import tenant_memory_service
+        
+        print("🧠 Cargando memorias de tenants desde Firestore...")
+        tenant_ids = tenant_memory_service.get_all_tenant_memories_from_firestore()
+        
+        if tenant_ids:
+            print(f"✅ {len(tenant_ids)} memorias encontradas en Firestore:")
+            for tenant_id in tenant_ids:
+                if tenant_memory_service.load_tenant_memory_from_firestore(tenant_id):
+                    # Mostrar datos cargados para cada tenant
+                    precomputed = tenant_memory_service.get_tenant_precomputed_responses(tenant_id)
+                    questions = tenant_memory_service.get_tenant_common_questions(tenant_id)
+                    context = tenant_memory_service.get_tenant_campaign_context(tenant_id)
+                    
+                    # 🗄️ NUEVO: Cargar prompts desde DB y cachearlos en OptimizedAIService
+                    prompts = document_index_persistence_service.get_tenant_prompts(tenant_id)
+                    
+                    if prompts:
+                        # Cachear en el servicio optimizado para acceso rápido
+                        from chatbot_ai_service.services.optimized_ai_service import OptimizedAIService
+                        if not hasattr(OptimizedAIService, '_prompts_cache'):
+                            OptimizedAIService._prompts_cache = {}
+                        OptimizedAIService._prompts_cache[tenant_id] = prompts
+                        
+                        # Cargar variaciones de 'welcome' si existen
+                        num_existing = 0
+                        if 'welcome_variations' in prompts:
+                            variations = prompts['welcome_variations']
+                            # Cachear por tenant
+                            OptimizedAIService._prompts_cache[f'{tenant_id}_welcome_variations'] = variations
+                            num_existing = len(variations)
+                            print(f"      • ✅ {num_existing} variaciones de saludo cargadas desde DB")
+                        else:
+                            print(f"      • ⚠️ No hay variaciones de saludo en DB - se generarán al primer uso")
+                        
+                        # 🧠 NUEVO: Precargar variaciones generadas por IA (si no existen o son pocas)
+                        # ⚡ Hacerlo en background para no bloquear startup
+                        if num_existing < 3:
+                            print(f"      • ⚡ Generando variaciones en background (no bloquea startup)")
+                            import asyncio
+                            loaded_memory = tenant_memory_service._tenant_memories.get(tenant_id)
+                            if loaded_memory:
+                                # Crear tarea en background
+                                asyncio.create_task(_generate_ai_welcome_variations_if_needed(tenant_id, loaded_memory))
+                            else:
+                                print(f"      • ⚠️ No hay memoria cargada")
+                        else:
+                            print(f"      • ✅ Ya hay {num_existing} variaciones - no necesita generar más")
+                    
+                    print(f"  - ✅ Tenant {tenant_id}:")
+                    print(f"      • {len(precomputed) if precomputed else 0} respuestas precomputadas")
+                    print(f"      • {len(questions)} preguntas comunes")
+                    print(f"      • Contexto: {len(context) if context else 0} caracteres")
+                    print(f"      • {'✅ Prompts cargados y cacheados' if prompts else '⚠️ No prompts'} desde DB")
+                else:
+                    print(f"  - ⚠️ Tenant {tenant_id}: no se pudo cargar")
+        else:
+            print("ℹ️ No hay memorias guardadas en Firestore aún")
+        
+        # 🔧 OPTIMIZACIÓN: Hacer el preprocesamiento opcional para inicio rápido
+        enable_preprocessing = os.getenv("ENABLE_DOCUMENT_PREPROCESSING", "false").lower() == "true"
+        
+        # 🗄️ Si ya hay datos en DB, saltar preprocesamiento automáticamente
+        has_indexes = len(all_indexes) > 0
+        has_memories = len(tenant_ids) > 0
+        
+        if has_indexes or has_memories:
+            print(f"✅ Sistema ya optimizado - {len(all_indexes)} índices y {len(tenant_ids)} memorias en DB")
+            print("⚡ Saltando preprocesamiento automático (inicio rápido)")
+            
+            if enable_preprocessing:
+                print("💡 Para forzar reprocesamiento: reiniciar con ENABLE_DOCUMENT_PREPROCESSING=true")
+            
+        elif enable_preprocessing:
+            print("🚀 Preprocesamiento de documentos HABILITADO - procesando nuevos documentos...")
+            await preload_documents_on_startup_optimized()
+        else:
+            print("⚡ Preprocesamiento DESHABILITADO - usando índices de DB (inicio rápido)")
+            print("💡 Para reprocesar: set ENABLE_DOCUMENT_PREPROCESSING=true")
+            
+    except Exception as e:
+        print(f"⚠️ Error cargando metadatos desde DB: {e}")
+        print("ℹ️ El servicio funcionará normalmente con carga lazy")
 
 @app.get("/")
 async def root():

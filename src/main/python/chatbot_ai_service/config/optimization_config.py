@@ -6,8 +6,8 @@ import os
 class OptimizationConfig:
     """Configuración de optimizaciones de rendimiento"""
     
-    # Timeout para respuestas de IA (segundos)
-    AI_RESPONSE_TIMEOUT = int(os.getenv("AI_RESPONSE_TIMEOUT", "15"))
+    # Timeout para respuestas de IA (segundos) - si se excede, mostrar menú
+    AI_RESPONSE_TIMEOUT = int(os.getenv("AI_RESPONSE_TIMEOUT", "10"))
     
     # Límite de caracteres para respuestas
     MAX_RESPONSE_LENGTH = int(os.getenv("MAX_RESPONSE_LENGTH", "800"))

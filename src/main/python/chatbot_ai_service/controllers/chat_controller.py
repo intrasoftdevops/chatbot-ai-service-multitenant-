@@ -13,9 +13,93 @@ import re
 
 from chatbot_ai_service.services.ai_service import AIService
 from chatbot_ai_service.services.optimized_ai_service import OptimizedAIService
+from chatbot_ai_service.memory import get_tenant_memory_service
+from chatbot_ai_service.models.tenant_models import ConversationSummary
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["chat"])
+
+def _update_tenant_memory_async(tenant_id: str, query: str, response: str, intent: str, session_id: str = None):
+    """
+    Actualiza la memoria del tenant de forma asíncrona (no bloquea la respuesta)
+    
+    Args:
+        tenant_id: ID del tenant
+        query: Mensaje del usuario
+        response: Respuesta generada
+        intent: Intención detectada
+        session_id: ID de la sesión
+    """
+    import asyncio
+    
+    def detect_sentiment_simple(text: str) -> str:
+        """Detección básica de sentimiento"""
+        text_lower = text.lower()
+        negative_words = ["malo", "mal", "malo", "problema", "error", "molesto", "enojado", "frustrado"]
+        positive_words = ["bueno", "excelente", "genial", "gracias", "perfecto", "me gusta", "amor"]
+        
+        negative_count = sum(1 for word in negative_words if word in text_lower)
+        positive_count = sum(1 for word in positive_words if word in text_lower)
+        
+        if negative_count > positive_count:
+            return "negative"
+        elif positive_count > negative_count:
+            return "positive"
+        else:
+            return "neutral"
+    
+    async def update_memory():
+        try:
+            memory_service = get_tenant_memory_service()
+            
+            # Obtener memoria actual
+            memory = await memory_service.get_tenant_memory(tenant_id)
+            
+            if not memory:
+                # Si no existe memoria, crearla
+                from chatbot_ai_service.models.tenant_models import TenantMemory
+                memory = TenantMemory(tenant_id=tenant_id, created_at=datetime.now())
+            
+            # Detectar sentimiento básico
+            sentiment = detect_sentiment_simple(query)
+            
+            # Agregar resumen de conversación
+            summary = ConversationSummary(
+                conversation_id=session_id or f"conv_{int(time.time())}",
+                user_phone=session_id or "unknown",
+                topics=[intent] if intent else [],
+                key_points=[query[:100]],
+                sentiment=sentiment,
+                needs_attention=(sentiment == "negative"),
+                timestamp=datetime.now()
+            )
+            
+            await memory_service.add_conversation_summary(tenant_id, summary)
+            
+            # Agregar pregunta común si no es saludo simple
+            if len(query) > 10 and intent != "saludo_apoyo":
+                await memory_service.add_common_question(tenant_id, query)
+            
+            # Actualizar estadísticas
+            memory.total_conversations += 1
+            memory.total_messages += 1
+            
+            # Guardar actualización
+            await memory_service.save_tenant_memory(tenant_id, memory)
+            
+            logger.info(f"✅ Memoria actualizada para tenant {tenant_id}")
+            
+        except Exception as e:
+            logger.error(f"❌ Error actualizando memoria del tenant: {e}")
+    
+    # Ejecutar de forma asíncrona sin bloquear
+    try:
+        loop = asyncio.get_event_loop()
+        asyncio.create_task(update_memory())
+    except RuntimeError:
+        # Si no hay loop activo, crear uno nuevo
+        asyncio.run(update_memory())
 
 @router.post("/tenants/{tenant_id}/chat")
 async def process_chat_message(tenant_id: str, request: Dict[str, Any]) -> Dict[str, Any]:
@@ -122,6 +206,9 @@ async def process_chat_message(tenant_id: str, request: Dict[str, Any]) -> Dict[
         logger.info(f"✅ Respuesta procesada - followup_message: {bool(followup_message)}")
         logger.info(f"🔍 user_blocked en respuesta: {response.get('user_blocked')}")
         logger.info(f"🔍 optimized en respuesta: {response.get('optimized')}")
+        
+        # 🆕 NUEVO: Actualizar memoria del tenant de forma asíncrona (no bloquea la respuesta)
+        _update_tenant_memory_async(tenant_id, query, clean_response, ai_response.get("intent"), session_id)
         
         return response
         
@@ -400,7 +487,15 @@ async def generate_all_initial_messages(tenant_id: str, request: Dict[str, Any])
         
         # Generar los 3 mensajes con IA
         ai_service = AIService()
-        messages = await ai_service.generate_all_initial_messages(tenant_config)
+        messages = await ai_service.generate_all_initial_messages(tenant_config, tenant_id=tenant_id)
+        
+        # 🗄️ NUEVO: Guardar prompts en DB para persistencia
+        try:
+            from chatbot_ai_service.services.document_index_persistence_service import document_index_persistence_service
+            await document_index_persistence_service.save_tenant_prompts(tenant_id, messages)
+            logger.info(f"✅ Prompts guardados en DB para tenant {tenant_id}")
+        except Exception as e:
+            logger.warning(f"⚠️ No se pudieron guardar prompts en DB: {e}")
         
         return {
             "tenant_id": tenant_id,

@@ -232,6 +232,40 @@ class RAGOrchestrator:
         Returns:
             Prompt formateado con guardrails y personalidad
         """
+        # 🆕 NUEVO: Obtener identidad del tenant para personalización completa
+        tenant_identity = None
+        tenant_memory = None
+        
+        if tenant_config:
+            tenant_id = tenant_config.get('tenant_id')
+            if tenant_id:
+                try:
+                    # Importar servicios de identidad y memoria
+                    from chatbot_ai_service.identity import get_tenant_identity_service
+                    from chatbot_ai_service.memory import get_tenant_memory_service
+                    
+                    identity_service = get_tenant_identity_service()
+                    memory_service = get_tenant_memory_service()
+                    
+                    # Obtener identidad y memoria (conexión síncrona para no bloquear)
+                    import asyncio
+                    try:
+                        loop = asyncio.get_event_loop()
+                        tenant_identity = loop.run_until_complete(identity_service.get_tenant_identity(tenant_id))
+                        tenant_memory = loop.run_until_complete(memory_service.get_tenant_memory(tenant_id))
+                    except RuntimeError:
+                        # Si no hay loop, crear uno nuevo
+                        tenant_identity = asyncio.run(identity_service.get_tenant_identity(tenant_id))
+                        tenant_memory = asyncio.run(memory_service.get_tenant_memory(tenant_id))
+                    
+                    if tenant_identity:
+                        logger.info(f"✅ Identidad del tenant cargada: {tenant_identity.candidate_name}")
+                    if tenant_memory:
+                        logger.info(f"✅ Memoria del tenant cargada: {tenant_memory.total_conversations} conversaciones")
+                        
+                except Exception as e:
+                    logger.warning(f"⚠️ Error cargando identidad/memoria del tenant: {e}")
+        
         # Extraer información de branding del tenant
         # Primero intentar obtener de branding_config (si existe)
         contact_name = None
@@ -311,15 +345,49 @@ class RAGOrchestrator:
         if user_context and user_context.get("user_name"):
             user_info = f"El usuario se llama {user_context['user_name']}. "
         
+        # 🆕 NUEVO: Enriquecer con identidad del tenant si está disponible
+        personality_text = ""
+        key_proposals_text = ""
+        bio_text = ""
+        
+        if tenant_identity:
+            # Usar identidad completa del tenant
+            candidate_name = tenant_identity.candidate_name
+            campaign_name = tenant_identity.campaign_name
+            contact_name = tenant_identity.contact_name
+            
+            # Personalidad y estilo
+            if tenant_identity.personality_traits:
+                traits = ", ".join(tenant_identity.personality_traits)
+                personality_text = f"Tu personalidad: {traits}. "
+            
+            # Tono y estilo de comunicación
+            style_info = f"Estilo de comunicación: {tenant_identity.communication_style}, tono: {tenant_identity.tone}. "
+            
+            # Bio si está disponible
+            if tenant_identity.bio:
+                bio_text = f"\n**SOBRE TI:** {tenant_identity.bio}\n"
+            
+            # Propuestas clave
+            if tenant_identity.key_proposals:
+                proposals = "\n".join([f"- {p}" for p in tenant_identity.key_proposals[:3]])  # Top 3
+                key_proposals_text = f"\n**PROPUESTAS CLAVE DE TU CAMPAÑA:**\n{proposals}\n"
+        else:
+            # Fallback a valores anteriores
+            candidate_name = candidate_name
+            campaign_name = f"la campaña de {contact_name}"
+        
         prompt = f"""
-Asistente virtual {candidate_name} de la campaña política de {contact_name}.
-
-**PERSONALIDAD Y TONO:**
+Asistente virtual {candidate_name} de la campaña política {campaign_name}.
+{bio_text}
+**TU PERSONALIDAD Y TONO:**
+{personality_text}{style_info}
 - Habla como representante de {contact_name} y su campaña
 - Sé amigable, cercano y auténtico
 - Usa un tono conversacional pero profesional
 - Muestra pasión por los temas de la campaña
 - Si no tienes información específica, ofrece conectar con el equipo de {contact_name}
+{key_proposals_text}
 
 **REGLAS FUNDAMENTALES:**
 1. SOLO responde con información de los DOCUMENTOS proporcionados
