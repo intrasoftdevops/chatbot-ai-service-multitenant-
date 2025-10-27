@@ -283,7 +283,25 @@ class DocumentContextService:
             
             # Path local para desarrollo y para subir a GCS
             local_path = f"./storage/indices/{tenant_id}"
-            gcs_bucket = "daniel-quintero-docs"  # Bucket de documentos
+            
+            # 🔧 Extraer nombre del bucket dinámicamente desde la URL
+            # Formato: gs://bucket-name/... o https://storage.googleapis.com/bucket-name/...
+            if documentation_bucket_url.startswith("gs://"):
+                gcs_bucket = documentation_bucket_url.split("gs://")[1].split("/")[0]
+            elif "storage.googleapis.com" in documentation_bucket_url:
+                # https://storage.googleapis.com/bucket-name/...
+                parts = documentation_bucket_url.split("storage.googleapis.com/")
+                if len(parts) > 1:
+                    gcs_bucket = parts[1].split("/")[0]
+                else:
+                    gcs_bucket = "unknown-bucket"  # Fallback
+            else:
+                # Intentar extraer bucket de cualquier formato
+                import re
+                match = re.search(r'gs://([^/]+)|storage\.googleapis\.com/([^/]+)', documentation_bucket_url)
+                gcs_bucket = match.group(1) or match.group(2) if match else "unknown-bucket"
+            
+            logger.info(f"🔧 Usando bucket: {gcs_bucket} para tenant {tenant_id}")
             gcs_path = f"gs://{gcs_bucket}/indices/{tenant_id}"
             
             os.makedirs(local_path, exist_ok=True)

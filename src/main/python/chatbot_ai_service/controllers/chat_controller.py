@@ -139,6 +139,13 @@ async def process_chat_message(tenant_id: str, request: Dict[str, Any]) -> Dict[
         logger.info(f"🔍 [CONTROLLER] tenant_config type: {type(tenant_config)}")
         logger.info(f"🔍 [CONTROLLER] tenant_config keys: {list(tenant_config.keys()) if tenant_config else 'None'}")
         
+        # 🔍 DEBUG CRÍTICO: Verificar si numero_whatsapp está presente
+        if tenant_config and 'numero_whatsapp' in tenant_config:
+            logger.info(f"✅ [CONTROLLER] numero_whatsapp PRESENTE en tenant_config: '{tenant_config['numero_whatsapp']}'")
+        else:
+            logger.warning(f"❌ [CONTROLLER] numero_whatsapp NO PRESENTE en tenant_config")
+            logger.warning(f"❌ [CONTROLLER] tenant_config completo: {tenant_config}")
+        
         logger.info(f"🔧 [CONTROLLER] Creando AIService base...")
         base_ai_service = AIService()
         logger.info(f"🔧 [CONTROLLER] AIService base creado exitosamente")
@@ -177,17 +184,21 @@ async def process_chat_message(tenant_id: str, request: Dict[str, Any]) -> Dict[
         logger.info(f"🔍 DEBUG: Respuesta recibida del ai_service:")
         logger.info(f"   - Tipo: {type(ai_response)}")
         logger.info(f"   - Keys: {list(ai_response.keys()) if isinstance(ai_response, dict) else 'No es dict'}")
-        logger.info(f"   - Response length: {len(ai_response.get('response', '')) if isinstance(ai_response, dict) else 'N/A'}")
+        if isinstance(ai_response, dict):
+            response_text = ai_response.get('response', '') or ''
+            logger.info(f"   - Response length: {len(response_text) if response_text else 0}")
+        else:
+            logger.info(f"   - Response length: N/A")
         logger.info(f"   - Intent: {ai_response.get('intent', 'N/A') if isinstance(ai_response, dict) else 'N/A'}")
         logger.info(f"   - Confidence: {ai_response.get('confidence', 'N/A') if isinstance(ai_response, dict) else 'N/A'}")
         logger.info(f"🔍 DEBUG: Contenido completo de la respuesta: {ai_response}")
         
         # NUEVO ENFOQUE: Usar followup_message directamente del servicio de IA
-        clean_response = ai_response.get("response", "")
-        followup_message = ai_response.get("followup_message", "")
+        clean_response = ai_response.get("response", "") or ""
+        followup_message = ai_response.get("followup_message") or ""
         
         logger.info(f"📤 NUEVO ENFOQUE: Respuesta principal: {len(clean_response)} caracteres")
-        logger.info(f"📤 NUEVO ENFOQUE: Followup message: {len(followup_message)} caracteres")
+        logger.info(f"📤 NUEVO ENFOQUE: Followup message: {len(followup_message) if followup_message else 0} caracteres")
         
         # Construir respuesta final
         response = {

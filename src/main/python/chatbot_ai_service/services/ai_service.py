@@ -68,7 +68,6 @@ class AIService:
         self.persistence_service = document_index_persistence_service
         
         # 🔧 FIX: Inicializar _validation_cache
-        self._validation_cache = {}
         self._validation_cache = {
             "name": {
                 "santiago": {"is_valid": True, "confidence": 0.95, "reason": "Nombre común válido"},
@@ -918,13 +917,41 @@ Respuesta:"""
         followup_message = ""
         
         try:
+            print(f"🔍 DENTRO DEL TRY INICIAL")
             logger.info(f"Procesando mensaje para tenant {tenant_id}, sesión: {session_id}")
             logger.info(f"🔍 DEBUG: Iniciando process_chat_message - query: '{query}', tenant_id: {tenant_id}")
             
             # 🚀 NUEVO: Usar directamente el sistema de documentos que funciona
             logger.info(f"🔍 DEBUG: ¿Entrando en ultra_fast_mode? {ultra_fast_mode}")
-            if ultra_fast_mode:
-                logger.info(f"🚀 ULTRA-FAST MODE: Usando sistema de documentos directo")
+            
+            # 🎯 FIX: Clasificar intención antes de decidir usar RAG
+            logger.info(f"🔍 DEBUG: Clasificando intención...")
+            try:
+                from chatbot_ai_service.services.tenant_memory_service import tenant_memory_service
+                tenant_context = tenant_memory_service.get_tenant_context(tenant_id)
+                if tenant_context:
+                    user_context['tenant_context'] = tenant_context
+                
+                classification_result = await self.classify_intent(tenant_id, query, user_context, session_id, tenant_config)
+                intent = classification_result.get("category", "saludo_apoyo").strip()
+                confidence = classification_result.get("confidence", 0.0)
+                logger.info(f"🔍 DEBUG: Intención clasificada: '{intent}' con confianza: {confidence}")
+            except Exception as e:
+                logger.error(f"❌ ERROR en clasificación de intención: {str(e)}")
+                intent = "saludo_apoyo"
+                confidence = 0.0
+            
+            # 🎯 FIX: NO usar RAG para solicitud_funcional
+            logger.info(f"🔍 DEBUG: ultra_fast_mode={ultra_fast_mode}, intent='{intent}'")
+            print(f"🔍 PRINT: ultra_fast_mode={ultra_fast_mode}, intent='{intent}'")
+            
+            # 🎯 NUEVO: Si es solicitud_funcional, saltar todo el bloque de documentos y continuar
+            if intent == "solicitud_funcional":
+                print(f"🎯 DETECTADO solicitud_funcional - SALTANDO ULTRA-FAST MODE para procesar correctamente")
+                logger.info(f"🎯 DETECTADO solicitud_funcional - SALTANDO ULTRA-FAST MODE para procesar correctamente")
+            elif ultra_fast_mode:
+                print(f"🎯 ENTRANDO EN ULTRA-FAST MODE para intent: '{intent}'")
+                logger.info(f"🚀 ULTRA-FAST MODE: Usando sistema de documentos directo (intent: {intent})")
                 from chatbot_ai_service.services.document_context_service import document_context_service
                 
                 # Extraer solo la pregunta actual si viene en formato de historial
@@ -1043,17 +1070,8 @@ Responde naturalmente y de forma breve (máximo 150 caracteres):"""
                     logger.info(f"👤 Usando contexto de sesión crítico para personalizar respuesta")
                     user_context['session_context'] = session_context
             
-            # Clasificar la intencion del mensaje usando IA (pero con contexto precargado)
-            logger.info(f"🔍 DEBUG: Clasificando intención...")
-            try:
-                classification_result = await self.classify_intent(tenant_id, query, user_context, session_id, tenant_config)
-                intent = classification_result.get("category", "saludo_apoyo").strip()
-                confidence = classification_result.get("confidence", 0.0)
-                logger.info(f"🔍 DEBUG: Intención clasificada: '{intent}' con confianza: {confidence}")
-            except Exception as e:
-                logger.error(f"❌ ERROR en clasificación de intención: {str(e)}")
-                intent = "saludo_apoyo"
-                confidence = 0.5
+            # 🎯 NOTA: La clasificación de intención ya se hizo antes del bloque ultra_fast_mode (línea 934)
+            # Continúa usando las variables 'intent' y 'confidence' ya clasificadas
             
             # 🚫 PRIORIDAD CRÍTICA: Si es malicioso, BLOQUEAR INMEDIATAMENTE y NO procesar
             if intent == "malicioso":
@@ -1184,7 +1202,11 @@ Responde naturalmente y de forma breve (máximo 150 caracteres):"""
             
             # Mostrar solo la clasificacion
             print(f"🎯 INTENCIÓN: {intent}")
+            print(f"🔍 LÍNEA 1203 - Después de clasificación")
             logger.info(f"🔍 DESPUÉS DE CLASIFICACIÓN - intent: '{intent}'")
+            print(f"🔍 LÍNEA 1204 - logger.info ejecutado")
+            logger.info(f"🔍 ESTE LOG DEBE APARECER después de INTENCIÓN")
+            print(f"🔍 LÍNEA 1205 - Antes del bloque malicioso")
             
             # 🚫 PRIORIDAD CRÍTICA: Si es malicioso, BLOQUEAR INMEDIATAMENTE y NO procesar
             if intent == "malicioso":
@@ -1215,21 +1237,35 @@ Responde naturalmente y de forma breve (máximo 150 caracteres):"""
                     "user_blocked": True
                 }
             
-            logger.info(f"🔍 JUSTO DESPUÉS DEL PRINT - intent: '{intent}'")
-            logger.info(f"🔍 INICIANDO BLOQUE RAG")
-            logger.info(f"🔍 DEBUG: Llegando al bloque RAG - intent: '{intent}'")
-            logger.info(f"🔍 DEBUG: ANTES DE CUALQUIER PROCESAMIENTO - intent: '{intent}'")
-            logger.info(f"🔍 DEBUG: Continuando con el flujo normal...")
+            print(f"🔍 LÍNEA 1241 - Después del bloque malicioso - intent: '{intent}'")
+            try:
+                logger.info(f"🔍 JUSTO DESPUÉS DEL PRINT - intent: '{intent}'")
+                logger.info(f"🔍 INICIANDO BLOQUE RAG")
+                logger.info(f"🔍 DEBUG: Llegando al bloque RAG - intent: '{intent}'")
+                logger.info(f"🔍 DEBUG: ANTES DE CUALQUIER PROCESAMIENTO - intent: '{intent}'")
+                logger.info(f"🔍 DEBUG: Continuando con el flujo normal...")
+            except Exception as e:
+                print(f"❌ ERROR en logs: {e}")
+                import traceback
+                traceback.print_exc()
+            
+            print(f"🔍 DESPUÉS DEL TRY/EXCEPT - intent: '{intent}'")
             
             # RAG con orden correcto: primero documentos, luego fallback
             document_context = None
             logger.info(f"🔍 ANTES DEL BLOQUE RAG - intent: '{intent}'")
+            print(f"🔍 DESPUÉS DE LOGGER.info - intent: '{intent}'")
             
+            print(f"🔍 ANTES DEL TRY RAG - intent: '{intent}'")
+            print(f"🔍 START TIME: {start_time if 'start_time' in locals() else 'NO DEFINIDO'}")
             try:
                 # Consultar documentos para intenciones que requieren información específica
-                intents_requiring_docs = ["conocer_candidato", "solicitud_funcional", "pregunta_especifica", "consulta_propuesta"]
+                intents_requiring_docs = ["conocer_candidato", "pregunta_especifica", "consulta_propuesta"]
+                print(f"🔍 intents_requiring_docs: {intents_requiring_docs}")
+                print(f"🔍 ¿Es '{intent}' en intents_requiring_docs? {intent in intents_requiring_docs}")
                 
                 if intent in intents_requiring_docs:
+                    print(f"🔍 DENTRO DEL IF - Intentando RAG para intención '{intent}'")
                     logger.info(f"🔍 DEBUG: Intentando RAG para intención '{intent}'")
                     # PRIMERO: Intentar obtener información de documentos
                     try:
@@ -1247,27 +1283,43 @@ Responde naturalmente y de forma breve (máximo 150 caracteres):"""
                         # Solo usar fallback si hay error
                         document_context = "gemini_direct"
                 else:
+                    print(f"🔍 DENTRO DEL ELSE - Intención '{intent}' no requiere documentos, saltando carga")
                     logger.info(f"[OBJETIVO] Intención '{intent}' no requiere documentos, saltando carga")
             except Exception as e:
                 logger.error(f"❌ ERROR en bloque RAG: {str(e)}")
+                import traceback
+                traceback.print_exc()
                 document_context = "gemini_direct"
             
+            print(f"🔍 DESPUÉS DEL BLOQUE RAG - intent: '{intent}', document_context: {document_context}")
+            print(f"🔍 DESPUÉS DEL PRINT 1294 - Antes de logger.info")
             logger.info(f"🔍 DESPUÉS DEL BLOQUE RAG - intent: '{intent}'")
+            print(f"🔍 DESPUÉS DE logger.info línea 1295")
             logger.info(f"🧠 Intención extraída: {intent} (confianza: {confidence:.2f})")
+            print(f"🔍 DESPUÉS DE logger.info línea 1296")
             logger.info(f"🔍 DEBUG: Continuando con procesamiento de intención...")
+            print(f"🔍 DESPUÉS DE logger.info línea 1297")
             logger.info(f"🔍 DEBUG: Llegando al bloque de procesamiento de intención")
+            print(f"🔍 DESPUÉS DE logger.info línea 1298")
             logger.info(f"🔍 DEBUG: document_context = '{document_context}'")
+            print(f"🔍 DESPUÉS DE logger.info línea 1299")
             logger.info(f"🔍 DEBUG: ANTES DE CACHÉ - intent: '{intent}'")
+            print(f"🔍 DESPUÉS DE logger.info línea 1300")
             
             # 1.5 NUEVO: Intentar obtener respuesta del caché
             logger.info(f"🔍 ANTES DE cache_service.get_cached_response")
+            print(f"🔍 DESPUÉS DE logger.info línea 1303")
+            print(f"🔍 ANTES DE LLAMAR A get_cached_response")
             cached_response = cache_service.get_cached_response(
                 tenant_id=tenant_id,
                 query=query,
                 intent=intent
             )
+            print(f"🔍 DESPUÉS DE get_cached_response - cached_response: {cached_response}")
             
-            if cached_response:
+            # 🔧 FIX TEMPORAL: No usar caché para solicitud_funcional para que genere followup_message correctamente
+            if cached_response and intent != "solicitud_funcional":
+                print(f"🔍 DENTRO DEL IF CACHED - cached_response exists")
                 processing_time = time.time() - start_time if 'start_time' in locals() else 0.0
                 logger.info(f"Respuesta servida desde caché (latencia: {processing_time:.2f}s)")
                 
@@ -1282,6 +1334,9 @@ Responde naturalmente y de forma breve (máximo 150 caracteres):"""
                     "tenant_id": tenant_id,
                     "session_id": session_id
                 }
+            
+            if cached_response and intent == "solicitud_funcional":
+                print(f"⚠️ CACHÉ ENCONTRADO PARA solicitud_funcional - SALTANDO para generar followup_message correcto")
             
             # OPTIMIZACIÓN 3: Respuestas rápidas para casos comunes
             logger.debug(f"[LUP] VERIFICANDO INTENT: {intent}")
@@ -1331,6 +1386,8 @@ Responde naturalmente y de forma breve (máximo 150 caracteres):"""
             
             try:
                 logger.info(f"🔍 DEBUG: DENTRO DEL TRY - intent: '{intent}'")
+                logger.info(f"🔍 DEBUG: ¿ES solicitud_funcional? {intent == 'solicitud_funcional'}")
+                
                 if intent == "conocer_candidato":
                     # Generar respuesta especializada para consultas sobre el candidato
                     logger.info(f"🎯 PROCESANDO conocer_candidato - document_context: {document_context[:100] if document_context else 'None'}...")
@@ -1353,7 +1410,7 @@ Responde naturalmente y de forma breve (máximo 150 caracteres):"""
                     logger.info(f"✅ RESPUESTA GENERADA para conocer_candidato: {len(response)} caracteres")
                 elif intent == "cita_campaña":
                     logger.info(f"[OBJETIVO] RESPUESTA RÁPIDA: cita_campaña")
-                    response = self._handle_appointment_request_with_context(branding_config, tenant_config, session_context)
+                    response = await self._handle_appointment_request_with_context(branding_config, tenant_config, session_context)
                 elif intent == "saludo_apoyo":
                     logger.info(f"[OBJETIVO] RESPUESTA RÁPIDA: saludo_apoyo")
                     response = self._get_greeting_response_with_context(branding_config, session_context, tenant_id=tenant_id)
@@ -1362,21 +1419,26 @@ Responde naturalmente y de forma breve (máximo 150 caracteres):"""
                     response = self._get_volunteer_response_with_context(branding_config, session_context)
                 elif intent == "solicitud_funcional":
                     logger.info(f"🔍 LLEGANDO AL BLOQUE solicitud_funcional - intent: '{intent}'")
+                    # 🔍 DEBUG: Ver qué tenant_config vamos a pasar
+                    logger.info(f"🔍 [solicitud_funcional] tenant_config keys antes de pasar: {list(tenant_config.keys()) if tenant_config else 'None'}")
                     # Respuesta específica para consultas funcionales con contexto de sesión
                     logger.info(f"🎯 PROCESANDO solicitud_funcional - llamando _handle_functional_request_with_session")
                     result = await self._handle_functional_request_with_session(
-                        query, user_context, ai_config, branding_config, tenant_id, session_id
+                        query, user_context, ai_config, branding_config, tenant_id, session_id, tenant_config
                     )
                     
                     # Manejar el nuevo formato de respuesta (puede ser string o tupla)
+                    logger.info(f"🎯 TIPO DE RESULTADO: {type(result)}")
                     if isinstance(result, tuple):
                         response, followup_message = result
-                        logger.info(f"🎯 RESPUESTA GENERADA para solicitud_funcional: {len(response)} caracteres")
+                        logger.info(f"🎯 RESPUESTA GENERADA para solicitud_funcional: {len(response) if response else 0} caracteres")
                         logger.info(f"🎯 FOLLOWUP_MESSAGE generado: {len(followup_message) if followup_message else 0} caracteres")
+                        logger.info(f"🎯 CONTENIDO FOLLOWUP: '{followup_message[:100] if followup_message and len(followup_message) > 0 else ''}...'")
                     else:
                         response = result
-                        followup_message = ""
-                        logger.info(f"🎯 RESPUESTA GENERADA para solicitud_funcional: {len(response)} caracteres")
+                        # 🔧 FIX: NO resetear followup_message aquí - ya está inicializado al inicio
+                        logger.info(f"🎯 RESPUESTA GENERADA para solicitud_funcional: {len(response) if response else 0} caracteres")
+                        logger.info(f"🎯 NO es tupla - tipo: {type(result)}")
                 else:
                     # Procesar según la intención clasificada con IA
                     logger.info(f"🔍 INTENT DETECTADO: '{intent}' - Iniciando procesamiento")
@@ -1478,7 +1540,9 @@ Responde naturalmente y de forma breve (máximo 150 caracteres):"""
             return final_response
             
         except Exception as e:
-            logger.error(f"Error procesando mensaje para tenant {tenant_id}: {str(e)}")
+            logger.error(f"❌❌❌ EXCEPCIÓN EN process_chat_message: {str(e)}")
+            import traceback
+            logger.error(f"❌❌❌ TRACEBACK COMPLETO: {traceback.format_exc()}")
             return {
                 "response": "Lo siento, hubo un error procesando tu mensaje.",
                 "followup_message": "",
@@ -2237,7 +2301,7 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
     
     async def _handle_functional_request_with_session(self, query: str, user_context: Dict[str, Any], 
                                                     ai_config: Dict[str, Any], branding_config: Dict[str, Any], 
-                                                    tenant_id: str, session_id: str) -> str:
+                                                    tenant_id: str, session_id: str, tenant_config: Dict[str, Any] = None) -> str:
         """Maneja solicitudes funcionales con contexto de sesión para respuestas más naturales"""
         try:
             logger.info(f"🔧 INICIANDO _handle_functional_request_with_session para query: '{query}'")
@@ -2246,6 +2310,14 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
             logger.info(f"🔧   - tenant_id: {tenant_id}")
             logger.info(f"🔧   - session_id: {session_id}")
             logger.info(f"🔧   - user_context: {user_context}")
+            
+            # 🔍 DEBUG CRÍTICO: Ver qué tenant_config recibimos
+            logger.info(f"🔧   - tenant_config recibido: {bool(tenant_config)}")
+            logger.info(f"🔧   - tenant_config keys: {list(tenant_config.keys()) if tenant_config else 'None'}")
+            if tenant_config and 'numero_whatsapp' in tenant_config:
+                logger.info(f"✅ [_handle_functional_request_with_session] numero_whatsapp PRESENTE: '{tenant_config['numero_whatsapp']}'")
+            else:
+                logger.warning(f"❌ [_handle_functional_request_with_session] numero_whatsapp NO PRESENTE en tenant_config")
             
             # Obtener contexto de sesión
             session_context = session_context_service.build_context_for_ai(session_id)
@@ -2257,10 +2329,15 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
             
             # Intentar obtener datos reales del usuario
             logger.info(f"🔍 Obteniendo datos del usuario para tenant: {tenant_id}")
-            logger.info(f"🔍 user_context recibido: {user_context}")
+            logger.info(f"🔍 user_context completo: {user_context}")
+            logger.info(f"🔍 phone en user_context: {user_context.get('phone')}")
+            logger.info(f"🔍 user_id en user_context: {user_context.get('user_id')}")
+            logger.info(f"🔍 user_state en user_context: {user_context.get('user_state')}")
+            
             user_data = self._get_user_progress_data(tenant_id, user_context)
             logger.info(f"📊 Datos del usuario obtenidos: {bool(user_data)}")
             logger.info(f"📊 Tipo de user_data: {type(user_data)}")
+            logger.info(f"📊 Contenido de user_data: {user_data}")
             
             # Si no se pudieron obtener datos del servicio Java, usar datos del user_context
             if not user_data and user_context:
@@ -2287,6 +2364,10 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
                 points = user_data.get("points", 0)
                 total_referrals = user_data.get("total_referrals", 0)
                 completed_referrals = user_data.get("completed_referrals", [])
+                # 🔧 FIX: Asegurar que completed_referrals sea una lista
+                if not isinstance(completed_referrals, list):
+                    logger.warning(f"⚠️ completed_referrals no es una lista, es: {type(completed_referrals)}")
+                    completed_referrals = []
                 referral_code = user_data.get("referral_code")
                 
                 logger.info(f"🔍 Datos del usuario procesados:")
@@ -2294,10 +2375,20 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
                 logger.info(f"🔍   - points: {points}")
                 logger.info(f"🔍   - total_referrals: {total_referrals}")
                 logger.info(f"🔍   - referral_code: {referral_code}")
+                logger.info(f"🔍   - Tipo de referral_code: {type(referral_code)}")
+                logger.info(f"🔍   - user_data completo: {user_data}")
                 
-                # Verificar si es solicitud de enlace y generar respuesta directa
+                # Verificar si es solicitud de enlace o consulta de progreso
                 query_lower = query.lower().strip()
                 link_keywords = ["link", "código", "codigo", "referido", "mandame", "dame", "enlace", "compartir", "comparte", "envia", "envía", "link", "url", "mi enlace", "mi código", "mi codigo"]
+                
+                # 🎯 NUEVO: Detectar consultas de progreso del usuario
+                progress_keywords = ["como voy", "cuantos puntos", "cuántos puntos", "mis puntos", "mi progreso", 
+                                      "mis referidos", "cuantos referidos", "cuántos referidos", "ver mis", "estado"]
+                is_progress_query = any(keyword in query_lower for keyword in progress_keywords)
+                logger.info(f"🔍 Es consulta de progreso: {is_progress_query}")
+                logger.info(f"🔍 Query original: '{query}'")
+                logger.info(f"🔍 Query lower: '{query_lower}'")
                 
                 logger.info(f"🔍 Verificando palabras clave de enlace en: '{query_lower}'")
                 logger.info(f"🔍 Palabras clave: {link_keywords}")
@@ -2317,23 +2408,56 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
                 
                 logger.info(f"🔍 Es solicitud de enlace: {is_link_request}")
                 
-                if is_link_request:
-                    logger.info(f"🔗 NUEVO ENFOQUE: Detectada solicitud de enlace - generando respuesta con followup_message")
+                # 🎯 NUEVO: Siempre incluir enlace si es consulta de progreso o solicitud de enlace
+                should_include_link = is_link_request or (is_progress_query and referral_code)
+                logger.info(f"🔍 Incluir enlace: {should_include_link} (es_link: {is_link_request}, es_progreso: {is_progress_query}, referral_code: {bool(referral_code)})")
+                
+                # Si es consulta de progreso pero NO hay código, aún devolver datos del usuario
+                if is_progress_query and not should_include_link:
+                    logger.warning(f"⚠️ Consulta de progreso SIN código de referido")
+                
+                # 🔧 FIX: Crear contextual_prompt ANTES para que esté disponible en todos los casos
+                contextual_prompt = self._build_functional_prompt_with_data(
+                    query, user_context, branding_config, session_context, user_data, tenant_id
+                )
+                
+                if should_include_link:
+                    logger.info(f"🔗 NUEVO ENFOQUE: Generando respuesta con enlace - es_link: {is_link_request}, es_progreso: {is_progress_query}")
                     
                     # Generar enlace de WhatsApp
-                    whatsapp_link = self._generate_whatsapp_referral_link(user_name, referral_code, contact_name, tenant_id, user_context)
+                    whatsapp_link = self._generate_whatsapp_referral_link(user_name, referral_code, contact_name, tenant_id, user_context, tenant_config)
                     
                     if whatsapp_link:
                         # Generar respuesta principal sin enlace
                         points = user_data.get("points", 0)
                         total_referrals = user_data.get("total_referrals", 0)
                         completed_referrals = user_data.get("completed_referrals", [])
+                        # 🔧 FIX: Asegurar que completed_referrals sea una lista
+                        if not isinstance(completed_referrals, list):
+                            logger.warning(f"⚠️ completed_referrals no es una lista, es: {type(completed_referrals)}")
+                            completed_referrals = []
                         
-                        response = f"""¡Claro que sí, {user_name}! 🚀 Aquí tienes la información para que sigas sumando más personas a la campaña de {contact_name}:
+                        # 🎯 Mensaje personalizado según el tipo de consulta
+                        if is_progress_query:
+                            # Consulta de progreso: mensaje motivacional con datos
+                            response = f"""¡Hola {user_name}! 🚀 Aquí está tu progreso:
+
+📊 **Tu progreso:**
+• Puntos: {points}
+• Referidos completados: {len(completed_referrals) if completed_referrals else 0}
+• Total de referidos: {total_referrals}
+• Tu código: {referral_code}
+
+💡 **Tip:** Cada persona que se registre con tu código te suma 50 puntos. Comparte tu enlace para seguir creciendo.
+
+En el siguiente mensaje te envío tu enlace para compartir 📲"""
+                        else:
+                            # Solicitud explícita de enlace
+                            response = f"""¡Claro que sí, {user_name}! 🚀 Aquí tienes tu información para seguir sumando más personas a la campaña de {contact_name}:
 
 📊 **Tu progreso actual:**
 - Puntos: {points}
-- Referidos completados: {len(completed_referrals)}
+- Referidos completados: {len(completed_referrals) if completed_referrals else 0}
 - Total de referidos: {total_referrals}
 - Tu código: {referral_code}
 
@@ -2355,16 +2479,14 @@ En el siguiente mensaje te envío tu enlace para compartir."""
                     logger.info(f"⚠️ Palabras clave disponibles: {link_keywords}")
                     logger.info(f"⚠️ Palabras encontradas: {found_keywords}")
                 
-                # Crear prompt contextualizado con datos reales
-                contextual_prompt = self._build_functional_prompt_with_data(
-                    query, user_context, branding_config, session_context, user_data, tenant_id
-                )
+                # 🔧 FIX: contextual_prompt ya se creó antes, solo generar respuesta con IA
+                logger.info(f"🔧 Usando contextual_prompt creado previamente")
                 
                 # Generar respuesta con IA usando el contexto
                 response_text = await self._generate_content(contextual_prompt, task_type="functional_with_data")
                 
                 logger.info(f"🔧 RETORNANDO respuesta desde _handle_functional_request_with_session (fallback)")
-                return response_text
+                return response_text, ""  # 🔧 FIX: Retornar tupla consistente (response, "")
             else:
                 # Fallback: usar respuesta genérica pero con contexto de sesión
                 contextual_prompt = self._build_functional_prompt_generic(
@@ -2373,12 +2495,21 @@ En el siguiente mensaje te envío tu enlace para compartir."""
                 
                 response_text = await self._generate_content(contextual_prompt, task_type="functional_generic")
                 logger.info(f"🔧 RETORNANDO respuesta desde _handle_functional_request_with_session (genérico)")
-                return response_text
+                return response_text, ""  # 🔧 FIX: Retornar tupla consistente (response, "")
                 
         except Exception as e:
             logger.error(f"Error manejando solicitud funcional con sesión: {str(e)}")
-            # Fallback a respuesta básica
-            return self._handle_functional_request(query, branding_config, tenant_id, user_context)
+            logger.exception(e)  # 🔧 FIX: Imprimir traceback completo
+            # Fallback a respuesta básica - asegurar que retorne tupla
+            try:
+                fallback_response = self._handle_functional_request(query, branding_config, tenant_id, user_context)
+                if isinstance(fallback_response, tuple):
+                    return fallback_response
+                else:
+                    return fallback_response, ""
+            except Exception as fallback_error:
+                logger.error(f"Error en fallback también: {str(fallback_error)}")
+                return f"Lo siento, hubo un error procesando tu solicitud. Intenta de nuevo.", ""
     
     def _build_functional_prompt_with_data(self, query: str, user_context: Dict[str, Any], 
                                          branding_config: Dict[str, Any], session_context: str, 
@@ -2389,6 +2520,10 @@ En el siguiente mensaje te envío tu enlace para compartir."""
         points = user_data.get("points", 0)
         total_referrals = user_data.get("total_referrals", 0)
         completed_referrals = user_data.get("completed_referrals", [])
+        # 🔧 FIX: Asegurar que completed_referrals sea una lista
+        if not isinstance(completed_referrals, list):
+            logger.warning(f"⚠️ completed_referrals no es una lista en _build_functional_prompt_with_data, es: {type(completed_referrals)}")
+            completed_referrals = []
         referral_code = user_data.get("referral_code")
         
         user_name = user.get("name", "Usuario")
@@ -2440,7 +2575,7 @@ DATOS REALES DEL USUARIO:
 - Departamento: {user_state}
 - Puntos actuales: {points}
 - Total de referidos: {total_referrals}
-- Referidos completados: {len(completed_referrals)}
+- Referidos completados: {len(completed_referrals) if completed_referrals else 0}
 - Código de referido: {referral_code}
 {referrals_info}
 
@@ -2493,7 +2628,7 @@ Responde de manera natural:"""
             
             # Generar enlace de WhatsApp
             logger.info(f"🔗 Generando enlace de WhatsApp para {user_name} con código {referral_code}")
-            whatsapp_link = self._generate_whatsapp_referral_link(user_name, referral_code, contact_name, tenant_id, user_context)
+            whatsapp_link = self._generate_whatsapp_referral_link(user_name, referral_code, contact_name, tenant_id, user_context, None)
             logger.info(f"🔗 Enlace generado: {whatsapp_link}")
             logger.info(f"🔗 Longitud del enlace: {len(whatsapp_link) if whatsapp_link else 0}")
             
@@ -2507,28 +2642,29 @@ Responde de manera natural:"""
             completed_referrals = user_data.get("completed_referrals", [])
             
             # Generar respuesta principal (sin enlace)
+            completed_count = len(completed_referrals) if completed_referrals else 0
             response = f"""¡Claro que sí, {user_name}! 🚀 Aquí tienes la información para que sigas sumando más personas a la campaña de {contact_name}:
 
 📊 **Tu progreso actual:**
 - Puntos: {points}
-- Referidos completados: {len(completed_referrals)}
+- Referidos completados: {completed_count}
 - Total de referidos: {total_referrals}
 - Tu código: {referral_code}
 
 ¡Vamos con toda, {user_name}! Con tu ayuda, llegaremos a más rincones de Colombia. 💪🇨🇴"""
 
             if has_followup_link:
-                logger.info(f"🔁 Se enviará segundo mensaje con enlace (len={len(whatsapp_link)})")
+                logger.info(f"🔁 Se enviará segundo mensaje con enlace (len={len(whatsapp_link) if whatsapp_link else 0})")
                 response += "\n\nEn el siguiente mensaje te envío tu enlace para compartir."
             
             # Agregar información especial para el segundo mensaje solo si hay enlace
-            if has_followup_link and whatsapp_link.strip():
+            if has_followup_link and whatsapp_link and whatsapp_link.strip():
                 response += f"\n\n<<<FOLLOWUP_MESSAGE_START>>>{whatsapp_link}<<<FOLLOWUP_MESSAGE_END>>>"
                 logger.info(f"✅ Marcador FOLLOWUP_MESSAGE agregado con enlace válido")
                 logger.info(f"🔗 Enlace completo en marcador: {whatsapp_link}")
             else:
                 logger.warning(f"⚠️ No se agregó marcador FOLLOWUP_MESSAGE - enlace vacío o inválido")
-                logger.warning(f"⚠️ has_followup_link: {has_followup_link}, whatsapp_link: '{whatsapp_link}'")
+                logger.warning(f"⚠️ has_followup_link: {has_followup_link}, whatsapp_link: '{whatsapp_link if whatsapp_link else None}'")
             
             logger.info(f"✅ Respuesta directa generada con seguimiento para {user_name}")
             return response
@@ -2537,11 +2673,11 @@ Responde de manera natural:"""
             logger.error(f"❌ Error generando respuesta directa con seguimiento: {str(e)}")
             return f"¡Hola {user_name}! Tu código de referido es: {referral_code}"
     
-    def _generate_direct_link_response(self, user_name: str, referral_code: str, contact_name: str, tenant_id: str, user_data: Dict[str, Any], user_context: Dict[str, Any] = None) -> str:
+    def _generate_direct_link_response(self, user_name: str, referral_code: str, contact_name: str, tenant_id: str, user_data: Dict[str, Any], user_context: Dict[str, Any] = None, tenant_config: Dict[str, Any] = None) -> str:
         """Genera una respuesta directa con el enlace de WhatsApp cuando se solicita"""
         try:
             # Generar enlace de WhatsApp
-            whatsapp_link = self._generate_whatsapp_referral_link(user_name, referral_code, contact_name, tenant_id, user_context)
+            whatsapp_link = self._generate_whatsapp_referral_link(user_name, referral_code, contact_name, tenant_id, user_context, tenant_config)
             
             if not whatsapp_link:
                 logger.error("❌ No se pudo generar enlace de WhatsApp")
@@ -2553,11 +2689,12 @@ Responde de manera natural:"""
             completed_referrals = user_data.get("completed_referrals", [])
             
             # Generar respuesta directa con enlace
+            completed_count = len(completed_referrals) if completed_referrals else 0
             response = f"""¡Claro que sí, {user_name}! 🚀 Aquí tienes tu enlace de WhatsApp personalizado para que sigas sumando más personas a la campaña de {contact_name}:
 
 📊 **Tu progreso actual:**
 - Puntos: {points}
-- Referidos completados: {len(completed_referrals)}
+- Referidos completados: {completed_count}
 - Total de referidos: {total_referrals}
 - Tu código: {referral_code}
 
@@ -2572,18 +2709,32 @@ En el siguiente mensaje te envío tu enlace para compartir."""
             logger.error(f"❌ Error generando respuesta directa: {str(e)}")
             return f"¡Hola {user_name}! Tu código de referido es: {referral_code}"
     
-    def _generate_whatsapp_referral_link(self, user_name: str, referral_code: str, contact_name: str, tenant_id: str = None, user_context: Dict[str, Any] = None) -> str:
+    def _generate_whatsapp_referral_link(self, user_name: str, referral_code: str, contact_name: str, tenant_id: str = None, user_context: Dict[str, Any] = None, tenant_config: Dict[str, Any] = None) -> str:
         """Genera un enlace de WhatsApp personalizado para referidos"""
         try:
-            # Obtener número de WhatsApp del tenant desde memoria precargada
-            tenant_context = user_context.get('tenant_context', {}) if user_context else {}
-            tenant_config = tenant_context.get('tenant_config', {})
+            # 🔍 DEBUG CRÍTICO: Ver de dónde viene el tenant_config que se usará
+            logger.info(f"🔍 [_generate_whatsapp_referral_link] tenant_config pasado al parámetro: keys={list(tenant_config.keys()) if tenant_config else 'None'}")
+            
+            # Si no se pasó tenant_config como parámetro, intentar obtenerlo desde user_context
+            if not tenant_config:
+                # Obtener número de WhatsApp del tenant desde memoria precargada
+                tenant_context = user_context.get('tenant_context', {}) if user_context else {}
+                tenant_config = tenant_context.get('tenant_config', {})
+                logger.warning(f"⚠️ [_generate_whatsapp_referral_link] tenant_config NO pasado como parámetro, usando de user_context")
+            else:
+                logger.info(f"✅ [_generate_whatsapp_referral_link] tenant_config pasado como parámetro")
+            
+            logger.info(f"🔍 [_generate_whatsapp_referral_link] tenant_config final que se usará: keys={list(tenant_config.keys()) if tenant_config else 'None'}")
+            
             whatsapp_number = self._get_tenant_whatsapp_number(tenant_id, tenant_config)
             # Validar número
+            logger.info(f"📱 Número obtenido de _get_tenant_whatsapp_number: '{whatsapp_number}'")
             if not whatsapp_number or not str(whatsapp_number).strip():
                 logger.warning("⚠️ No hay numero_whatsapp configurado para el tenant; no se generará enlace")
                 return ""
             
+            # 🔧 FIX: Validar que no sea el tenant_id
+           
             logger.info(f"📱 Generando enlace con número: {whatsapp_number}")
             
             # Generar el texto del mensaje que el usuario compartirá
@@ -2624,6 +2775,9 @@ En el siguiente mensaje te envío tu enlace para compartir."""
                 logger.info(f"✅ Usando configuración del tenant {tenant_id} desde memoria precargada para WhatsApp")
                 logger.info(f"📋 Configuración del tenant {tenant_id}: {tenant_config}")
                 if tenant_config:
+                    logger.info(f"📋 TODOS los campos en tenant_config: {list(tenant_config.keys())}")
+                    logger.info(f"📋 Contenido completo de tenant_config: {tenant_config}")
+                    
                     # Aceptar claves alternativas por compatibilidad
                     whatsapp_number = None
                     if "numero_whatsapp" in tenant_config:
@@ -2632,8 +2786,13 @@ En el siguiente mensaje te envío tu enlace para compartir."""
                     elif "whatsapp_number" in tenant_config:
                         whatsapp_number = tenant_config.get("whatsapp_number")
                         logger.info(f"📱 Encontrado whatsapp_number: {whatsapp_number}")
-
+                    
                     if whatsapp_number and str(whatsapp_number).strip():
+                        # 🔧 VALIDACIÓN CRÍTICA: Asegurar que NO sea el tenant_id
+                        if str(whatsapp_number).strip() == str(tenant_id).strip():
+                            logger.error(f"❌ ERROR: El número de WhatsApp es igual al tenant_id '{tenant_id}'. No se generará enlace.")
+                            return ""
+                        
                         logger.info(f"✅ Número de WhatsApp del tenant {tenant_id}: {whatsapp_number}")
                         return str(whatsapp_number).strip()
 
@@ -2690,61 +2849,39 @@ En el siguiente mensaje te envío tu enlace para compartir."""
                 logger.warning("POLITICAL_REFERRALS_SERVICE_URL no configurado")
                 return None
             
-            # Consultar usuario por teléfono
-            user_url = f"{java_service_url}/api/users/by-phone"
-            user_payload = {
+            # 🔧 FIX: Usar endpoint de progreso que retorna todo junto
+            progress_url = f"{java_service_url}/api/users/progress"
+            progress_payload = {
                 "clientProjectId": client_project_id,
                 "phone": phone
             }
             
-            logger.info(f"🔍 Consultando usuario: {user_url} con payload: {user_payload}")
+            logger.info(f"🔍 Consultando progreso de usuario: {progress_url} con payload: {progress_payload}")
             
-            user_response = requests.post(user_url, json=user_payload, timeout=10)
-            logger.info(f"🔍 Respuesta del usuario: status={user_response.status_code}")
-            if user_response.status_code != 200:
-                logger.warning(f"❌ Error consultando usuario: {user_response.status_code}")
-                logger.warning(f"❌ Response text: {user_response.text}")
+            progress_response = requests.post(progress_url, json=progress_payload, timeout=10)
+            logger.info(f"🔍 Respuesta de progreso: status={progress_response.status_code}")
+            if progress_response.status_code != 200:
+                logger.warning(f"❌ Error consultando progreso: {progress_response.status_code}")
+                logger.warning(f"❌ Response text: {progress_response.text}")
                 return None
                 
-            user_data = user_response.json()
-            logger.info(f"🔍 Datos del usuario obtenidos: {user_data}")
-            if not user_data:
-                logger.warning("❌ Usuario no encontrado")
+            progress_data = progress_response.json()
+            logger.info(f"🔍 Datos de progreso obtenidos: {progress_data}")
+            if not progress_data:
+                logger.warning("❌ No se obtuvo progreso del usuario")
                 return None
             
-            # Consultar referidos del usuario
-            referral_code = user_data.get("referralCode")
-            if not referral_code:
-                logger.warning("Usuario no tiene código de referido")
-                return {
-                    "user": user_data,
-                    "referrals": [],
-                    "points": 0,
-                    "referral_code": None
-                }
+            # Extraer datos del usuario y referidos
+            user_data = progress_data.get("user", {})
+            referral_code = user_data.get("referral_code")
+            points = progress_data.get("points", 0)
+            total_referrals = progress_data.get("totalReferrals", 0)
+            completed_referrals_count = progress_data.get("completedReferrals", 0)
+            referrals = progress_data.get("referrals", [])
             
-            # Consultar usuarios referidos por este código
-            referrals_url = f"{java_service_url}/api/users/by-referral-code"
-            referrals_payload = {
-                "clientProjectId": client_project_id,
-                "referralCode": referral_code
-            }
+            logger.info(f"✅ Progreso obtenido: points={points}, total_referrals={total_referrals}, referral_code={referral_code}")
             
-            logger.info(f"Consultando referidos: {referrals_url} con payload: {referrals_payload}")
-            
-            referrals_response = requests.post(referrals_url, json=referrals_payload, timeout=10)
-            referrals = []
-            
-            if referrals_response.status_code == 200:
-                referrals_data = referrals_response.json()
-                if isinstance(referrals_data, list):
-                    referrals = referrals_data
-                elif isinstance(referrals_data, dict) and referrals_data:
-                    referrals = [referrals_data]
-            
-            # Calcular puntos (50 por referido completado)
             completed_referrals = [r for r in referrals if r.get("completed", False)]
-            points = len(completed_referrals) * 50
             
             return {
                 "user": user_data,
@@ -2752,7 +2889,7 @@ En el siguiente mensaje te envío tu enlace para compartir."""
                 "completed_referrals": completed_referrals,
                 "points": points,
                 "referral_code": referral_code,
-                "total_referrals": len(referrals)
+                "total_referrals": total_referrals
             }
             
         except Exception as e:
@@ -2771,10 +2908,11 @@ En el siguiente mensaje te envío tu enlace para compartir."""
             user_name = user.get("name", "Usuario")
             user_city = user.get("city", "tu ciudad")
             
+            completed_count = len(completed_referrals) if completed_referrals else 0
             response = f"""🎯 **¡Hola {user_name}! Aquí está tu progreso:**
 
 [TROFEO] **Tus Puntos Actuales: {points}**
-- Referidos completados: {len(completed_referrals)}
+- Referidos completados: {completed_count}
 - Total de referidos: {total_referrals}
 - Puntos por referido: 50 puntos
 
@@ -3564,8 +3702,8 @@ Responde solo el JSON estricto sin comentarios:
             # 🚀 OPTIMIZACIÓN: Prompt ultra-corto para velocidad máxima con detección de malicia por IA
             prompt = f"""Clasifica este mensaje en UNA de estas categorías:
 - malicioso (insultos, groserías, amenazas, ataques)
-- conocer_candidato (preguntas sobre política)
-- solicitud_funcional (app, referidos, puntos)
+- conocer_candidato (preguntas sobre política, propuestas, candidato)
+- solicitud_funcional (app, referidos, puntos, estado, progreso, consultas funcionales)
 - cita_campaña (agendar reunión)
 - saludo_apoyo (hola, gracias)
 - publicidad_info (pedir material)
@@ -3701,6 +3839,11 @@ Devuelve SOLO el nombre de la categoría:"""
         
         # Patrones de alta confianza (ordenado por especificidad - primero los más específicos)
         patterns = {
+            "solicitud_funcional": [
+                "puntos", "referidos", "app", "aplicación", "estado", "progreso", "como voy",
+                "cuánto", "cuantos", "cuántos", "referidos tengo", "mis puntos", "mi estado",
+                "mis referidos", "tengo puntos", "total referidos", "ver mis"
+            ],
             "conocer_candidato": [
                 "propuestas", "propuesta", "quiero conocer", "conocer", "saber de", "información sobre",
                 "quien es", "qué es", "cómo funciona", "candidato", "políticas", "obras", 
@@ -4685,21 +4828,67 @@ Ejemplos:
             logger.error(f"Error manejando comportamiento malicioso: {str(e)}")
             return "Lo siento, no puedo procesar tu mensaje en este momento."
     
-    def _handle_appointment_request_with_context(self, branding_config: Dict[str, Any], 
+    async def _handle_appointment_request_with_context(self, branding_config: Dict[str, Any], 
                                                tenant_config: Dict[str, Any], session_context: str = "") -> str:
         """Maneja solicitudes de citas con contexto de sesión"""
-        contact_name = branding_config.get("contactName", "el candidato")
-        calendly_link = tenant_config.get("link_calendly", "")
+        contact_name = branding_config.get("contactName", branding_config.get("contact_name", "el candidato"))
         
-        # Si hay contexto de sesión, personalizar la respuesta
-        if session_context:
-            return f"""¡Perfecto! Me alegra que quieras agendar una cita con {contact_name}. 
-            
-Puedes reservar tu cita directamente aquí: {calendly_link}
+        # Obtener link de Calendly desde DB del tenant
+        calendly_link = tenant_config.get("link_calendly", "") if tenant_config else ""
+        
+        # Generar respuesta con IA
+        if calendly_link:
+            logger.info(f"✅ Link de Calendly disponible: {calendly_link}")
+            prompt = f"""Genera una respuesta natural y amigable en español para un chatbot de campaña política. El usuario quiere agendar una cita.
 
-Si tienes alguna pregunta específica sobre la reunión o necesitas ayuda con el proceso, no dudes en preguntarme."""
+Información:
+- Nombre del candidato: {contact_name}
+- Link de Calendly: {calendly_link}
+
+Genera una respuesta breve y conversacional que incluya el link de Calendly."""
         else:
-            return f"""¡Excelente! Para agendar una cita con {contact_name}, puedes usar este enlace: {calendly_link}"""
+            logger.info(f"⚠️ Link de Calendly NO disponible")
+            prompt = f"""Genera una respuesta natural y amigable en español para un chatbot de campaña política. El usuario quiere agendar una cita pero el sistema aún no está disponible.
+
+Información:
+- Nombre del candidato: {contact_name}
+
+Indica que el sistema de citas estará disponible muy pronto."""
+        
+        try:
+            # Generar respuesta con IA usando el modelo
+            if self.model:
+                response_obj = self.model.generate_content(prompt)
+                response = response_obj.text.strip()
+                
+                # Verificar si la respuesta incluye el enlace
+                if calendly_link and calendly_link not in response:
+                    logger.warning(f"⚠️ La IA no incluyó el enlace. Agregándolo ahora...")
+                    # Si no incluye el enlace, agregarlo al final
+                    if not response.endswith('.'):
+                        response += "."
+                    response += f"\n\nPuedes reservar tu cita directamente aquí: {calendly_link}"
+                
+                if not response or len(response.strip()) < 10:
+                    # Fallback
+                    if calendly_link:
+                        return f"¡Perfecto! Puedes reservar tu cita aquí: {calendly_link}"
+                    else:
+                        return f"El sistema de citas estará disponible muy pronto. ¿Te gustaría que te notifique cuando esté listo?"
+                return response
+            else:
+                # Si no hay modelo, usar fallback
+                if calendly_link:
+                    return f"¡Perfecto! Puedes reservar tu cita aquí: {calendly_link}"
+                else:
+                    return "El sistema de citas estará disponible muy pronto."
+        except Exception as e:
+            logger.error(f"Error generando respuesta con IA: {e}")
+            # Fallback final
+            if calendly_link:
+                return f"¡Perfecto! Puedes reservar tu cita aquí: {calendly_link}"
+            else:
+                return "El sistema de citas estará disponible muy pronto."
     
     def _get_greeting_response_with_context(self, branding_config: Dict[str, Any], session_context: str = "", tenant_id: str = None) -> str:
         """Genera saludo con contexto de sesión inteligente - USA PROMPTS DESDE DB"""
@@ -5429,8 +5618,22 @@ Mensaje:"""
             if tenant_id:
                 prompts_from_db = self.persistence_service.get_tenant_prompts(tenant_id)
                 if prompts_from_db:
-                    logger.info(f"✅ Usando prompts desde DB para tenant {tenant_id}: {len(prompts_from_db)} prompts")
-                    return prompts_from_db
+                    # 🔧 FIX: Validar que la estructura es correcta (welcome, contact, name)
+                    required_keys = ['welcome', 'contact', 'name']
+                    if all(key in prompts_from_db for key in required_keys):
+                        logger.info(f"✅ Usando prompts desde DB para tenant {tenant_id}: {len(prompts_from_db)} prompts")
+                        return prompts_from_db
+                    else:
+                        logger.warning(f"⚠️ Prompts en DB tienen estructura incorrecta para tenant {tenant_id}")
+                        logger.warning(f"   Ubicación en DB: Collection='tenant_prompts', Document='{tenant_id}', Field='prompts'")
+                        logger.warning(f"   Estructura actual en DB: {list(prompts_from_db.keys())}")
+                        logger.warning(f"   Contenido actual: {prompts_from_db}")
+                        logger.warning(f"   Estructura esperada: {required_keys}")
+                        logger.info(f"🔄 Regenerando mensajes con estructura correcta...")
+                        logger.info(f"📝 Los nuevos mensajes se guardarán sobrescribiendo la estructura incorrecta")
+                        # Continuar para regenerar los mensajes
+                else:
+                    logger.info(f"ℹ️ No hay prompts en DB para tenant {tenant_id}, generando nuevos")
             
             # 🔍 DEBUG: Log para ver qué se recibe
             logger.info(f"🔍 DEBUG generate_all_initial_messages: tenant_config recibido: {tenant_config}")

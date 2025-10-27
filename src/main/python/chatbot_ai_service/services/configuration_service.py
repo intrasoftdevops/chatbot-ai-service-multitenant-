@@ -110,6 +110,10 @@ class ConfigurationService:
             if "watiTenantId" in normalized:
                 normalized["wati_tenant_id"] = normalized.pop("watiTenantId")
             
+            # 🔧 FIX: Normalizar numeroWhatsapp -> numero_whatsapp
+            if "numeroWhatsapp" in normalized:
+                normalized["numero_whatsapp"] = normalized.pop("numeroWhatsapp")
+            
             logger.info(f"Configuración normalizada: {list(normalized.keys())}")
             return normalized
             

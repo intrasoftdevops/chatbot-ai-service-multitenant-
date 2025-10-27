@@ -44,11 +44,24 @@ class OptimizedAIService:
         
         try:
             # 1. VERIFICAR CONFIGURACIÓN DEL TENANT
-            if not tenant_config:
+            # 🔍 DEBUG CRÍTICO: Ver qué tenant_config estamos recibiendo
+            if tenant_config:
+                self.logger.info(f"✅ [OPTIMIZED] tenant_config RECIBIDO - keys: {list(tenant_config.keys())}")
+                if 'numero_whatsapp' in tenant_config:
+                    self.logger.info(f"✅ [OPTIMIZED] numero_whatsapp PRESENTE: '{tenant_config['numero_whatsapp']}'")
+                else:
+                    self.logger.warning(f"❌ [OPTIMIZED] numero_whatsapp NO PRESENTE en tenant_config")
+            else:
                 self.logger.warning(f"⚠️ No se recibió tenant_config en el request, obteniendo desde servicio Java...")
                 tenant_config = self._get_tenant_config(tenant_id)
                 if not tenant_config:
                     return self._create_error_response("Tenant no encontrado", start_time)
+                # 🔍 DEBUG: Ver qué devolvió _get_tenant_config
+                self.logger.info(f"✅ [OPTIMIZED] tenant_config desde GET - keys: {list(tenant_config.keys())}")
+                if 'numero_whatsapp' in tenant_config:
+                    self.logger.info(f"✅ [OPTIMIZED] numero_whatsapp desde GET: '{tenant_config['numero_whatsapp']}'")
+                else:
+                    self.logger.warning(f"❌ [OPTIMIZED] numero_whatsapp NO en tenant_config desde GET")
             
             # 2. CLASIFICAR INTENCIÓN
             print(f"🎯 [OPTIMIZED] Clasificando intención...")
@@ -87,7 +100,6 @@ class OptimizedAIService:
                     
                     # Obtener información del usuario para logging
                     user_id = user_context.get("user_id", "unknown")
-                    # user_id ya contiene el teléfono con + (ej: +573227281752)
                     phone_number = user_id if user_id != "unknown" else "unknown"
                     
                     self.logger.info(f"🔔 Información de usuario para bloqueo:")
@@ -209,6 +221,93 @@ class OptimizedAIService:
                     self.logger.warning(f"⚠️ Error procesando saludo: {e}")
                     self.logger.exception(e)
             
+            # 🎯 NUEVO: Manejar citas directamente (RÁPIDO)
+            if intent == "cita_campaña":
+                self.logger.info(f"🔍 Intent es cita_campaña - generando respuesta con IA")
+                print(f"🎯 [DEBUG] Intent detectado como cita_campaña")
+                
+                try:
+                    # Obtener configuración del tenant
+                    if not tenant_config:
+                        tenant_config = self._get_tenant_config(tenant_id)
+                    
+                    # Obtener branding y configuración
+                    branding_config = tenant_config.get("branding", {}) if tenant_config else {}
+                    contact_name = branding_config.get("contactName", branding_config.get("contact_name", "el candidato"))
+                    
+                    # Obtener link de Calendly desde DB del tenant
+                    calendly_link = tenant_config.get("link_calendly", "") if tenant_config else ""
+                    
+                    # Generar respuesta con IA basada en si hay link disponible o no
+                    if calendly_link:
+                        self.logger.info(f"✅ Link de Calendly disponible: {calendly_link}")
+                        # Generar respuesta con IA que incluya el link
+                        prompt = f"""Genera una respuesta natural y amigable en español para un chatbot de campaña política. El usuario quiere agendar una cita. 
+
+Información:
+- Nombre del candidato: {contact_name}
+- Link de Calendly: {calendly_link}
+
+Genera una respuesta breve, natural y conversacional que incluya el link de Calendly. La respuesta debe ser cálida y profesional, destacando que pueden agendar cita, conocerse con el candidato, hablar de oportunidades de voluntariado y coordenar actividades."""
+
+                        response = await self._generate_quick_ai_response(prompt)
+                        
+                        # Verificar si la respuesta incluye el enlace
+                        if calendly_link not in response:
+                            self.logger.warning(f"⚠️ La IA no incluyó el enlace. Agregándolo ahora...")
+                            # Si no incluye el enlace, agregarlo al final
+                            if not response.endswith('.'):
+                                response += "."
+                            response += f"\n\nPuedes reservar tu cita directamente aquí: {calendly_link}"
+                        
+                        if not response or len(response.strip()) < 10:
+                            # Fallback si IA no genera buena respuesta
+                            response = f"""¡Perfecto! Te ayudo a agendar una cita con alguien de la campaña.
+
+Puedes reservar tu cita directamente aquí: {calendly_link}
+
+En la reunión podrás conocer más sobre {contact_name}, hablar sobre oportunidades de voluntariado o coordinar actividades en tu región. Si necesitas ayuda, pregúntame."""
+                    else:
+                        self.logger.info(f"⚠️ Link de Calendly NO disponible para tenant {tenant_id}")
+                        # Generar respuesta con IA indicando que pronto estará disponible
+                        prompt = f"""Genera una respuesta natural y amigable en español para un chatbot de campaña política. El usuario quiere agendar una cita pero el sistema de citas aún no está disponible.
+
+Información:
+- Nombre del candidato: {contact_name}
+
+Genera una respuesta breve que indique que el sistema de citas estará disponible muy pronto, pero ofreciendo alternativas como contactar por WhatsApp o esperar a que el sistema esté listo."""
+
+                        response = await self._generate_quick_ai_response(prompt)
+                        
+                        if not response or len(response.strip()) < 10:
+                            # Fallback si IA no genera buena respuesta
+                            response = f"""¡Hola! Me alegra tu interés en agendar una cita con {contact_name}. 
+
+El sistema de citas estará disponible muy pronto. Mientras tanto, puedes contactarnos directamente por WhatsApp o esperar a que esté listo.
+
+¿Te gustaría que te notifique cuando el sistema de citas esté disponible?"""
+                    
+                    processing_time = time.time() - start_time
+                    self.logger.info(f"✅ Respuesta de cita generada con IA ({processing_time:.4f}s)")
+                    print(f"🎯 [CITA] Respuesta generada por IA")
+                    
+                    return {
+                        "response": response,
+                        "followup_message": "",
+                        "from_cache": False,
+                        "processing_time": processing_time,
+                        "tenant_id": tenant_id,
+                        "session_id": session_id,
+                        "intent": intent,
+                        "confidence": confidence,
+                        "user_blocked": False,
+                        "optimized": True
+                    }
+                        
+                except Exception as e:
+                    self.logger.warning(f"⚠️ Error procesando cita: {e}")
+                    self.logger.exception(e)
+            
             # 3. PROCESAR CON SERVICIO BASE (con timeout)
             self.logger.info(f"📚 [OPTIMIZED] Procesando con servicio base...")
             import asyncio
@@ -222,6 +321,13 @@ class OptimizedAIService:
                 processing_user_context['conversation_history'] = conversation_history
                 self.logger.info(f"📚 [OPTIMIZED] Agregando historial al user_context (NO al query)")
                 self.logger.info(f"📚 [OPTIMIZED] Query puro: '{query}'")
+            
+            # 🔍 DEBUG CRÍTICO: Ver qué tenant_config vamos a pasar a base_ai_service
+            self.logger.info(f"🔍 [OPTIMIZED] PREPARANDO para llamar a base_ai_service con tenant_config keys: {list(tenant_config.keys()) if tenant_config else 'None'}")
+            if tenant_config and 'numero_whatsapp' in tenant_config:
+                self.logger.info(f"✅ [OPTIMIZED] numero_whatsapp VA A PASARSE A base_ai_service: '{tenant_config['numero_whatsapp']}'")
+            else:
+                self.logger.warning(f"❌ [OPTIMIZED] numero_whatsapp NO VA A PASARSE A base_ai_service")
             
             try:
                 result = await asyncio.wait_for(
