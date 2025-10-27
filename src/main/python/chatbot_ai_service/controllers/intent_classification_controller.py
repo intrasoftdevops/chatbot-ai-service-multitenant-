@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException
 from typing import Dict, Any
 import logging
 
-from chatbot_ai_service.services.ai_service import AIService
+from chatbot_ai_service.services.ai_service import ai_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["intent-classification"])
@@ -31,7 +31,6 @@ async def classify_intent(tenant_id: str, request: Dict[str, Any]) -> Dict[str, 
         logger.info(f"📝 Mensaje a clasificar: '{message[:50]}...'")
         
         # Clasificar con el servicio de IA
-        ai_service = AIService()
         classification_result = await ai_service.classify_intent(tenant_id, message, user_context)
         
         return {
@@ -64,7 +63,6 @@ async def analyze_registration(tenant_id: str, request: Dict[str, Any]) -> Dict[
         logger.info(f"📊 Estado actual: {current_state}")
         
         # Analizar con el servicio de IA
-        ai_service = AIService()
         analysis_result = await ai_service.analyze_registration_message(tenant_id, message, user_context, current_state)
         
         return {
@@ -95,7 +93,6 @@ async def detect_referral_code(tenant_id: str, request: Dict[str, Any]) -> Dict[
         logger.info(f"📝 Mensaje a analizar: '{message[:50]}...'")
         
         # Detectar código con el servicio de IA
-        ai_service = AIService()
         detection_result = await ai_service.detect_referral_code(tenant_id, message)
         
         return {
@@ -125,7 +122,6 @@ async def validate_data(tenant_id: str, request: Dict[str, Any]) -> Dict[str, An
         logger.info(f"📝 Validando {data_type}: '{data[:50]}...'")
         
         # Validar con el servicio de IA
-        ai_service = AIService()
         validation_result = await ai_service.validate_user_data(tenant_id, data, data_type)
         
         return {
@@ -152,7 +148,6 @@ async def extract_user_name_endpoint(tenant_id: str, request: Dict[str, Any]) ->
         logger.info(f"📝 Extrayendo nombre del usuario del mensaje: '{message[:50]}...'")
         
         # Extraer nombre con el servicio de IA
-        ai_service = AIService()
         extraction_result = await ai_service.extract_user_name_from_message(tenant_id, message)
         
         return {

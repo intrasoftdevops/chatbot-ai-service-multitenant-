@@ -68,6 +68,7 @@ class AIService:
         self.persistence_service = document_index_persistence_service
         
         # 🔧 FIX: Inicializar _validation_cache
+        self._validation_cache = {}
         self._validation_cache = {
             "name": {
                 "santiago": {"is_valid": True, "confidence": 0.95, "reason": "Nombre común válido"},
