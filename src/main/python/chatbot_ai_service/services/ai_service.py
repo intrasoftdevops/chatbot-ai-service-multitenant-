@@ -1127,7 +1127,31 @@ Respuesta:"""
                 logger.error(f"❌ ERROR en clasificación de intención: {str(e)}")
                 intent = "saludo_apoyo"
                 confidence = 0.5
-                logger.info(f"🔍 DEBUG: Usando intención por defecto: '{intent}'")
+            
+            # 🚫 PRIORIDAD CRÍTICA: Si es malicioso, BLOQUEAR INMEDIATAMENTE y NO procesar
+            if intent == "malicioso":
+                logger.warning(f"🚫 Mensaje malicioso detectado por IA en process_chat_message - BLOQUEANDO USUARIO")
+                logger.warning(f"🚫 Mensaje: '{query}'")
+                logger.warning(f"🚫 Confianza: {confidence:.2f}")
+                
+                # Bloquear usuario
+                blocked_response = await self._handle_malicious_behavior(
+                    query, user_context, tenant_id, confidence
+                )
+                
+                # NO enviar respuesta - bloquear silenciosamente
+                logger.warning(f"🚫 Usuario bloqueado - NO enviando respuesta")
+                return {
+                    "response": "",  # Respuesta vacía = no responder
+                    "followup_message": "",
+                    "from_cache": False,
+                    "processing_time": time.time() - start_time,
+                    "tenant_id": tenant_id,
+                    "session_id": session_id,
+                    "intent": "malicioso",
+                    "confidence": confidence,
+                    "user_blocked": True
+                }
             
             # VERIFICAR SI EL USUARIO ESTÁ BLOQUEADO PRIMERO
             user_state = user_context.get("user_state", "")
@@ -1206,12 +1230,9 @@ Respuesta:"""
             # Agregar mensaje del usuario a la sesion
             session_context_service.add_message(session_id, "user", query)
             
-            # 🔧 PRIORIDAD 1: DETECCIÓN DE MENSAJES MALICIOSOS (incluso durante registro)
-            malicious_detection = self._detect_malicious_intent(query)
-            if malicious_detection and malicious_detection.get("is_malicious", False):
-                logger.warning(f"🚫 Mensaje malicioso detectado durante registro: {malicious_detection}")
-                # Manejar comportamiento malicioso inmediatamente
-                return await self._handle_malicious_message(tenant_id, query, user_context, malicious_detection, session_id)
+            # 🔧 PRIORIDAD 1: DETECCIÓN DE MENSAJES MALICIOSOS (ahora por IA en classify_intent)
+            # Nota: La detección de malicia ahora se hace por IA en classify_intent, no por patrones
+            # Esto permite detectar amenazas indirectas, insultos creativos y contenido hostil de manera más inteligente
             
             # 🔧 PRIORIDAD 2: REGISTRO - Verificar si el usuario está en proceso de registro
             user_state = user_context.get("user_state", "")
@@ -1237,6 +1258,36 @@ Respuesta:"""
             # Mostrar solo la clasificacion
             print(f"🎯 INTENCIÓN: {intent}")
             logger.info(f"🔍 DESPUÉS DE CLASIFICACIÓN - intent: '{intent}'")
+            
+            # 🚫 PRIORIDAD CRÍTICA: Si es malicioso, BLOQUEAR INMEDIATAMENTE y NO procesar
+            if intent == "malicioso":
+                logger.warning(f"🚫 Mensaje malicioso detectado por IA - BLOQUEANDO USUARIO INMEDIATAMENTE")
+                logger.warning(f"🚫 Mensaje: '{query}'")
+                logger.warning(f"🚫 Confianza: {confidence:.2f}")
+                
+                # Obtener información del usuario
+                user_id = user_context.get("user_id", "unknown")
+                phone_number = user_context.get("phone_number", user_context.get("phone", "unknown"))
+                
+                # Bloquear usuario
+                blocked_response = await self._handle_malicious_behavior(
+                    query, user_context, tenant_id, confidence
+                )
+                
+                # El handler retorna "" cuando bloquea, así que no enviamos nada
+                logger.warning(f"🚫 Usuario {user_id} bloqueado - NO enviando respuesta")
+                return {
+                    "response": "",  # Respuesta vacía = no responder
+                    "followup_message": "",
+                    "from_cache": False,
+                    "processing_time": time.time() - start_time if 'start_time' in locals() else 0.0,
+                    "tenant_id": tenant_id,
+                    "session_id": session_id,
+                    "intent": "malicioso",
+                    "confidence": confidence,
+                    "user_blocked": True
+                }
+            
             logger.info(f"🔍 JUSTO DESPUÉS DEL PRINT - intent: '{intent}'")
             logger.info(f"🔍 INICIANDO BLOQUE RAG")
             logger.info(f"🔍 DEBUG: Llegando al bloque RAG - intent: '{intent}'")
@@ -3497,69 +3548,24 @@ Responde solo el JSON estricto sin comentarios:
     
     def _detect_malicious_intent(self, message: str) -> Dict[str, Any]:
         """
-        Detecta intención maliciosa de manera inteligente usando análisis contextual
+        ⚠️ DEPRECADO - Ya no se usa detección por patrones/keywords
+        
+        La detección de malicia ahora se hace completamente por IA usando Gemini
+        en el método _classify_with_ai(), que es más inteligente y puede detectar:
+        - Amenazas indirectas
+        - Insultos creativos
+        - Lenguaje codificado
+        - Contexto y sarcasmo
+        - Patrones de hostilidad sutiles
+        
+        Este método se mantiene por compatibilidad pero ya no se llama.
         """
-        message_lower = message.lower().strip()
-        
-        # Indicadores de comportamiento malicioso (no solo palabras, sino patrones)
-        malicious_indicators = {
-            "insultos_directos": [
-                "idiota", "imbécil", "estúpido", "tonto", "bobo", "bruto",
-                "hijueputa", "malparido", "gonorrea", "marica", "chimba",
-                "careverga", "verga", "chimbo", "malparida", "hijuepucha"
-            ],
-            "ataques_campana": [
-                "ladrones", "corruptos", "estafadores", "mentirosos", "falsos",
-                "robando", "estafando", "mintiendo", "engañando"
-            ],
-            "provocacion": [
-                "vete a la mierda", "que se joda", "me importa un carajo",
-                "no me importa", "me vale verga", "me vale mierda"
-            ],
-            "spam_indicators": [
-                "spam", "basura", "mierda", "porquería", "pendejada"
-            ]
-        }
-        
-        # Analizar el mensaje por categorías
-        detected_categories = []
-        confidence_score = 0.0
-        
-        for category, indicators in malicious_indicators.items():
-            for indicator in indicators:
-                if indicator in message_lower:
-                    detected_categories.append(category)
-                    confidence_score += 0.2
-                    break
-        
-        # Detectar patrones de agresividad
-        aggressive_patterns = [
-            r'\b(que\s+se\s+joda|vete\s+a\s+la\s+mierda|me\s+importa\s+un\s+carajo)\b',
-            r'\b(no\s+me\s+importa|me\s+vale\s+verga|me\s+vale\s+mierda)\b',
-            r'\b(eres\s+un|son\s+unos|esto\s+es\s+una)\b.*\b(idiota|imbécil|estafa|mentira)\b'
-        ]
-        
-        import re
-        for pattern in aggressive_patterns:
-            if re.search(pattern, message_lower):
-                detected_categories.append("aggressive_pattern")
-                confidence_score += 0.3
-                break
-        
-        # Calcular confianza final
-        confidence_score = min(confidence_score, 1.0)
-        
-        is_malicious = len(detected_categories) > 0 and confidence_score >= 0.3
-        
-        if is_malicious:
-            logger.warning(f"🚨 Intención maliciosa detectada - Categorías: {detected_categories}, Confianza: {confidence_score:.2f}")
-            logger.warning(f"🚨 Mensaje: '{message}'")
-        
+        # Retornar que NO es malicioso, ya que la detección real se hace por IA
         return {
-            "is_malicious": is_malicious,
-            "categories": detected_categories,
-            "confidence": confidence_score,
-            "reason": "intelligent_intent_detection"
+            "is_malicious": False,
+            "categories": [],
+            "confidence": 0.0,
+            "reason": "deprecated_pattern_detection"
         }
 
     async def _classify_with_ai(self, message: str, user_context: Dict[str, Any], session_context: str = "", tenant_id: str = None) -> Dict[str, Any]:
@@ -3567,16 +3573,9 @@ Responde solo el JSON estricto sin comentarios:
         
         self._ensure_model_initialized()
         
-        # Primero verificar intención maliciosa de manera inteligente
-        malicious_detection = self._detect_malicious_intent(message)
-        if malicious_detection["is_malicious"]:
-            return {
-                "category": "malicioso",
-                "confidence": malicious_detection["confidence"],
-                "original_message": message,
-                "reason": malicious_detection["reason"],
-                "detected_categories": malicious_detection["categories"]
-            }
+        # 🔧 DETECCIÓN DE MALICIA AHORA SE HACE POR IA - Patrones eliminados
+        # La detección de malicia ahora se hace directamente en el prompt de IA con Gemini
+        # que es más inteligente y puede detectar amenazas indirectas, insultos creativos, etc.
         
         # 🚀 OPTIMIZACIÓN: Clasificación híbrida (patrones + IA)
         pattern_result = self._classify_with_patterns(message, user_context)
@@ -3598,38 +3597,26 @@ Responde solo el JSON estricto sin comentarios:
                 if cached_result and time.time() - cached_result.get("timestamp", 0) < 300:  # TTL 5 minutos
                     return cached_result
             
-            # 🚀 OPTIMIZACIÓN: Prompt ultra-corto para velocidad máxima
-            prompt = f"""Analiza este mensaje y clasifícalo en UNA sola categoría:
+            # 🚀 OPTIMIZACIÓN: Prompt ultra-corto para velocidad máxima con detección de malicia por IA
+            prompt = f"""Clasifica este mensaje en UNA de estas categorías:
+- malicioso (insultos, groserías, amenazas, ataques)
+- conocer_candidato (preguntas sobre política)
+- solicitud_funcional (app, referidos, puntos)
+- cita_campaña (agendar reunión)
+- saludo_apoyo (hola, gracias)
+- publicidad_info (pedir material)
+- colaboracion_voluntariado (ofrecer ayudar)
+- quejas (reclamos constructivos)
 
-CATEGORÍAS:
-- saludo_apoyo: Solo saludos/agradecimientos SIN pregunta
-- conocer_candidato: CUALQUIER pregunta sobre candidato o temas políticos
-- solicitud_funcional: Preguntas sobre app (referidos, puntos)
-- cita_campaña: Solicita cita/reunión
-- publicidad_info: Pide material
-- colaboracion_voluntariado: Ofrece ayudar
-- quejas: Reclama o critica
-- malicioso: Ofensivo/amenazante
+Mensaje: "{message}"
 
-MENSAJE: "{message}"
-
-CLASIFICACIÓN PASO A PASO:
-1. ¿Tiene palabras de pregunta? (qué, quién, cuál, cómo, quién, quiénes, cuándo, dónde, por qué)
-   - SI: Si pregunta sobre candidato/temas políticos → conocer_candidato
-   - SI: Si pregunta sobre app → solicitud_funcional
-2. ¿Es SOLO "ok", "sí", "gracias" sin pregunta? → saludo_apoyo
-3. Si NO tiene pregunta clara, mira el CONTENIDO:
-   - "quien es X", "quienes son X", "cual es X" → conocer_candidato
-   - "ok y que es X" → conocer_candidato (IGNORA el "ok")
-   - "ok y quien es X" → conocer_candidato (IGNORA el "ok")
-
-RESPUESTA:"""
+Devuelve SOLO el nombre de la categoría:"""
             
             # 🔧 OPTIMIZACIÓN: Timeout ultra-agresivo (2 segundos)
             import asyncio
             try:
                 response_text = await asyncio.wait_for(
-                    self._generate_content_ultra_fast(prompt, max_tokens=5),
+                    self._generate_content_ultra_fast(prompt, max_tokens=2),
                     timeout=2.0
                 )
             except asyncio.TimeoutError:
@@ -3642,9 +3629,39 @@ RESPUESTA:"""
             
             category = response_text.strip().lower()
             
+            # 🔧 MEJORADO: Extraer SOLO la categoría válida (primera palabra de la respuesta)
+            # Limpiar la respuesta: tomar solo la primera palabra después de limpiar
+            category_clean = category.split()[0] if category.split() else category
+            
+            # Lista de categorías válidas
+            valid_categories = ["malicioso", "saludo_apoyo", "conocer_candidato", "solicitud_funcional", 
+                               "cita_campaña", "publicidad_info", "colaboracion_voluntariado", "quejas"]
+            
+            # Si category_clean es una categoría válida, usar esa
+            if category_clean in valid_categories:
+                category = category_clean
+                logger.info(f"✅ Categoría limpia extraída: '{category}'")
+            elif len(category) > 50:
+                valid_categories = ["malicioso", "saludo_apoyo", "conocer_candidato", "solicitud_funcional", 
+                                   "cita_campaña", "publicidad_info", "colaboracion_voluntariado", "quejas"]
+                
+                # Buscar si contiene alguna categoría válida
+                found_category = None
+                for cat in valid_categories:
+                    if cat in category:
+                        found_category = cat
+                        break
+                
+                if found_category:
+                    logger.info(f"✅ Categoría extraída de respuesta larga: '{found_category}'")
+                    category = found_category
+                else:
+                    logger.warning("⚠️ RESPUESTA LARGA SIN CATEGORÍA VÁLIDA - Usando conocer_candidato")
+                    category = "conocer_candidato"  # Fallback seguro, NO usar fallback inteligente
+            
             # 🔧 OPTIMIZACIÓN: Detección mejorada de bloqueo por safety filters
-            if category in ["hola, ¿en qué puedo ayudarte hoy?", "lo siento, no puedo procesar esa consulta en este momento. por favor, intenta reformular tu pregunta de manera más específica.", "hola", "hello", "hi"] or len(category) > 50:
-                logger.warning("⚠️ GEMINI BLOQUEADO O RESPUESTA LARGA - Usando fallback")
+            if category in ["hola, ¿en qué puedo ayudarte hoy?", "lo siento, no puedo procesar esa consulta en este momento. por favor, intenta reformular tu pregunta de manera más específica.", "hola", "hello", "hi"]:
+                logger.warning("⚠️ GEMINI BLOQUEADO - Usando fallback inteligente")
                 category = self._fallback_intent_classification(message, user_context)
             
             # Detectar si la respuesta es muy genérica (posible bloqueo)
@@ -3701,6 +3718,22 @@ RESPUESTA:"""
     def _classify_with_patterns(self, message: str, user_context: Dict[str, Any]) -> Dict[str, Any]:
         """Clasificación ultra-rápida usando patrones de texto"""
         message_lower = message.lower().strip()
+        
+        # 🚫 PATRÓN CRÍTICO: Detectar malicia PRIMERO
+        malicious_patterns = [
+            "corrupto", "asqueroso", "hp", "hpta", "idiota", "imbécil", "bruto",
+            "ladrón", "ladrones", "ratero", "rateros", "estafa", "mentiroso",
+            "vete a la mierda", "que se joda", "porquería", "basura", "mierda"
+        ]
+        for pattern in malicious_patterns:
+            if pattern in message_lower:
+                logger.warning(f"🚨 MALICIA DETECTADA EN FALLBACK: '{pattern}' en mensaje")
+                return {
+                    "category": "malicioso",
+                    "confidence": 0.9,
+                    "original_message": message,
+                    "reason": "Pattern-based malicious detection"
+                }
         
         # Patrones de alta confianza
         patterns = {
@@ -3799,6 +3832,18 @@ RESPUESTA:"""
             Categoría detectada
         """
         message_lower = message.lower().strip()
+        
+        # 🚫 PRIORIDAD 1: Detectar malicia
+        malicious_patterns = [
+            "corrupto", "asqueroso", "hp", "hpta", "idiota", "imbécil", "bruto",
+            "ladrón", "ladrones", "ratero", "rateros", "estafa", "mentiroso",
+            "vete a la mierda", "que se joda", "porquería", "basura", "mierda",
+            "corruptos", "asquerosos", "hp.", "hpta.", "pelados", "corrupta"
+        ]
+        for pattern in malicious_patterns:
+            if pattern in message_lower:
+                logger.warning(f"🚨 MALICIA DETECTADA EN _fallback_intent_classification: '{pattern}'")
+                return "malicioso"
         
         # Solo detectar casos muy obvios y específicos
         if message_lower in ["hola", "buenos días", "buenas tardes", "buenas noches", "gracias"]:
@@ -4631,13 +4676,11 @@ Ejemplos:
             user_id = user_context.get("user_id", "unknown")
             phone_number = user_context.get("phone", "unknown")
             
-            # Detectar tipo de comportamiento malicioso usando análisis inteligente
-            malicious_analysis = self._detect_malicious_intent(query)
-            behavior_type = "intención maliciosa inteligente"
-            categories = malicious_analysis.get("categories", [])
+            # Comportamiento malicioso detectado por IA (Gemini)
+            # Ya no usamos análisis por patrones, ahora la IA detecta directamente
+            behavior_type = "intención maliciosa detectada por IA"
             
-            logger.warning(f"🚨 {behavior_type.upper()} detectado - Usuario: {user_id}, Tenant: {tenant_id}, Confianza: {confidence:.2f}")
-            logger.warning(f"🚨 Categorías detectadas: {categories}")
+            logger.warning(f"🚨 {behavior_type.upper()} - Usuario: {user_id}, Tenant: {tenant_id}, Confianza: {confidence:.2f}")
             logger.warning(f"🚨 Mensaje malicioso: '{query}'")
             
             # Notificar al servicio Java para bloquear el usuario

@@ -114,10 +114,14 @@ async def process_chat_message(tenant_id: str, request: Dict[str, Any]) -> Dict[
             "session_id": session_id or f"session_{user_context.get('user_id', 'unknown')}",
             "intent": ai_response.get("intent", "unknown"),
             "confidence": ai_response.get("confidence", 0.8),
-            "error": ai_response.get("error")
+            "error": ai_response.get("error"),
+            "user_blocked": ai_response.get("user_blocked", False),  # 🔧 Agregado para soporte de bloqueo
+            "optimized": ai_response.get("optimized", False)  # 🔧 Agregado para soporte de optimización
         }
         
         logger.info(f"✅ Respuesta procesada - followup_message: {bool(followup_message)}")
+        logger.info(f"🔍 user_blocked en respuesta: {response.get('user_blocked')}")
+        logger.info(f"🔍 optimized en respuesta: {response.get('optimized')}")
         
         return response
         

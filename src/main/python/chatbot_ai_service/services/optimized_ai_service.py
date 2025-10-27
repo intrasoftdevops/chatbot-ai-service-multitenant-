@@ -68,6 +68,69 @@ class OptimizedAIService:
                 self.logger.info(f"📊 [CLASIFICACIÓN] Session: {session_id}")
                 print(f"📊 [CLASIFICACIÓN] {'='*50}")
                 self.logger.info(f"📊 [CLASIFICACIÓN] {'='*50}")
+                
+                # 🚫 PRIORIDAD CRÍTICA: Si es malicioso, BLOQUEAR INMEDIATAMENTE y NO procesar
+                if intent == "malicioso":
+                    self.logger.warning(f"🚫🚫🚫 MALICIA DETECTADA - BLOQUEANDO INMEDIATAMENTE")
+                    self.logger.warning(f"🚫 Intent: '{intent}'")
+                    self.logger.warning(f"🚫 Mensaje: '{query}'")
+                    self.logger.warning(f"🚫 Confianza: {confidence:.2f}")
+                    self.logger.warning(f"🚫 Tenant: {tenant_id}")
+                    print(f"🚫🚫🚫 MALICIA DETECTADA EN PYTHON - BLOQUEANDO")
+                    
+                    # Obtener información del usuario para logging
+                    user_id = user_context.get("user_id", "unknown")
+                    # user_id ya contiene el teléfono con + (ej: +573227281752)
+                    phone_number = user_id if user_id != "unknown" else "unknown"
+                    
+                    self.logger.info(f"🔔 Información de usuario para bloqueo:")
+                    self.logger.info(f"   - user_id: {user_id}")
+                    self.logger.info(f"   - phone_number: {phone_number}")
+                    
+                    # Importar el servicio de notificación
+                    from chatbot_ai_service.services.blocking_notification_service import BlockingNotificationService
+                    
+                    # Inicializar servicio de notificación si no existe
+                    if not hasattr(self.base_ai_service, 'blocking_notification_service') or not self.base_ai_service.blocking_notification_service:
+                        blocking_service = BlockingNotificationService()
+                        import os
+                        java_url = os.getenv("POLITICAL_REFERRALS_SERVICE_URL", "http://localhost:8080")
+                        blocking_service.set_java_service_url(java_url)
+                        self.base_ai_service.blocking_notification_service = blocking_service
+                    
+                    # Notificar al servicio Java para bloquear en WATI
+                    self.logger.info(f"🔔 Enviando notificación de bloqueo al servicio Java")
+                    try:
+                        notification_result = await self.base_ai_service.blocking_notification_service.notify_user_blocked(
+                            tenant_id=tenant_id,
+                            user_id=user_id,
+                            phone_number=phone_number,
+                            malicious_message=query,
+                            classification_confidence=confidence
+                        )
+                        self.logger.info(f"🔔 Resultado de notificación: {notification_result}")
+                        
+                        if notification_result.get("success"):
+                            self.logger.info(f"✅ Usuario {user_id} bloqueado en WATI y base de datos")
+                        else:
+                            self.logger.error(f"❌ Error bloqueando usuario: {notification_result.get('error')}")
+                    except Exception as notif_error:
+                        self.logger.error(f"❌ Excepción notificando bloqueo: {str(notif_error)}")
+                    
+                    # NO enviar respuesta - bloquear silenciosamente
+                    self.logger.warning(f"🚫 Usuario {user_id} bloqueado - NO enviando respuesta")
+                    return {
+                        "response": "",  # Respuesta vacía = no responder
+                        "followup_message": "",
+                        "from_cache": False,
+                        "processing_time": time.time() - start_time,
+                        "tenant_id": tenant_id,
+                        "session_id": session_id,
+                        "intent": "malicioso",
+                        "confidence": confidence,
+                        "user_blocked": True,
+                        "optimized": True
+                    }
             except Exception as classify_error:
                 print(f"❌ [CLASIFICACIÓN] ERROR EN CLASIFICACIÓN: {classify_error}")
                 self.logger.error(f"❌ [CLASIFICACIÓN] ERROR EN CLASIFICACIÓN: {classify_error}")
