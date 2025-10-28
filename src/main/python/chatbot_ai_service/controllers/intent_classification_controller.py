@@ -95,8 +95,14 @@ async def detect_referral_code(tenant_id: str, request: Dict[str, Any]) -> Dict[
         # Detectar código con el servicio de IA
         detection_result = await ai_service.detect_referral_code(tenant_id, message)
         
+        logger.info(f"🔍 DEBUG Controller: detection_result completo: {detection_result}")
+        
+        # El servicio Python devuelve "code", pero el controller debe devolver "referral_code"
+        detected_code = detection_result.get("code")
+        logger.info(f"🔍 DEBUG Controller: código extraído 'code': '{detected_code}'")
+        
         return {
-            "referral_code": detection_result.get("referral_code"),
+            "referral_code": detected_code,
             "confidence": detection_result.get("confidence", 0.0),
             "success": True
         }

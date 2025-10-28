@@ -5005,18 +5005,21 @@ Ejemplos:
 """
 
             response_text = await self._generate_content(prompt)
+            logger.info(f"🔍 DEBUG: Respuesta cruda de IA para detección de código: '{response_text}'")
+            
             detected_code = response_text.strip().upper()
+            logger.info(f"🔍 DEBUG: detected_code después de strip y upper: '{detected_code}'")
             
             # Validar que el código tiene exactamente 8 caracteres alfanuméricos
             if detected_code != "NO" and len(detected_code) == 8 and detected_code.isalnum():
-                logger.info(f"Código de referido detectado por IA: {detected_code}")
+                logger.info(f"✅ Código de referido detectado por IA: {detected_code}")
                 return {
                     "code": detected_code,
                     "reason": "Código detectado exitosamente",
                     "original_message": message
                 }
             else:
-                logger.info("No se detectó código de referido válido")
+                logger.info(f"❌ No se detectó código de referido válido. detected_code: '{detected_code}', len: {len(detected_code)}, isalnum: {detected_code.isalnum() if detected_code else False}")
                 return {
                     "code": None,
                     "reason": "No se encontró código válido",
