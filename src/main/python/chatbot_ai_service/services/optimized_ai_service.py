@@ -402,6 +402,40 @@ El sistema para solicitar materiales estará disponible muy pronto. Mientras tan
                     self.logger.warning(f"⚠️ Error procesando publicidad: {e}")
                     self.logger.exception(e)
             
+            # 🤝 NUEVO: Manejar atencion_humano directamente (RÁPIDO)
+            if intent == "atencion_humano":
+                self.logger.info(f"🤝 Intent es atencion_humano - procesando solicitud de atención humana")
+                print(f"🎯 [DEBUG] Intent detectado como atencion_humano")
+                
+                try:
+                    if not tenant_config:
+                        tenant_config = self._get_tenant_config(tenant_id)
+                    
+                    brand_cfg = tenant_config.get("branding", {})
+                    
+                    # Llamar al handler de atención humana
+                    response = await self.base_ai_service._handle_human_assistance_request(
+                        brand_cfg, tenant_config, user_context, ""
+                    )
+                    
+                    processing_time = time.time() - start_time
+                    return {
+                        "response": response,
+                        "followup_message": "",
+                        "from_cache": False,
+                        "processing_time": processing_time,
+                        "tenant_id": tenant_id,
+                        "session_id": session_id,
+                        "intent": intent,
+                        "confidence": confidence,
+                        "user_blocked": False,
+                        "optimized": True,
+                        "needs_human_assistance": user_context.get("_needs_human_assistance", False)
+                    }
+                except Exception as e:
+                    self.logger.warning(f"⚠️ Error procesando atencion_humano: {e}")
+                    self.logger.exception(e)
+            
             # 🎯 NUEVO: Manejar actualizacion_datos directamente (RÁPIDO)
             if intent == "actualizacion_datos":
                 self.logger.info(f"🔍 Intent es actualizacion_datos - llamando al handler específico")

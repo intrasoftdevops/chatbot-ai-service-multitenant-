@@ -317,6 +317,7 @@ class TenantMemoryService:
             "cita_campaña": ["cita", "citas", "agendar", "reunión", "reuniones", "conocer", "hablar"],
             "publicidad_info": ["folleto", "folletos", "material", "materiales", "publicidad", "difusión", "propaganda", "brochure", "panfleto", "información publicitaria"],
             "actualizacion_datos": ["actualizar", "actualizar datos", "corregir", "cambiar", "modificar", "mi nombre es", "mi apellido es", "vivo en", "mi ciudad es", "cambiar mi"],
+            "atencion_humano": ["quiero que me atienda un agente humano", "asesor", "quisiera hablar con un asesor", "hablar con persona", "atencion humana", "agente humano", "quiero hablar con alguien", "necesito un humano", "me atienda una persona"],
             "referidos": ["referido", "referidos", "invitar", "invitar amigos", "compartir", "recomendar"],
             "agradecimiento": ["gracias", "thank you", "muchas gracias", "te agradezco", "appreciate"],
             "despedida": ["adiós", "adios", "bye", "hasta luego", "nos vemos", "chao"],

@@ -1414,6 +1414,9 @@ Responde naturalmente y de forma breve (máximo 150 caracteres):"""
                 elif intent == "publicidad_info":
                     logger.info(f"[OBJETIVO] RESPUESTA RÁPIDA: publicidad_info")
                     response = await self._handle_advertising_info_with_context(branding_config, tenant_config, session_context)
+                elif intent == "atencion_humano":
+                    logger.info(f"[OBJETIVO] RESPUESTA RÁPIDA: atencion_humano")
+                    response = await self._handle_human_assistance_request(branding_config, tenant_config, user_context, session_context)
                 elif intent == "actualizacion_datos":
                     logger.info(f"[OBJETIVO] RESPUESTA RÁPIDA: actualizacion_datos")
                     result = await self._handle_data_update_request(query, user_context, session_context, tenant_id=tenant_id)
@@ -3810,6 +3813,7 @@ Responde solo el JSON estricto sin comentarios:
                 prompt = f"""Clasifica este mensaje en UNA de estas categorías:
 - malicioso (SOLO insultos PERSONALES: "eres un corrupto", "ustedes son mentirosos", amenazas, ataques a personas)
 - conocer_candidato (preguntas sobre política, propuestas, candidato)
+- atencion_humano (solicitar hablar con agente humano, asesor, persona: "quiero agente humano", "asesor", "hablar con alguien")
 - solicitud_funcional (app, referidos, puntos, estado, progreso, consultas funcionales)
 - cita_campaña (agendar reunión)
 - saludo_apoyo (hola, gracias, mensajes positivos)
@@ -3916,7 +3920,7 @@ Devuelve SOLO el nombre de la categoría:"""
             
             # Lista de categorías válidas
             valid_categories = ["malicioso", "saludo_apoyo", "conocer_candidato", "solicitud_funcional", 
-                               "cita_campaña", "publicidad_info", "actualizacion_datos", "colaboracion_voluntariado", "area_colaboracion_select", "quejas", "queja_detalle_select"]
+                               "cita_campaña", "publicidad_info", "actualizacion_datos", "colaboracion_voluntariado", "area_colaboracion_select", "quejas", "queja_detalle_select", "atencion_humano"]
             
             # Si category_clean es una categoría válida, usar esa
             if category_clean in valid_categories:
@@ -5212,6 +5216,35 @@ Indica que el sistema para solicitar materiales estará disponible muy pronto.""
                 return f"¡Perfecto! Puedes solicitar materiales publicitarios aquí: {forms_link}"
             else:
                 return "El sistema para solicitar materiales estará disponible muy pronto."
+    
+    async def _handle_human_assistance_request(self, branding_config: Dict[str, Any], 
+                                               tenant_config: Dict[str, Any],
+                                               user_context: Dict[str, Any],
+                                               session_context: str = "") -> str:
+        """Maneja solicitudes de atención humana - redirecciona a un agente
+        
+        Returns:
+            str: Mensaje indicando que será redirigido a un agente
+        """
+        contact_name = branding_config.get("contactName", branding_config.get("contact_name", "el equipo"))
+        
+        try:
+            logger.info("🤝 [ATENCIÓN HUMANA] Procesando solicitud de atención humana")
+            
+            # Mensaje de confirmación
+            response = f"Perfecto, voy a conectarte con un agente humano para ayudarte mejor. Un momento por favor."
+            
+            # Indizar en user_context que se debe asignar a un team
+            user_context["_needs_human_assistance"] = True
+            user_context["_human_assistance_message"] = response
+            
+            logger.info("✅ [ATENCIÓN HUMANA] Solicitud marcada para redirección a equipo humano")
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error manejando solicitud de atención humana: {e}")
+            return "Entendido, voy a conectarte con un agente humano. Un momento por favor."
     
     async def _handle_data_update_request(self, query: str, user_context: Dict[str, Any], 
                                          session_context: str = "", tenant_id: str = None) -> tuple:
