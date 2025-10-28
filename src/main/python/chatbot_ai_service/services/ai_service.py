@@ -1417,6 +1417,12 @@ Responde naturalmente y de forma breve (máximo 150 caracteres):"""
                 elif intent == "colaboracion_voluntariado":
                     logger.info(f"[OBJETIVO] RESPUESTA RÁPIDA: colaboracion_voluntariado")
                     response = self._get_volunteer_response_with_context(branding_config, session_context)
+                elif intent == "quejas":
+                    logger.info(f"[OBJETIVO] RESPUESTA RÁPIDA: quejas")
+                    response = self._get_complaint_response_with_context(branding_config, session_context)
+                elif intent == "queja_detalle_select":
+                    logger.info(f"[OBJETIVO] RESPUESTA RÁPIDA: queja_detalle_select")
+                    response = self._get_complaint_detail_response_with_context(branding_config, session_context, query)
                 elif intent == "solicitud_funcional":
                     logger.info(f"🔍 LLEGANDO AL BLOQUE solicitud_funcional - intent: '{intent}'")
                     # 🔍 DEBUG: Ver qué tenant_config vamos a pasar
@@ -1490,6 +1496,9 @@ Responde naturalmente y de forma breve (máximo 150 caracteres):"""
                 "confidence": confidence
             }
             
+            # 🎯 MARCADOR ESPECIAL PARA QUEJA_DETALLE_SELECT (para usar en final_response)
+            is_complaint_detail = (intent == "queja_detalle_select")
+            
             cache_service.cache_response(
                 tenant_id=tenant_id,
                 query=query,
@@ -1535,6 +1544,15 @@ Responde naturalmente y de forma breve (máximo 150 caracteres):"""
                 "confidence": confidence,
                 "from_cache": False
             }
+            
+            # 🎯 AGREGAR CAMPO ESPECIAL PARA QUEJA_DETALLE_SELECT
+            if intent == "queja_detalle_select":
+                final_response["complaint_registered"] = True
+                logger.info(f"✅ Campo complaint_registered=True agregado a respuesta")
+            
+            if is_complaint_detail:
+                final_response["complaint_registered"] = True
+                logger.info(f"✅ Campo complaint_registered=True agregado (marcador)")
             
             logger.info(f"✅ DEVOLVIENDO RESPUESTA FINAL: {final_response}")
             return final_response
@@ -3012,6 +3030,15 @@ Puedes preguntarme sobre:
             logger.info(f"🎯 [CLASIFICACIÓN BASE] Tenant ID: {tenant_id}")
             logger.info(f"🎯 [CLASIFICACIÓN BASE] Session ID: {session_id}")
             
+            # 🔍 DEBUG: Verificar si hay historial en user_context
+            if user_context and "conversation_history" in user_context:
+                history = user_context["conversation_history"]
+                logger.info(f"🔍 [CLASIFICACIÓN BASE] Historial detectado en user_context ({len(history) if history else 0} chars)")
+                if history:
+                    logger.info(f"🔍 [CLASIFICACIÓN BASE] Primeros 200 chars de historial: '{history[:200]}...'")
+            else:
+                logger.info(f"🔍 [CLASIFICACIÓN BASE] NO hay historial en user_context")
+            
             # 🚀 OPTIMIZACIÓN: Detección ultra-rápida para saludos comunes
             message_lower = message.lower().strip()
             if message_lower in self._common_responses:
@@ -3679,9 +3706,27 @@ Responde solo el JSON estricto sin comentarios:
         # La detección de malicia ahora se hace directamente en el prompt de IA con Gemini
         # que es más inteligente y puede detectar amenazas indirectas, insultos creativos, etc.
         
-        # 🚀 OPTIMIZACIÓN: Clasificación híbrida (patrones + IA)
+            # 🚀 OPTIMIZACIÓN: Clasificación híbrida (patrones + IA)
         pattern_result = self._classify_with_patterns(message, user_context)
-        if pattern_result["confidence"] > 0.8:
+        
+        # 🐛 DEBUG: Log del resultado de patrones
+        logger.info(f"🔍 [PATTERN DEBUG] Resultado: {pattern_result['category']} (confianza: {pattern_result['confidence']:.2f}) - razon: {pattern_result.get('reason', 'N/A')}")
+        
+        # 🔧 CAMBIO: Solo usar patrones si son MUY específicos (malicia, registro). Para todo lo demás, dejar que la IA decida.
+        # Esto permite que la IA clasifique mejor las quejas implícitas sin depender de keywords
+        if pattern_result["confidence"] > 0.9 and pattern_result["category"] in ["malicioso", "registration_response"]:
+            # 🔧 FIX: Si hay historial de conversación con queja, priorizar queja_detalle_select
+            if user_context and "conversation_history" in user_context:
+                history = user_context["conversation_history"]
+                if history and ("queja" in history.lower() or "reclamo" in history.lower()):
+                    logger.info(f"🔍 [PATTERNS] Historial contiene queja - priorizando queja_detalle_select")
+                    if "no me parece" in message.lower() or "inadecuado" in message.lower() or "malo" in message.lower():
+                        return {
+                            "category": "queja_detalle_select",
+                            "confidence": 0.95,
+                            "original_message": message,
+                            "reason": "Historial + patrón de queja"
+                        }
             return pattern_result
         
         if not self.model:
@@ -3699,17 +3744,86 @@ Responde solo el JSON estricto sin comentarios:
                 if cached_result and time.time() - cached_result.get("timestamp", 0) < 300:  # TTL 5 minutos
                     return cached_result
             
+            # 🔧 DETECTAR SI HAY HISTORIAL DE CONVERSACIÓN PARA MEJORAR LA CLASIFICACIÓN
+            conversation_history = ""
+            if user_context and "conversation_history" in user_context:
+                conversation_history = user_context["conversation_history"]
+                logger.info(f"🔍 [CLASIFICACIÓN] Historial detectado ({len(conversation_history)} chars)")
+            
             # 🚀 OPTIMIZACIÓN: Prompt ultra-corto para velocidad máxima con detección de malicia por IA
-            prompt = f"""Clasifica este mensaje en UNA de estas categorías:
-- malicioso (insultos, groserías, amenazas, ataques)
+            if conversation_history and len(conversation_history) > 0:
+                prompt = f"""Clasifica este mensaje en UNA de estas categorías:
+- malicioso (SOLO insultos PERSONALES: "eres un corrupto", "ustedes son mentirosos", amenazas, ataques a personas)
 - conocer_candidato (preguntas sobre política, propuestas, candidato)
 - solicitud_funcional (app, referidos, puntos, estado, progreso, consultas funcionales)
 - cita_campaña (agendar reunión)
-- saludo_apoyo (hola, gracias)
+- saludo_apoyo (hola, gracias, mensajes positivos)
 - publicidad_info (pedir material)
 - colaboracion_voluntariado (ofrecer ayudar)
 - area_colaboracion_select (respondiendo con un área de colaboración específica: redes, logística, comunicaciones, territorial, jurídicos, programáticos, elecciones, call center, u otro)
-- quejas (reclamos constructivos)
+- quejas (mensaje inicial sobre problema, queja, reclamo, o crítica SIN detalles)
+- queja_detalle_select (mensaje con detalles específicos de problema, falla, error, mal servicio, insatisfacción, críticas al servicio/sistema)
+
+CONTEXTO DE CONVERSACIÓN ANTERIOR:
+{conversation_history}
+
+MENSAJE ACTUAL: "{message}"
+
+REGLAS CRÍTICAS:
+
+1. QUEJA DETALLE_SELECT (detalles de problema):
+   - Mensajes que describen problemas específicos: "esto es malo", "no funciona", "muy lento", "demorado", "deficiente", "no se presta buen servicio", "mala atención", "no sirve", "pésimo servicio"
+   - Críticas al servicio/sistema: "el servicio es horrible", "todo es muy demorado", "no hay buena atención"
+   - Expresiones de insatisfacción con el servicio: "esto no me parece bien", "nada funciona bien"
+   - ⚠️ SIEMPRE que hay críticas al servicio (aunque no diga "queja"), es queja_detalle_select
+
+2. QUEJAS (mensaje inicial sin detalles):
+   - Solo dice "tengo una queja", "quiero hacer un reclamo", "hay un problema" SIN detalles adicionales
+
+3. MALICIOSO (SOLO insultos a personas):
+   - "eres un corrupto", "ustedes son mentirosos", "tú eres un ladrón"
+   - ⚠️ Críticas al servicio NO son maliciosas: "el servicio es malo" ≠ malicio
+
+4. SALUDO_APOYO:
+   - "hola", "gracias", "ok", mensajes positivos
+   - ⚠️ NO uses esto para críticas al servicio
+
+Si el mensaje describe problemas con el servicio/funcionalidad/sistema/atención SIN insultar a personas = queja_detalle_select
+
+Devuelve SOLO el nombre de la categoría:"""
+            else:
+                prompt = f"""Clasifica este mensaje en UNA de estas categorías:
+- malicioso (SOLO insultos PERSONALES: "eres un corrupto", "ustedes son mentirosos", amenazas, ataques a personas)
+- conocer_candidato (preguntas sobre política, propuestas, candidato)
+- solicitud_funcional (app, referidos, puntos, estado, progreso, consultas funcionales)
+- cita_campaña (agendar reunión)
+- saludo_apoyo (hola, gracias, mensajes positivos)
+- publicidad_info (pedir material)
+- colaboracion_voluntariado (ofrecer ayudar)
+- area_colaboracion_select (respondiendo con un área de colaboración específica: redes, logística, comunicaciones, territorial, jurídicos, programáticos, elecciones, call center, u otro)
+- quejas (mensaje inicial sobre problema, queja, reclamo, o crítica SIN detalles)
+- queja_detalle_select (mensaje con detalles específicos de problema, falla, error, mal servicio, insatisfacción, críticas al servicio/sistema)
+
+REGLAS CRÍTICAS:
+
+1. QUEJA DETALLE_SELECT (detalles de problema):
+   - Mensajes que describen problemas específicos: "esto es malo", "no funciona", "muy lento", "demorado", "deficiente", "no se presta buen servicio", "mala atención", "no sirve", "pésimo servicio"
+   - Críticas al servicio/sistema: "el servicio es horrible", "todo es muy demorado", "no hay buena atención", "aqui no se presta buen servicio"
+   - Expresiones de insatisfacción con el servicio: "esto no me parece bien", "nada funciona bien"
+   - ⚠️ SIEMPRE que hay críticas al servicio (aunque no diga "queja"), es queja_detalle_select
+
+2. QUEJAS (mensaje inicial sin detalles):
+   - Solo dice "tengo una queja", "quiero hacer un reclamo", "hay un problema" SIN detalles adicionales
+
+3. MALICIOSO (SOLO insultos a personas):
+   - "eres un corrupto", "ustedes son mentirosos", "tú eres un ladrón"
+   - ⚠️ Críticas al servicio NO son maliciosas: "el servicio es malo" ≠ malicio
+
+4. SALUDO_APOYO:
+   - "hola", "gracias", "ok", mensajes positivos
+   - ⚠️ NO uses esto para críticas al servicio
+
+Si el mensaje describe problemas con el servicio/funcionalidad/sistema/atención SIN insultar a personas = queja_detalle_select
 
 Mensaje: "{message}"
 
@@ -3717,9 +3831,13 @@ Devuelve SOLO el nombre de la categoría:"""
             
             # 🔧 OPTIMIZACIÓN: Timeout ultra-agresivo (2 segundos)
             import asyncio
+            
+            # 🐛 DEBUG: Log del prompt para ver qué está recibiendo la IA
+            logger.info(f"🔍 [PROMPT DEBUG] Prompt completo:\n{prompt[:500]}...")
+            
             try:
                 response_text = await asyncio.wait_for(
-                    self._generate_content_ultra_fast(prompt, max_tokens=2),
+                    self._generate_content_ultra_fast(prompt, max_tokens=20),
                     timeout=2.0
                 )
             except asyncio.TimeoutError:
@@ -3732,13 +3850,16 @@ Devuelve SOLO el nombre de la categoría:"""
             
             category = response_text.strip().lower()
             
+            # 🐛 DEBUG: Log la respuesta de la IA
+            logger.info(f"🔍 [IA DEBUG] Respuesta de IA: '{response_text}' -> category: '{category}'")
+            
             # 🔧 MEJORADO: Extraer SOLO la categoría válida (primera palabra de la respuesta)
             # Limpiar la respuesta: tomar solo la primera palabra después de limpiar
             category_clean = category.split()[0] if category.split() else category
             
             # Lista de categorías válidas
             valid_categories = ["malicioso", "saludo_apoyo", "conocer_candidato", "solicitud_funcional", 
-                               "cita_campaña", "publicidad_info", "colaboracion_voluntariado", "area_colaboracion_select", "quejas"]
+                               "cita_campaña", "publicidad_info", "colaboracion_voluntariado", "area_colaboracion_select", "quejas", "queja_detalle_select"]
             
             # Si category_clean es una categoría válida, usar esa
             if category_clean in valid_categories:
@@ -3778,7 +3899,7 @@ Devuelve SOLO el nombre de la categoría:"""
             valid_categories = [
                 "malicioso", "cita_campaña", "saludo_apoyo", "publicidad_info", 
                 "conocer_candidato", "actualizacion_datos", "solicitud_funcional", 
-                "colaboracion_voluntariado", "quejas", "lider", "atencion_humano", 
+                "colaboracion_voluntariado", "quejas", "queja_detalle_select", "lider", "atencion_humano", 
                 "atencion_equipo_interno", "registration_response"
             ]
             
@@ -3822,15 +3943,57 @@ Devuelve SOLO el nombre de la categoría:"""
         """Clasificación ultra-rápida usando patrones de texto"""
         message_lower = message.lower().strip()
         
-        # 🚫 PATRÓN CRÍTICO: Detectar malicia PRIMERO
+        # 🎯 PRIORIDAD 1: Detectar quejas implícitas ANTES de patrones exactos
+        # Palabras sobre servicio/sistema
+        service_words = [
+            "servicio", "sistema", "esto", "esta", "app", "aplicación",
+            "atención", "atencion", "proceso", "plataforma", "soporte",
+            "funcionalidad", "característica", "feature", "aqui", "aquí",
+            "todo", "algo", "nada", "ninguno", "ninguna"
+        ]
+        
+        # Indicadores de queja implícita
+        queja_indicators = [
+            "malo", "mala", "mal", "muy mal", "malísimo", "malísima",
+            "pésimo", "pésima", "terrible", "horrible", "deplorable",
+            "deficiente", "no funciona", "no sirve", "no está bien",
+            "no me gusta", "no me parece", "no es bueno", "no es adecuado",
+            "inadecuado", "mal servicio", "servicio malo", "muy lento",
+            "no funciona bien", "no sirve bien", "problema con",
+            "no se presta", "no presta", "no hay buen", "no hay buena",
+            "muy demorado", "demorado", "lento", "tarda", "demasiado",
+            "mala atención", "pésima atención", "horrible atención"
+        ]
+        
+        has_queja_indicator = any(indicator in message_lower for indicator in queja_indicators)
+        has_service_word = any(word in message_lower for word in service_words)
+        
+        if has_queja_indicator and (has_service_word or len(message_lower) > 20):
+            has_personal_attack = any(word in message_lower for word in ["tú", "tu", "usted", "ustedes", "eres", "son"])
+            if not has_personal_attack:
+                logger.info(f"🎯 QUEJA IMPLÍCITA DETECTADA: '{message}' -> críticas al servicio")
+                return {
+                    "category": "queja_detalle_select",
+                    "confidence": 0.85,
+                    "original_message": message,
+                    "reason": "Queja implícita sobre servicio"
+                }
+        
+        # 🚫 PRIORIDAD 2: Detectar malicia
         malicious_patterns = [
             "corrupto", "asqueroso", "hp", "hpta", "idiota", "imbécil", "bruto",
             "ladrón", "ladrones", "ratero", "rateros", "estafa", "mentiroso",
-            "vete a la mierda", "que se joda", "porquería", "basura", "mierda"
+            "vete a la mierda", "que se joda", "porquería", "basura", "mierda",
+            "tú eres", "ustedes son", "eres un", "son unos", "vete a", "que se muera",
+            "chupa", "idiota", "imbécil", "hijo de", "malparido", "hpta"
         ]
+        
         for pattern in malicious_patterns:
             if pattern in message_lower:
-                logger.warning(f"🚨 MALICIA DETECTADA EN FALLBACK: '{pattern}' en mensaje")
+                if "queja" in message_lower or "reclamo" in message_lower:
+                    logger.info(f"🎯 MENSAJE TIENE QUEJA: saltando detección de malicia por '{pattern}'")
+                    break
+                logger.warning(f"🚨 MALICIA DETECTADA: '{pattern}' en mensaje")
                 return {
                     "category": "malicioso",
                     "confidence": 0.9,
@@ -3875,13 +4038,46 @@ Devuelve SOLO el nombre de la categoría:"""
             ],
             "quejas": [
                 "queja", "reclamo", "problema", "mal servicio", "no funciona",
-                "error", "falla", "defecto"
+                "error", "falla", "defecto", "no me parece", "me parece que",
+                "no está bien", "no funciona bien", "servicio adecuado",
+                "inadecuado", "malo", "pésimo", "deficiente"
+            ],
+            "queja_detalle_select": [
+                "mi queja es", "mi reclamo es", "el problema es", "lo que pasó",
+                "lo que sucedió", "detalle", "detalles", "explicar",
+                "no me parece", "me parece que no", "mal servicio", "muy lento",
+                "no funciona", "está mal", "inadecuado", "no se presta", "no presta",
+                "demorado", "muy demorado", "lento", "tarda", "demasiado",
+                "no hay buen servicio", "no hay buena atención", "mala atención"
             ],
             "registration_response": [
                 "me llamo", "mi nombre es", "soy", "vivo en", "mi ciudad es",
                 "mi teléfono es", "mi email es"
             ]
         }
+        
+        # 🎯 DETECCIÓN ESPECIAL: Queja completa en un solo mensaje
+        # Si el mensaje contiene "tengo una queja" Y además detalles adicionales, es queja_detalle_select
+        if "tengo una queja" in message_lower or "tengo queja" in message_lower:
+            # Verificar si hay detalles adicionales (más de 20 caracteres adicionales)
+            queja_pos = message_lower.find("queja")
+            if queja_pos != -1 and len(message_lower) > queja_pos + 35:  # Más de 35 chars después de "queja" = hay detalles
+                logger.info(f"🎯 QUEJA COMPLETA DETECTADA: '{message}' tiene queja + detalles")
+                return {
+                    "category": "queja_detalle_select",
+                    "confidence": 0.95,
+                    "original_message": message,
+                    "reason": "Queja completa en un solo mensaje"
+                }
+            else:
+                # Solo dice "tengo una queja" sin detalles
+                logger.info(f"🎯 QUEJA INICIAL DETECTADA: '{message}'")
+                return {
+                    "category": "quejas",
+                    "confidence": 0.9,
+                    "original_message": message,
+                    "reason": "Mensaje inicial de queja"
+                }
         
         # Buscar coincidencias exactas primero
         for category, pattern_list in patterns.items():
@@ -4972,6 +5168,35 @@ Indica que el sistema de citas estará disponible muy pronto."""
 Elige una opción o cuéntame directamente en qué te gustaría ayudar."""
         
         return volunteer_response
+
+    def _get_complaint_response_with_context(self, branding_config: Dict[str, Any], session_context: str = "") -> str:
+        """Genera respuesta inicial para quejas solicitando más detalles"""
+        contact_name = branding_config.get("contactName", "el candidato")
+        
+        # Respuesta pidiendo detalles de la queja
+        complaint_response = f"""Entiendo que tienes una inquietud o queja. Tu opinión es muy importante para {contact_name} y queremos ayudarte.
+
+Por favor, compárteme más detalles sobre tu queja o reclamo. Puedes contarme:
+• ¿Qué sucedió?
+• ¿Cuándo pasó?
+• ¿Quién estuvo involucrado?
+
+Describe tu situación y con gusto te ayudaré a resolverla o la transmitiré al equipo correspondiente."""
+        
+        return complaint_response
+
+    def _get_complaint_detail_response_with_context(self, branding_config: Dict[str, Any], session_context: str = "", complaint_detail: str = "") -> str:
+        """Genera respuesta de confirmación de queja registrada"""
+        contact_name = branding_config.get("contactName", "el candidato")
+        
+        # Respuesta confirmando recepción de queja
+        complaint_confirmation = f"""Gracias por compartir los detalles de tu queja o reclamo. He registrado la información y la he enviado al equipo correspondiente de la campaña.
+
+{contact_name} y su equipo tomarán cartas en el asunto para resolver tu inquietud lo antes posible.
+
+Tu opinión es muy valiosa para nosotros. ¿Hay algo más en lo que pueda ayudarte?"""
+        
+        return complaint_confirmation
 
 
     async def validate_user_data(self, tenant_id: str, data: str, data_type: str) -> Dict[str, Any]:

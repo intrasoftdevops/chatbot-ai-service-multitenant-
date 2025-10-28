@@ -67,7 +67,13 @@ class OptimizedAIService:
             print(f"🎯 [OPTIMIZED] Clasificando intención...")
             self.logger.info(f"🎯 [OPTIMIZED] Clasificando intención...")
             try:
-                intent_result = await self._classify_intent_optimized(tenant_id, query, user_context)
+                # 🔧 AGREGAR HISTORIAL AL USER_CONTEXT ANTES DE CLASIFICAR
+                classification_user_context = user_context.copy() if user_context else {}
+                if conversation_history:
+                    classification_user_context['conversation_history'] = conversation_history
+                    self.logger.info(f"📚 [CLASIFICACIÓN] Historial incluido en user_context ({len(conversation_history)} chars)")
+                
+                intent_result = await self._classify_intent_optimized(tenant_id, query, classification_user_context)
                 intent = intent_result.get("category", "saludo_apoyo")
                 confidence = intent_result.get("confidence", 0.0)
                 
@@ -88,6 +94,7 @@ class OptimizedAIService:
                 # 🎯 DEBUG: Verificar si es saludo antes del bloque de malicia
                 print(f"🎯 [DEBUG] Intent después de clasificación: '{intent}'")
                 print(f"🎯 [DEBUG] ¿Es saludo_apoyo? {intent == 'saludo_apoyo'}")
+                print(f"🎯 [DEBUG] ¿Es queja_detalle_select? {intent == 'queja_detalle_select'}")
                 
                 # 🚫 PRIORIDAD CRÍTICA: Si es malicioso, BLOQUEAR INMEDIATAMENTE y NO procesar
                 if intent == "malicioso":
@@ -413,6 +420,101 @@ Tu información ha sido registrada. {contact_name} y el equipo de campaña estar
                         
                 except Exception as e:
                     self.logger.warning(f"⚠️ Error procesando selección de área: {e}")
+                    self.logger.exception(e)
+            
+            # 🎯 NUEVO: Manejar quejas directamente (RÁPIDO)
+            if intent == "quejas":
+                self.logger.info(f"🔍 Intent es quejas - generando respuesta solicitando más detalles")
+                print(f"🎯 [DEBUG] Intent detectado como quejas")
+                
+                try:
+                    # Obtener configuración del tenant
+                    if not tenant_config:
+                        tenant_config = self._get_tenant_config(tenant_id)
+                    
+                    # Obtener branding y configuración
+                    branding_config = tenant_config.get("branding", {}) if tenant_config else {}
+                    contact_name = branding_config.get("contactName", branding_config.get("contact_name", "el candidato"))
+                    
+                    # Generar respuesta solicitando más detalles
+                    response = f"""Entiendo que tienes una inquietud o queja. Tu opinión es muy importante para {contact_name} y queremos ayudarte.
+
+Por favor, compárteme más detalles sobre tu queja o reclamo. Puedes contarme:
+• ¿Qué sucedió?
+• ¿Cuándo pasó?
+• ¿Quién estuvo involucrado?
+
+Describe tu situación y con gusto te ayudaré a resolverla o la transmitiré al equipo correspondiente."""
+                    
+                    processing_time = time.time() - start_time
+                    self.logger.info(f"✅ Respuesta de quejas generada ({processing_time:.4f}s)")
+                    print(f"🎯 [QUEJAS] Respuesta generada")
+                    
+                    return {
+                        "response": response,
+                        "followup_message": "",
+                        "from_cache": False,
+                        "processing_time": processing_time,
+                        "tenant_id": tenant_id,
+                        "session_id": session_id,
+                        "intent": intent,
+                        "confidence": confidence,
+                        "user_blocked": False,
+                        "optimized": True
+                    }
+                        
+                except Exception as e:
+                    self.logger.warning(f"⚠️ Error procesando quejas: {e}")
+                    self.logger.exception(e)
+            
+            # 🎯 NUEVO: Manejar queja_detalle_select (RÁPIDO)
+            print(f"🎯 [DEBUG PRE-QUEJA_DETALLE] Intent: '{intent}', ¿Es queja_detalle_select? {intent == 'queja_detalle_select'}")
+            if intent == "queja_detalle_select":
+                self.logger.info(f"🔍 Intent es queja_detalle_select - confirmando registro de queja")
+                print(f"🎯 [DEBUG] Intent detectado como queja_detalle_select - ENTRANDO AL BLOQUE")
+                
+                try:
+                    # Obtener configuración del tenant
+                    if not tenant_config:
+                        tenant_config = self._get_tenant_config(tenant_id)
+                    
+                    # Obtener branding y configuración
+                    branding_config = tenant_config.get("branding", {}) if tenant_config else {}
+                    contact_name = branding_config.get("contactName", branding_config.get("contact_name", "el candidato"))
+                    
+                    # Generar respuesta de confirmación
+                    response = f"""Gracias por compartir los detalles de tu queja o reclamo. He registrado la información y la he enviado al equipo correspondiente de la campaña.
+
+{contact_name} y su equipo tomarán cartas en el asunto para resolver tu inquietud lo antes posible.
+
+Tu opinión es muy valiosa para nosotros. ¿Hay algo más en lo que pueda ayudarte?"""
+                    
+                    processing_time = time.time() - start_time
+                    self.logger.info(f"✅ Respuesta de confirmación de queja generada ({processing_time:.4f}s)")
+                    print(f"🎯 [QUEJA_DETALLE] Respuesta generada")
+                    
+                    result_dict = {
+                        "response": response,
+                        "followup_message": "",
+                        "from_cache": False,
+                        "processing_time": processing_time,
+                        "tenant_id": tenant_id,
+                        "session_id": session_id,
+                        "intent": intent,
+                        "confidence": confidence,
+                        "user_blocked": False,
+                        "optimized": True,
+                        "complaint_registered": True  # Información extra para que Java sepa que se registró la queja
+                    }
+                    
+                    print(f"🎯 [QUEJA_DETALLE] RESULTADO FINAL: {result_dict}")
+                    self.logger.info(f"🎯 [QUEJA_DETALLE] Keys en resultado: {list(result_dict.keys())}")
+                    self.logger.info(f"🎯 [QUEJA_DETALLE] complaint_registered: {result_dict.get('complaint_registered')}")
+                    
+                    return result_dict
+                        
+                except Exception as e:
+                    self.logger.warning(f"⚠️ Error procesando queja_detalle: {e}")
                     self.logger.exception(e)
             
             # 3. PROCESAR CON SERVICIO BASE (con timeout)
