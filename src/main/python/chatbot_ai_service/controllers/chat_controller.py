@@ -211,12 +211,14 @@ async def process_chat_message(tenant_id: str, request: Dict[str, Any]) -> Dict[
             "confidence": ai_response.get("confidence", 0.8),
             "error": ai_response.get("error"),
             "user_blocked": ai_response.get("user_blocked", False),  # 🔧 Agregado para soporte de bloqueo
-            "optimized": ai_response.get("optimized", False)  # 🔧 Agregado para soporte de optimización
+            "optimized": ai_response.get("optimized", False),  # 🔧 Agregado para soporte de optimización
+            "collaboration_area": ai_response.get("collaboration_area")  # 🎯 Agregado para guardar área de colaboración
         }
         
         logger.info(f"✅ Respuesta procesada - followup_message: {bool(followup_message)}")
         logger.info(f"🔍 user_blocked en respuesta: {response.get('user_blocked')}")
         logger.info(f"🔍 optimized en respuesta: {response.get('optimized')}")
+        logger.info(f"🔍 collaboration_area en respuesta: {response.get('collaboration_area')}")
         
         # 🆕 NUEVO: Actualizar memoria del tenant de forma asíncrona (no bloquea la respuesta)
         _update_tenant_memory_async(tenant_id, query, clean_response, ai_response.get("intent"), session_id)

@@ -308,6 +308,113 @@ El sistema de citas estará disponible muy pronto. Mientras tanto, puedes contac
                     self.logger.warning(f"⚠️ Error procesando cita: {e}")
                     self.logger.exception(e)
             
+            # 🎯 NUEVO: Manejar colaboracion_voluntariado directamente (RÁPIDO)
+            if intent == "colaboracion_voluntariado":
+                self.logger.info(f"🔍 Intent es colaboracion_voluntariado - generando respuesta con opciones de área")
+                print(f"🎯 [DEBUG] Intent detectado como colaboracion_voluntariado")
+                
+                try:
+                    # Obtener configuración del tenant
+                    if not tenant_config:
+                        tenant_config = self._get_tenant_config(tenant_id)
+                    
+                    # Obtener branding y configuración
+                    branding_config = tenant_config.get("branding", {}) if tenant_config else {}
+                    contact_name = branding_config.get("contactName", branding_config.get("contact_name", "el candidato"))
+                    
+                    # Generar respuesta con opciones de colaboración
+                    response = f"""¡Excelente que quieras apoyarnos! {contact_name} valora mucho la colaboración de personas comprometidas como tú.
+
+¿En qué área te gustaría colaborar?
+
+1. Redes sociales
+2. Comunicaciones
+3. Temas programáticos
+4. Logística
+5. Temas jurídicos
+6. Trabajo territorial
+7. Día de elecciones
+8. Call center
+9. Otro (¿cuál?)
+
+Elige una opción o cuéntame directamente en qué te gustaría ayudar."""
+                    
+                    processing_time = time.time() - start_time
+                    self.logger.info(f"✅ Respuesta de colaboracion generada ({processing_time:.4f}s)")
+                    print(f"🎯 [COLABORACION] Respuesta generada")
+                    
+                    return {
+                        "response": response,
+                        "followup_message": "",
+                        "from_cache": False,
+                        "processing_time": processing_time,
+                        "tenant_id": tenant_id,
+                        "session_id": session_id,
+                        "intent": intent,
+                        "confidence": confidence,
+                        "user_blocked": False,
+                        "optimized": True
+                    }
+                        
+                except Exception as e:
+                    self.logger.warning(f"⚠️ Error procesando colaboracion: {e}")
+                    self.logger.exception(e)
+            
+            # 🎯 NUEVO: Manejar selección de área de colaboración (RÁPIDO)
+            if intent == "area_colaboracion_select":
+                self.logger.info(f"🔍 Intent es area_colaboracion_select - confirmando selección de área")
+                print(f"🎯 [DEBUG] Intent detectado como area_colaboracion_select")
+                
+                try:
+                    # Obtener configuración del tenant
+                    if not tenant_config:
+                        tenant_config = self._get_tenant_config(tenant_id)
+                    
+                    # Obtener branding y configuración
+                    branding_config = tenant_config.get("branding", {}) if tenant_config else {}
+                    contact_name = branding_config.get("contactName", branding_config.get("contact_name", "el candidato"))
+                    
+                    # Extraer el área de colaboración del mensaje
+                    area = self._extract_collaboration_area(query)
+                    self.logger.info(f"🔍 Área extraída del mensaje: '{area}'")
+                    print(f"🔍 [AREA_SELECT] Área extraída: '{area}'")
+                    
+                    # Mapear el área a formato consistente
+                    area_mapped = self._map_collaboration_area(area)
+                    self.logger.info(f"🔍 Área mapeada para BD: '{area_mapped}'")
+                    print(f"🔍 [AREA_SELECT] Área mapeada: '{area_mapped}'")
+                    
+                    # Generar respuesta de confirmación
+                    response = f"""¡Perfecto! Has seleccionado: **{area.title()}**
+
+Tu información ha sido registrada. {contact_name} y el equipo de campaña estarán en contacto contigo pronto para coordinar tu participación en esta área.
+
+¡Gracias por tu compromiso y por querer ser parte del cambio! 🙌"""
+                    
+                    processing_time = time.time() - start_time
+                    self.logger.info(f"✅ Respuesta de confirmación de área generada ({processing_time:.4f}s)")
+                    print(f"🎯 [AREA_SELECT] Respuesta generada para área: {area_mapped}")
+                    self.logger.info(f"🎯 [AREA_SELECT] Enviando collaboration_area: '{area_mapped}' en respuesta")
+                    print(f"🎯 [AREA_SELECT] collaboration_area que se enviará: '{area_mapped}'")
+                    
+                    return {
+                        "response": response,
+                        "followup_message": "",
+                        "from_cache": False,
+                        "processing_time": processing_time,
+                        "tenant_id": tenant_id,
+                        "session_id": session_id,
+                        "intent": intent,
+                        "confidence": confidence,
+                        "user_blocked": False,
+                        "optimized": True,
+                        "collaboration_area": area_mapped  # Información extra para que Java actualice el usuario
+                    }
+                        
+                except Exception as e:
+                    self.logger.warning(f"⚠️ Error procesando selección de área: {e}")
+                    self.logger.exception(e)
+            
             # 3. PROCESAR CON SERVICIO BASE (con timeout)
             self.logger.info(f"📚 [OPTIMIZED] Procesando con servicio base...")
             import asyncio
@@ -403,6 +510,56 @@ El sistema de citas estará disponible muy pronto. Mientras tanto, puedes contac
                     "session_id": session_id,
                     "optimized": True
                 }
+    
+    def _extract_collaboration_area(self, message: str) -> str:
+        """Extrae el área de colaboración del mensaje del usuario"""
+        message_lower = message.lower().strip()
+        
+        # Mapeo de patrones a áreas
+        area_patterns = {
+            "redes sociales": ["redes sociales", "redes", "1"],
+            "comunicaciones": ["comunicaciones", "2"],
+            "temas programáticos": ["temas programáticos", "programaticos", "3"],
+            "logística": ["logistica", "logística", "4"],
+            "temas jurídicos": ["temas jurídicos", "juridicos", "5"],
+            "trabajo territorial": ["trabajo territorial", "territorial", "6"],
+            "día de elecciones": ["dia de elecciones", "elecciones", "7"],
+            "call center": ["call center", "callcenter", "8"],
+            "otro": ["otro", "otra", "9"]
+        }
+        
+        # Buscar coincidencias
+        for area, patterns in area_patterns.items():
+            for pattern in patterns:
+                if pattern in message_lower:
+                    return area
+        
+        # Si no encuentra nada específico, retornar el mensaje original
+        return message.strip()
+    
+    def _map_collaboration_area(self, area: str) -> str:
+        """Mapea el área a un formato consistente para la base de datos"""
+        area_lower = area.lower().strip()
+        
+        # Mapeo a formato snake_case
+        mapping = {
+            "redes sociales": "redes_sociales",
+            "comunicaciones": "comunicaciones",
+            "temas programáticos": "temas_programaticos",
+            "logística": "logistica",
+            "logistica": "logistica",
+            "temas jurídicos": "temas_juridicos",
+            "juridicos": "temas_juridicos",
+            "trabajo territorial": "trabajo_territorial",
+            "territorial": "trabajo_territorial",
+            "día de elecciones": "dia_elecciones",
+            "elecciones": "dia_elecciones",
+            "call center": "call_center",
+            "callcenter": "call_center",
+            "otro": "otro"
+        }
+        
+        return mapping.get(area_lower, "otro")
     
     def _get_tenant_config(self, tenant_id: str) -> Optional[Dict[str, Any]]:
         """Obtiene configuración del tenant"""

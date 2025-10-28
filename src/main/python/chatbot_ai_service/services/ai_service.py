@@ -3708,6 +3708,7 @@ Responde solo el JSON estricto sin comentarios:
 - saludo_apoyo (hola, gracias)
 - publicidad_info (pedir material)
 - colaboracion_voluntariado (ofrecer ayudar)
+- area_colaboracion_select (respondiendo con un área de colaboración específica: redes, logística, comunicaciones, territorial, jurídicos, programáticos, elecciones, call center, u otro)
 - quejas (reclamos constructivos)
 
 Mensaje: "{message}"
@@ -3737,7 +3738,7 @@ Devuelve SOLO el nombre de la categoría:"""
             
             # Lista de categorías válidas
             valid_categories = ["malicioso", "saludo_apoyo", "conocer_candidato", "solicitud_funcional", 
-                               "cita_campaña", "publicidad_info", "colaboracion_voluntariado", "quejas"]
+                               "cita_campaña", "publicidad_info", "colaboracion_voluntariado", "area_colaboracion_select", "quejas"]
             
             # Si category_clean es una categoría válida, usar esa
             if category_clean in valid_categories:
@@ -3864,6 +3865,13 @@ Devuelve SOLO el nombre de la categoría:"""
             "colaboracion_voluntariado": [
                 "voluntario", "ayudar", "colaborar", "trabajar", "participar",
                 "unirme", "apoyar", "contribuir"
+            ],
+            "area_colaboracion_select": [
+                "redes sociales", "redes", "comunicaciones", "temas programáticos",
+                "programaticos", "logistica", "logística", "temas jurídicos",
+                "juridicos", "trabajo territorial", "territorial", "dia de elecciones",
+                "elecciones", "call center", "callcenter", "call center",
+                "otro área", "otra área", "otro"
             ],
             "quejas": [
                 "queja", "reclamo", "problema", "mal servicio", "no funciona",
@@ -4943,18 +4951,27 @@ Indica que el sistema de citas estará disponible muy pronto."""
             return self._filter_links_from_response(fallback_response)
     
     def _get_volunteer_response_with_context(self, branding_config: Dict[str, Any], session_context: str = "") -> str:
-        """Genera respuesta de voluntariado con contexto de sesión"""
+        """Genera respuesta de voluntariado con clasificación por área"""
         contact_name = branding_config.get("contactName", "el candidato")
         
-        # Si hay contexto de sesión, personalizar la respuesta
-        if session_context:
-            return f"""¡Qué genial que quieras ser parte del equipo de {contact_name}! 
-            
-Tu apoyo es fundamental para el cambio que queremos lograr. Te puedo ayudar a conectarte con nuestro equipo de voluntarios o responder cualquier pregunta que tengas sobre cómo participar."""
-        else:
-            return f"""¡Excelente! {contact_name} valora mucho el apoyo de personas como tú. 
-            
-Te puedo ayudar a conectarte con nuestro equipo de voluntarios. ¿Te gustaría que te ayude a agendar una reunión o tienes alguna pregunta específica sobre cómo participar?"""
+        # Respuesta con opciones de clasificación por área
+        volunteer_response = f"""¡Excelente que quieras apoyarnos! {contact_name} valora mucho la colaboración de personas comprometidas como tú.
+
+¿En qué área te gustaría colaborar?
+
+1. Redes sociales
+2. Comunicaciones
+3. Temas programáticos
+4. Logística
+5. Temas jurídicos
+6. Trabajo territorial
+7. Día de elecciones
+8. Call center
+9. Otro (¿cuál?)
+
+Elige una opción o cuéntame directamente en qué te gustaría ayudar."""
+        
+        return volunteer_response
 
 
     async def validate_user_data(self, tenant_id: str, data: str, data_type: str) -> Dict[str, Any]:
