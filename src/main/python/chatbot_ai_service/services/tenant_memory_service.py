@@ -316,6 +316,7 @@ class TenantMemoryService:
             "voluntariado": ["voluntario", "voluntarios", "ayudar", "participar", "colaborar", "trabajar", "unirme"],
             "cita_campaña": ["cita", "citas", "agendar", "reunión", "reuniones", "conocer", "hablar"],
             "publicidad_info": ["folleto", "folletos", "material", "materiales", "publicidad", "difusión", "propaganda", "brochure", "panfleto", "información publicitaria"],
+            "actualizacion_datos": ["actualizar", "actualizar datos", "corregir", "cambiar", "modificar", "mi nombre es", "mi apellido es", "vivo en", "mi ciudad es", "cambiar mi"],
             "referidos": ["referido", "referidos", "invitar", "invitar amigos", "compartir", "recomendar"],
             "agradecimiento": ["gracias", "thank you", "muchas gracias", "te agradezco", "appreciate"],
             "despedida": ["adiós", "adios", "bye", "hasta luego", "nos vemos", "chao"],

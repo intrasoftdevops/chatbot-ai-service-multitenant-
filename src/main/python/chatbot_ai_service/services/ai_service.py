@@ -1414,6 +1414,20 @@ Responde naturalmente y de forma breve (máximo 150 caracteres):"""
                 elif intent == "publicidad_info":
                     logger.info(f"[OBJETIVO] RESPUESTA RÁPIDA: publicidad_info")
                     response = await self._handle_advertising_info_with_context(branding_config, tenant_config, session_context)
+                elif intent == "actualizacion_datos":
+                    logger.info(f"[OBJETIVO] RESPUESTA RÁPIDA: actualizacion_datos")
+                    result = await self._handle_data_update_request(query, user_context, session_context, tenant_id=tenant_id)
+                    
+                    # El método ahora retorna (response_message, update_data_dict)
+                    if isinstance(result, tuple):
+                        response, update_data = result
+                        # Guardar datos para que Java los procese (se retornarán en el response)
+                        if update_data:
+                            # Los datos se incluirán en el response del método principal
+                            user_context["data_to_update"] = update_data
+                            logger.info(f"📝 Datos para actualizar: {update_data}")
+                    else:
+                        response = result
                 elif intent == "saludo_apoyo":
                     logger.info(f"[OBJETIVO] RESPUESTA RÁPIDA: saludo_apoyo")
                     response = self._get_greeting_response_with_context(branding_config, session_context, tenant_id=tenant_id)
@@ -1559,6 +1573,11 @@ Responde naturalmente y de forma breve (máximo 150 caracteres):"""
             if is_complaint_detail:
                 final_response["complaint_registered"] = True
                 logger.info(f"✅ Campo complaint_registered=True agregado (marcador)")
+            
+            # 🎯 AGREGAR CAMPO ESPECIAL PARA ACTUALIZACION_DATOS
+            if intent == "actualizacion_datos" and user_context.get("data_to_update"):
+                final_response["data_to_update"] = user_context["data_to_update"]
+                logger.info(f"✅ Campo data_to_update agregado: {user_context['data_to_update']}")
             
             logger.info(f"✅ DEVOLVIENDO RESPUESTA FINAL: {final_response}")
             return final_response
@@ -3795,6 +3814,7 @@ Responde solo el JSON estricto sin comentarios:
 - cita_campaña (agendar reunión)
 - saludo_apoyo (hola, gracias, mensajes positivos)
 - publicidad_info (pedir material)
+- actualizacion_datos (corregir, cambiar o actualizar información personal: nombre, apellido, ciudad, teléfono, etc.)
 - colaboracion_voluntariado (ofrecer ayudar)
 - area_colaboracion_select (respondiendo con un área de colaboración específica: redes, logística, comunicaciones, territorial, jurídicos, programáticos, elecciones, call center, u otro)
 - quejas (mensaje inicial sobre problema, queja, reclamo, o crítica SIN detalles)
@@ -3835,6 +3855,7 @@ Devuelve SOLO el nombre de la categoría:"""
 - cita_campaña (agendar reunión)
 - saludo_apoyo (hola, gracias, mensajes positivos)
 - publicidad_info (pedir material)
+- actualizacion_datos (corregir, cambiar o actualizar información personal: nombre, apellido, ciudad, teléfono, etc.)
 - colaboracion_voluntariado (ofrecer ayudar)
 - area_colaboracion_select (respondiendo con un área de colaboración específica: redes, logística, comunicaciones, territorial, jurídicos, programáticos, elecciones, call center, u otro)
 - quejas (mensaje inicial sobre problema, queja, reclamo, o crítica SIN detalles)
@@ -3895,7 +3916,7 @@ Devuelve SOLO el nombre de la categoría:"""
             
             # Lista de categorías válidas
             valid_categories = ["malicioso", "saludo_apoyo", "conocer_candidato", "solicitud_funcional", 
-                               "cita_campaña", "publicidad_info", "colaboracion_voluntariado", "area_colaboracion_select", "quejas", "queja_detalle_select"]
+                               "cita_campaña", "publicidad_info", "actualizacion_datos", "colaboracion_voluntariado", "area_colaboracion_select", "quejas", "queja_detalle_select"]
             
             # Si category_clean es una categoría válida, usar esa
             if category_clean in valid_categories:
@@ -3903,7 +3924,7 @@ Devuelve SOLO el nombre de la categoría:"""
                 logger.info(f"✅ Categoría limpia extraída: '{category}'")
             elif len(category) > 50:
                 valid_categories = ["malicioso", "saludo_apoyo", "conocer_candidato", "solicitud_funcional", 
-                                   "cita_campaña", "publicidad_info", "colaboracion_voluntariado", "quejas"]
+                                   "cita_campaña", "publicidad_info", "actualizacion_datos", "colaboracion_voluntariado", "quejas"]
                 
                 # Buscar si contiene alguna categoría válida
                 found_category = None
@@ -5191,6 +5212,187 @@ Indica que el sistema para solicitar materiales estará disponible muy pronto.""
                 return f"¡Perfecto! Puedes solicitar materiales publicitarios aquí: {forms_link}"
             else:
                 return "El sistema para solicitar materiales estará disponible muy pronto."
+    
+    async def _handle_data_update_request(self, query: str, user_context: Dict[str, Any], 
+                                         session_context: str = "", tenant_id: str = None) -> tuple:
+        """Maneja solicitudes de actualización de datos dinámica
+        
+        Returns:
+            tuple: (response_message, update_data_dict)
+        """
+        import json
+        import re
+        
+        try:
+            self._ensure_model_initialized()
+            
+            if not self.model:
+                return ("Por favor, proporciona la información que deseas actualizar. Ejemplo: 'Quiero actualizar mi nombre a Juan y mi ciudad a Medellín'", None)
+            
+            # 🔍 VERIFICAR SI ESTÁ EN MODO "ESPERANDO DATOS"
+            query_lower = query.lower().strip()
+            is_waiting_for_data = any([
+                "actualizar" in query_lower and "datos" in query_lower,
+                "actualizar" in query_lower and "información" in query_lower,
+                "cambiar" in query_lower and "datos" in query_lower,
+                "modificar" in query_lower and "datos" in query_lower,
+                "corregir" in query_lower and "datos" in query_lower
+            ]) and not any([word in query_lower for word in ["nombre", "apellido", "ciudad", "ciudad", "city", "name", "lastname", "teléfono", "phone"]])
+            
+            # Si solo dice que quiere actualizar pero no dice qué, inicializar estado
+            if is_waiting_for_data:
+                logger.info("⚠️ Usuario quiere actualizar datos pero no especificó cuáles")
+                message = "Perfecto, puedo ayudarte a actualizar tus datos. Por favor, indícame qué información deseas cambiar. Por ejemplo:\n\n• Nombre\n• Apellido\n• Ciudad\n• Teléfono\n\nO puedes escribir directamente: 'Quiero cambiar mi nombre a Juan'"
+                
+                # Guardar en sesión que estamos esperando datos
+                user_context["pending_data_update"] = True
+                return (message, None)
+            
+            # Extraer información de actualización usando IA
+            prompt = """Analiza el siguiente mensaje y extrae qué datos quiere actualizar el usuario.
+            
+Mensaje del usuario: """ + f'"{query}"' + """
+
+Contexto de conversación anterior:
+{session_context if session_context else "No hay contexto previo"}
+
+INSTRUCCIONES:
+1. Identifica TODOS los campos que el usuario quiere actualizar (nombre, apellido, ciudad, teléfono, etc.)
+2. Para cada campo, identifica el NUEVO valor que el usuario quiere
+3. Si el usuario quiere actualizar "todo" o "todos", identificar todos los campos mencionados en el contexto
+4. **IMPORTANTE**: Si dice "mi nombre" o solo da un nombre sin contexto, determinar si es nombre o apellido basándote en:
+   - Si dice "mi nombre es X" o "mi nombre es X Y" y solo hay una palabra después de "es", es NOMBRE
+   - Si dice "mi apellido es X", es APELLIDO
+   - Si dice solo "Juan" sin contexto, pero la palabra tiene vocales comunes de apellidos colombianos (García, Rodríguez, Pérez, etc.), considerar como APELLIDO
+   - Si la palabra empieza con mayúscula y tiene estructura típica de nombre hispano (Juan, María, Carlos, etc.), es NOMBRE
+   - Si hay duda, usar el contexto de la conversación para determinar
+5. Devuelve SOLO un JSON con la estructura:
+{{"field_name": "nuevo_valor", "field_name2": "nuevo_valor2"}}
+
+Mapeo de campos:
+- "name" para nombre
+- "lastname" para apellido  
+- "city" para ciudad
+- "phone" para teléfono
+
+Ejemplos:
+- "Quiero actualizar mi nombre a Juan" → {{"name": "Juan"}}
+- "Mi nombre es Juan Pérez" → {{"name": "Juan Pérez"}}  (nombre completo)
+- "Mi apellido es García" → {{"lastname": "García"}}
+- "Mi apellido es Pérez" → {{"lastname": "Pérez"}}
+- "Vivo en Bogotá" → {{"city": "Bogotá"}}
+- "Quiero cambiar mi nombre a María y mi ciudad a Cali" → {{"name": "María", "city": "Cali"}}
+- "Mi nombre es Carlos" (después de pedir actualización) → {{"name": "Carlos"}}
+- "Ahora mi apellido es Rodríguez" → {{"lastname": "Rodríguez"}}
+
+REGLA ESPECIAL PARA NOMBRE VS APELLIDO:
+- Si dice solo "Juan", "María", "Carlos" sin contexto, usar tu criterio basado en nombres comunes hispanos
+- Si dice "García", "Pérez", "Rodríguez", "López", "González" → APELLIDO
+- Si dice "mi nombre es X" → NOMBRE
+- Si dice "mi apellido es X" → APELLIDO
+
+**IMPORTANTE**: Si el usuario da "Santiago Buitrago Rojas":
+- "Santiago" es NOMBRE → name: Santiago
+- "Buitrago Rojas" son los apellidos → lastname: Buitrago Rojas
+- Si solo da "Juan Pérez" → name: Juan, lastname: Pérez
+
+Ejemplos de separación:
+- "Juan García" → {"name": "Juan", "lastname": "García"}
+- "María José López" → {"name": "María José", "lastname": "López"}
+- "Carlos Rodríguez Pérez" → {"name": "Carlos", "lastname": "Rodríguez Pérez"}
+
+Devuelve SOLO el JSON, sin texto adicional:"""
+
+            response_obj = await self._generate_content_ultra_fast(prompt, max_tokens=200)
+            response_text = response_obj.strip()
+            
+            # Limpiar la respuesta para extraer JSON
+            
+            # Buscar JSON en la respuesta - soportar JSON con llaves anidadas
+            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response_text)
+            update_data_str = None
+            
+            # Fallback: si no encuentra con regex, buscar entre ```json y ```
+            if not json_match:
+                json_block = re.search(r'```json\s*(\{.*?\})\s*```', response_text, re.DOTALL)
+                if json_block:
+                    update_data_str = json_block.group(1)
+                else:
+                    # Último fallback: buscar cualquier JSON
+                    json_simple = re.search(r'\{[^{}]*"name"[^{}]*\}', response_text)
+                    if json_simple:
+                        update_data_str = json_simple.group()
+            else:
+                update_data_str = json_match.group()
+                
+            if update_data_str and update_data_str.strip():
+                update_data = json.loads(update_data_str)
+                
+                logger.info(f"✅ Datos a actualizar extraídos (antes de normalizar): {update_data}")
+                
+                # 🔧 NORMALIZAR datos extraídos: primera letra en mayúscula
+                if "name" in update_data and update_data["name"]:
+                    update_data["name"] = update_data["name"].title()
+                if "lastname" in update_data and update_data["lastname"]:
+                    update_data["lastname"] = update_data["lastname"].title()
+                if "city" in update_data and update_data["city"]:
+                    update_data["city"] = update_data["city"].title()
+                if "phone" in update_data and update_data["phone"]:
+                    update_data["phone"] = update_data["phone"].strip()
+                
+                logger.info(f"✅ Datos normalizados: {update_data}")
+                
+                # Generar mensaje de confirmación mostrando TODOS los datos (actuales + actualizados)
+                confirmation_lines = []
+                
+                # Obtener datos actuales del usuario desde user_context
+                current_name = user_context.get("user_name") or user_context.get("name") or ""
+                current_lastname = user_context.get("user_lastname") or user_context.get("lastname") or ""
+                current_city = user_context.get("user_city") or user_context.get("city") or ""
+                current_state = user_context.get("user_state") or user_context.get("state") or ""
+                current_country = user_context.get("user_country") or user_context.get("country") or "Colombia"
+                
+                # Aplicar cambios para mostrar cómo quedarían
+                final_name = update_data.get("name", current_name) if update_data else current_name
+                final_lastname = update_data.get("lastname", current_lastname) if update_data else current_lastname
+                final_city = update_data.get("city", current_city) if update_data else current_city
+                final_state = update_data.get("state", current_state) if update_data else current_state
+                final_country = update_data.get("country", current_country) if update_data else current_country
+                
+                # Mostrar los 3 datos completos (nombre, apellido, ciudad)
+                if final_name:
+                    confirmation_lines.append(f"👤 Nombre: {final_name}")
+                if final_lastname:
+                    confirmation_lines.append(f"👤 Apellido: {final_lastname}")
+                if final_city:
+                    # Construir información completa de ubicación
+                    location_parts = [final_city]
+                    if final_state:
+                        location_parts.append(final_state)
+                    if final_country:
+                        location_parts.append(final_country)
+                    location_info = ", ".join(location_parts)
+                    confirmation_lines.append(f"🏙️ Ciudad: {location_info}")
+                
+                confirmation_body = "Perfecto! Tus datos quedarían así:\n\n" + "\n".join(confirmation_lines) + "\n\n¿Confirmas que estos datos son correctos?"
+                
+                # Indicar que se deben enviar botones
+                update_data["_needs_interactive_buttons"] = True
+                update_data["_confirmation_message"] = confirmation_body
+                
+                # Retornar mensaje Y datos para que Java envíe botones
+                return (confirmation_body, update_data)
+            else:
+                # Fallback si no se pudo extraer JSON
+                logger.warning("⚠️ No se pudo extraer datos para actualizar")
+                return ("Entiendo que quieres actualizar tu información. Por favor, indica específicamente qué datos deseas cambiar. Por ejemplo: 'Quiero actualizar mi nombre a Juan' o 'Cambiar mi ciudad a Bogotá'.", None)
+                
+        except json.JSONDecodeError as json_error:
+            logger.error(f"❌ Error decodificando JSON de actualización: {json_error}")
+            return ("Hubo un problema procesando tu solicitud de actualización. Por favor, intenta de nuevo especificando los datos que deseas cambiar.", None)
+        except Exception as e:
+            logger.error(f"❌ Error procesando actualización de datos: {e}")
+            return ("Hubo un error procesando tu solicitud de actualización. Por favor, intenta de nuevo.", None)
     
     def _get_greeting_response_with_context(self, branding_config: Dict[str, Any], session_context: str = "", tenant_id: str = None) -> str:
         """Genera saludo con contexto de sesión inteligente - USA PROMPTS DESDE DB"""

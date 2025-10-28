@@ -402,6 +402,64 @@ El sistema para solicitar materiales estará disponible muy pronto. Mientras tan
                     self.logger.warning(f"⚠️ Error procesando publicidad: {e}")
                     self.logger.exception(e)
             
+            # 🎯 NUEVO: Manejar actualizacion_datos directamente (RÁPIDO)
+            if intent == "actualizacion_datos":
+                self.logger.info(f"🔍 Intent es actualizacion_datos - llamando al handler específico")
+                print(f"🎯 [DEBUG] Intent detectado como actualizacion_datos")
+                
+                try:
+                    # Obtener configuración del tenant
+                    if not tenant_config:
+                        tenant_config = self._get_tenant_config(tenant_id)
+                    
+                    # Llamar al handler del base_ai_service que maneja actualizacion_datos
+                    self.logger.info(f"📞 Llamando a _handle_data_update_request desde optimized service")
+                    result = await self.base_ai_service._handle_data_update_request(
+                        query, user_context, "", tenant_id=tenant_id
+                    )
+                    
+                    # El método retorna (response_message, update_data_dict)
+                    if isinstance(result, tuple):
+                        response, update_data = result
+                        # Guardar datos para que Java los procese
+                        if update_data:
+                            user_context["data_to_update"] = update_data
+                            self.logger.info(f"📝 Datos para actualizar: {update_data}")
+                        
+                        processing_time = time.time() - start_time
+                        self.logger.info(f"✅ Respuesta de actualización generada ({processing_time:.4f}s)")
+                        
+                        return {
+                            "response": response,
+                            "followup_message": "",
+                            "from_cache": False,
+                            "processing_time": processing_time,
+                            "tenant_id": tenant_id,
+                            "session_id": session_id,
+                            "intent": intent,
+                            "confidence": confidence,
+                            "user_blocked": False,
+                            "optimized": True,
+                            "data_to_update": update_data  # Incluir datos para Java
+                        }
+                    else:
+                        # Fallback si no retorna tupla
+                        return {
+                            "response": result if result else "Entiendo que quieres actualizar datos. Por favor, especifica qué información deseas cambiar.",
+                            "followup_message": "",
+                            "from_cache": False,
+                            "processing_time": time.time() - start_time,
+                            "tenant_id": tenant_id,
+                            "session_id": session_id,
+                            "intent": intent,
+                            "confidence": confidence,
+                            "optimized": True
+                        }
+                        
+                except Exception as e:
+                    self.logger.warning(f"⚠️ Error procesando actualizacion_datos: {e}")
+                    self.logger.exception(e)
+            
             # 🎯 NUEVO: Manejar colaboracion_voluntariado directamente (RÁPIDO)
             if intent == "colaboracion_voluntariado":
                 self.logger.info(f"🔍 Intent es colaboracion_voluntariado - generando respuesta con opciones de área")

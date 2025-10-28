@@ -214,7 +214,8 @@ async def process_chat_message(tenant_id: str, request: Dict[str, Any]) -> Dict[
             "optimized": ai_response.get("optimized", False),  # 🔧 Agregado para soporte de optimización
             "collaboration_area": ai_response.get("collaboration_area"),  # 🎯 Agregado para guardar área de colaboración
             "complaint_registered": ai_response.get("complaint_registered", False),  # 🎯 Agregado para registrar queja
-            "complaint_type": ai_response.get("complaint_type")  # 🎯 Tipo de queja (servicio, atencion, tecnica, lentitud, etc.)
+            "complaint_type": ai_response.get("complaint_type"),  # 🎯 Tipo de queja (servicio, atencion, tecnica, lentitud, etc.)
+            "data_to_update": ai_response.get("data_to_update")  # 🎯 Agregado para actualizar datos del usuario
         }
         
         logger.info(f"✅ Respuesta procesada - followup_message: {bool(followup_message)}")
