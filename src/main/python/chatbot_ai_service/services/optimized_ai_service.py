@@ -315,6 +315,93 @@ El sistema de citas estará disponible muy pronto. Mientras tanto, puedes contac
                     self.logger.warning(f"⚠️ Error procesando cita: {e}")
                     self.logger.exception(e)
             
+            # 🎯 NUEVO: Manejar publicidad_info directamente (RÁPIDO)
+            if intent == "publicidad_info":
+                self.logger.info(f"🔍 Intent es publicidad_info - generando respuesta con IA")
+                print(f"🎯 [DEBUG] Intent detectado como publicidad_info")
+                
+                try:
+                    # Obtener configuración del tenant
+                    if not tenant_config:
+                        tenant_config = self._get_tenant_config(tenant_id)
+                    
+                    # Obtener branding y configuración
+                    branding_config = tenant_config.get("branding", {}) if tenant_config else {}
+                    contact_name = branding_config.get("contactName", branding_config.get("contact_name", "el candidato"))
+                    
+                    # Obtener link de Forms desde DB del tenant
+                    forms_link = tenant_config.get("link_forms", "") if tenant_config else ""
+                    
+                    # Generar respuesta con IA basada en si hay link disponible o no
+                    if forms_link:
+                        self.logger.info(f"✅ Link de Forms disponible: {forms_link}")
+                        # Generar respuesta con IA que incluya el link
+                        prompt = f"""Genera una respuesta natural y amigable en español para un chatbot de campaña política. El usuario quiere solicitar materiales publicitarios o información de campaña.
+
+Información:
+- Nombre del candidato: {contact_name}
+- Link de Formularios: {forms_link}
+
+Genera una respuesta breve, natural y conversacional que incluya el link del formulario para solicitar materiales. La respuesta debe ser cálida y profesional, ofreciendo ayuda para solicitar folletos, material de difusión y propaganda."""
+
+                        response = await self._generate_quick_ai_response(prompt)
+                        
+                        # Verificar si la respuesta incluye el enlace
+                        if forms_link not in response:
+                            self.logger.warning(f"⚠️ La IA no incluyó el enlace. Agregándolo ahora...")
+                            # Si no incluye el enlace, agregarlo al final
+                            if not response.endswith('.'):
+                                response += "."
+                            response += f"\n\nPuedes solicitar materiales publicitarios aquí: {forms_link}"
+                        
+                        if not response or len(response.strip()) < 10:
+                            # Fallback si IA no genera buena respuesta
+                            response = f"""¡Perfecto! Te ayudo a solicitar materiales publicitarios de la campaña.
+
+Puedes solicitar materiales publicitarios aquí: {forms_link}
+
+En el formulario podrás solicitar folletos, material de difusión y propaganda de {contact_name}. Si necesitas ayuda, pregúntame."""
+                    else:
+                        self.logger.info(f"⚠️ Link de Forms NO disponible para tenant {tenant_id}")
+                        # Generar respuesta con IA indicando que pronto estará disponible
+                        prompt = f"""Genera una respuesta natural y amigable en español para un chatbot de campaña política. El usuario quiere solicitar materiales publicitarios pero el sistema aún no está disponible.
+
+Información:
+- Nombre del candidato: {contact_name}
+
+Genera una respuesta breve que indique que el sistema para solicitar materiales estará disponible muy pronto, pero ofreciendo alternativas como contactar por WhatsApp o esperar a que el sistema esté listo."""
+
+                        response = await self._generate_quick_ai_response(prompt)
+                        
+                        if not response or len(response.strip()) < 10:
+                            # Fallback si IA no genera buena respuesta
+                            response = f"""¡Hola! Me alegra tu interés en solicitar materiales publicitarios de {contact_name}. 
+
+El sistema para solicitar materiales estará disponible muy pronto. Mientras tanto, puedes contactarnos directamente por WhatsApp o esperar a que esté listo.
+
+¿Te gustaría que te notifique cuando el sistema esté disponible?"""
+                    
+                    processing_time = time.time() - start_time
+                    self.logger.info(f"✅ Respuesta de publicidad generada con IA ({processing_time:.4f}s)")
+                    print(f"🎯 [PUBLICIDAD] Respuesta generada por IA")
+                    
+                    return {
+                        "response": response,
+                        "followup_message": "",
+                        "from_cache": False,
+                        "processing_time": processing_time,
+                        "tenant_id": tenant_id,
+                        "session_id": session_id,
+                        "intent": intent,
+                        "confidence": confidence,
+                        "user_blocked": False,
+                        "optimized": True
+                    }
+                        
+                except Exception as e:
+                    self.logger.warning(f"⚠️ Error procesando publicidad: {e}")
+                    self.logger.exception(e)
+            
             # 🎯 NUEVO: Manejar colaboracion_voluntariado directamente (RÁPIDO)
             if intent == "colaboracion_voluntariado":
                 self.logger.info(f"🔍 Intent es colaboracion_voluntariado - generando respuesta con opciones de área")

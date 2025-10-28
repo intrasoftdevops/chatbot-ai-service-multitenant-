@@ -315,6 +315,7 @@ class TenantMemoryService:
             "propuestas_campaña": ["propuestas", "propuesta", "plan", "planes", "proyecto", "proyectos", "educación", "salud", "trabajo"],
             "voluntariado": ["voluntario", "voluntarios", "ayudar", "participar", "colaborar", "trabajar", "unirme"],
             "cita_campaña": ["cita", "citas", "agendar", "reunión", "reuniones", "conocer", "hablar"],
+            "publicidad_info": ["folleto", "folletos", "material", "materiales", "publicidad", "difusión", "propaganda", "brochure", "panfleto", "información publicitaria"],
             "referidos": ["referido", "referidos", "invitar", "invitar amigos", "compartir", "recomendar"],
             "agradecimiento": ["gracias", "thank you", "muchas gracias", "te agradezco", "appreciate"],
             "despedida": ["adiós", "adios", "bye", "hasta luego", "nos vemos", "chao"],

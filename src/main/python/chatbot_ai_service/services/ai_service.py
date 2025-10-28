@@ -1411,6 +1411,9 @@ Responde naturalmente y de forma breve (máximo 150 caracteres):"""
                 elif intent == "cita_campaña":
                     logger.info(f"[OBJETIVO] RESPUESTA RÁPIDA: cita_campaña")
                     response = await self._handle_appointment_request_with_context(branding_config, tenant_config, session_context)
+                elif intent == "publicidad_info":
+                    logger.info(f"[OBJETIVO] RESPUESTA RÁPIDA: publicidad_info")
+                    response = await self._handle_advertising_info_with_context(branding_config, tenant_config, session_context)
                 elif intent == "saludo_apoyo":
                     logger.info(f"[OBJETIVO] RESPUESTA RÁPIDA: saludo_apoyo")
                     response = self._get_greeting_response_with_context(branding_config, session_context, tenant_id=tenant_id)
@@ -1473,10 +1476,13 @@ Responde naturalmente y de forma breve (máximo 150 caracteres):"""
                 logger.error(f"❌ ERROR en procesamiento de intención '{intent}': {str(e)}")
                 response = f"Lo siento, hubo un error procesando tu consulta sobre '{intent}'. Por favor intenta de nuevo."
             
-            # Filtrar enlaces de la respuesta para WhatsApp (excepto citas)
+            # Filtrar enlaces de la respuesta para WhatsApp (excepto citas y publicidad)
             if intent == "cita_campaña":
                 filtered_response = response  # No filtrar enlaces de Calendly
                 logger.info("[CALENDARIO] Respuesta de cita - manteniendo enlaces de Calendly")
+            elif intent == "publicidad_info":
+                filtered_response = response  # No filtrar enlaces de Forms
+                logger.info("[PUBLICIDAD] Respuesta de publicidad - manteniendo enlaces de Forms")
             else:
                 filtered_response = self._filter_links_from_response(response)
             
@@ -2175,6 +2181,7 @@ Cada persona que se registre con tu código te suma 50 puntos al ranking. !Es un
         """
         Elimina completamente enlaces y referencias a enlaces de las respuestas para WhatsApp
         EXCEPTO enlaces de Calendly cuando la intención es cita_campaña
+        EXCEPTO enlaces de Forms cuando la intención es publicidad_info
         """
         import re
         
@@ -2182,6 +2189,35 @@ Cada persona que se registre con tu código te suma 50 puntos al ranking. !Es un
         if intent == "cita_campaña":
             logger.info("[CALENDARIO] Intención de cita detectada, manteniendo enlaces de Calendly")
             # Solo limpiar referencias a enlaces pero mantener enlaces de Calendly
+            link_phrases = [
+                r'puedes revisar este enlace[^.]*\.',
+                r'puedes consultar este enlace[^.]*\.',
+                r'visita este enlace[^.]*\.',
+                r'accede a este enlace[^.]*\.',
+                r'consulta el siguiente enlace[^.]*\.',
+                r'revisa el siguiente enlace[^.]*\.',
+                r'puedes ver más información en[^.]*\.',
+                r'para más información visita[^.]*\.',
+                r'allí encontrarás[^.]*\.',
+                r'allí podrás[^.]*\.',
+                r'en el siguiente enlace[^.]*\.',
+                r'en este enlace[^.]*\.',
+                r'\*\*Enlace a[^*]*\*\*[^.]*\.',
+                r'te puedo compartir algunos enlaces[^.]*\.',
+                r'te puedo compartir[^.]*enlaces[^.]*\.',
+                r'compartir.*enlaces.*información[^.]*\.',
+            ]
+            
+            filtered_response = response
+            for phrase_pattern in link_phrases:
+                filtered_response = re.sub(phrase_pattern, '', filtered_response, flags=re.IGNORECASE)
+            
+            return filtered_response.strip()
+        
+        # Si es una respuesta de publicidad, mantener enlaces de Forms
+        if intent == "publicidad_info":
+            logger.info("[PUBLICIDAD] Intención de publicidad detectada, manteniendo enlaces de Forms")
+            # Solo limpiar referencias a enlaces pero mantener enlaces de Forms
             link_phrases = [
                 r'puedes revisar este enlace[^.]*\.',
                 r'puedes consultar este enlace[^.]*\.',
@@ -5093,6 +5129,68 @@ Indica que el sistema de citas estará disponible muy pronto."""
                 return f"¡Perfecto! Puedes reservar tu cita aquí: {calendly_link}"
             else:
                 return "El sistema de citas estará disponible muy pronto."
+    
+    async def _handle_advertising_info_with_context(self, branding_config: Dict[str, Any], 
+                                               tenant_config: Dict[str, Any], session_context: str = "") -> str:
+        """Maneja solicitudes de información publicitaria con contexto de sesión"""
+        contact_name = branding_config.get("contactName", branding_config.get("contact_name", "el candidato"))
+        
+        # Obtener link de Forms desde DB del tenant
+        forms_link = tenant_config.get("link_forms", "") if tenant_config else ""
+        
+        # Generar respuesta con IA
+        if forms_link:
+            logger.info(f"✅ Link de Forms disponible: {forms_link}")
+            prompt = f"""Genera una respuesta natural y amigable en español para un chatbot de campaña política. El usuario quiere solicitar materiales publicitarios o información de campaña.
+
+Información:
+- Nombre del candidato: {contact_name}
+- Link de Formularios: {forms_link}
+
+Genera una respuesta breve y conversacional que incluya el link del formulario para solicitar materiales."""
+        else:
+            logger.info(f"⚠️ Link de Forms NO disponible")
+            prompt = f"""Genera una respuesta natural y amigable en español para un chatbot de campaña política. El usuario quiere solicitar materiales publicitarios pero el sistema aún no está disponible.
+
+Información:
+- Nombre del candidato: {contact_name}
+
+Indica que el sistema para solicitar materiales estará disponible muy pronto."""
+        
+        try:
+            # Generar respuesta con IA usando el modelo
+            if self.model:
+                response_obj = self.model.generate_content(prompt)
+                response = response_obj.text.strip()
+                
+                # Verificar si la respuesta incluye el enlace
+                if forms_link and forms_link not in response:
+                    logger.warning(f"⚠️ La IA no incluyó el enlace. Agregándolo ahora...")
+                    # Si no incluye el enlace, agregarlo al final
+                    if not response.endswith('.'):
+                        response += "."
+                    response += f"\n\nPuedes solicitar materiales publicitarios aquí: {forms_link}"
+                
+                if not response or len(response.strip()) < 10:
+                    # Fallback
+                    if forms_link:
+                        return f"¡Perfecto! Puedes solicitar materiales publicitarios aquí: {forms_link}"
+                    else:
+                        return f"El sistema para solicitar materiales estará disponible muy pronto. ¿Te gustaría que te notifique cuando esté listo?"
+                return response
+            else:
+                # Si no hay modelo, usar fallback
+                if forms_link:
+                    return f"¡Perfecto! Puedes solicitar materiales publicitarios aquí: {forms_link}"
+                else:
+                    return "El sistema para solicitar materiales estará disponible muy pronto."
+        except Exception as e:
+            logger.error(f"Error generando respuesta con IA: {e}")
+            # Fallback final
+            if forms_link:
+                return f"¡Perfecto! Puedes solicitar materiales publicitarios aquí: {forms_link}"
+            else:
+                return "El sistema para solicitar materiales estará disponible muy pronto."
     
     def _get_greeting_response_with_context(self, branding_config: Dict[str, Any], session_context: str = "", tenant_id: str = None) -> str:
         """Genera saludo con contexto de sesión inteligente - USA PROMPTS DESDE DB"""
