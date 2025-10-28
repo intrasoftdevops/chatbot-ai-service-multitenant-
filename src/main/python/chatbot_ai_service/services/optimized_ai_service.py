@@ -493,6 +493,9 @@ Tu opinión es muy valiosa para nosotros. ¿Hay algo más en lo que pueda ayudar
                     self.logger.info(f"✅ Respuesta de confirmación de queja generada ({processing_time:.4f}s)")
                     print(f"🎯 [QUEJA_DETALLE] Respuesta generada")
                     
+                    # 🎯 Clasificar el tipo de queja basándose en el contenido del mensaje
+                    complaint_type = self._classify_complaint_type(query)
+                    
                     result_dict = {
                         "response": response,
                         "followup_message": "",
@@ -504,12 +507,14 @@ Tu opinión es muy valiosa para nosotros. ¿Hay algo más en lo que pueda ayudar
                         "confidence": confidence,
                         "user_blocked": False,
                         "optimized": True,
-                        "complaint_registered": True  # Información extra para que Java sepa que se registró la queja
+                        "complaint_registered": True,  # Información extra para que Java sepa que se registró la queja
+                        "complaint_type": complaint_type  # Tipo de queja (servicio, atencion, tecnica, lentitud, etc.)
                     }
                     
                     print(f"🎯 [QUEJA_DETALLE] RESULTADO FINAL: {result_dict}")
                     self.logger.info(f"🎯 [QUEJA_DETALLE] Keys en resultado: {list(result_dict.keys())}")
                     self.logger.info(f"🎯 [QUEJA_DETALLE] complaint_registered: {result_dict.get('complaint_registered')}")
+                    self.logger.info(f"🎯 [QUEJA_DETALLE] complaint_type: {complaint_type}")
                     
                     return result_dict
                         
@@ -743,3 +748,30 @@ Tu opinión es muy valiosa para nosotros. ¿Hay algo más en lo que pueda ayudar
             print(f"🔍 DEBUG: _generate_quick_ai_response - ERROR: {e}")
             self.logger.warning(f"⚠️ Error generando con IA: {e}")
             return ""
+    
+    def _classify_complaint_type(self, message: str) -> str:
+        """Clasifica el tipo de queja basándose en el contenido del mensaje"""
+        message_lower = message.lower()
+        
+        # Tipo 1: Lentitud / demoras
+        if any(word in message_lower for word in ["demorado", "lento", "tarda", "demasiado", "tardío", "retrasado"]):
+            return "lentitud"
+        
+        # Tipo 2: Mala atención
+        if any(phrase in message_lower for phrase in ["mala atención", "pésima atención", "horrible atención", "no hay buena atención", "atención deficiente"]):
+            return "atencion"
+        
+        # Tipo 3: Problemas técnicos
+        if any(word in message_lower for word in ["no funciona", "no sirve", "error", "bug", "falla", "técnico"]):
+            return "tecnica"
+        
+        # Tipo 4: Calidad del servicio
+        if any(phrase in message_lower for phrase in ["mal servicio", "servicio malo", "no se presta", "no presta", "pésimo servicio", "horrible servicio"]):
+            return "servicio"
+        
+        # Tipo 5: Problemas generales (fallback)
+        if any(word in message_lower for word in ["malo", "mala", "mal", "deficiente", "terrible", "horrible", "pésimo", "inadecuado"]):
+            return "general"
+        
+        # Por defecto
+        return "general"
