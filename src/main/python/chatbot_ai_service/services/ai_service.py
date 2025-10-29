@@ -5107,13 +5107,29 @@ Ejemplos:
         # Generar respuesta con IA
         if calendly_link:
             logger.info(f"✅ Link de Calendly disponible: {calendly_link}")
-            prompt = f"""Genera una respuesta natural y amigable en español para un chatbot de campaña política. El usuario quiere agendar una cita.
+            prompt = f"""Eres un asistente virtual de campaña política. El usuario quiere agendar una cita.
 
 Información:
-- Nombre del candidato: {contact_name}
-- Link de Calendly: {calendly_link}
+- Candidato: {contact_name}
+- Link: {calendly_link}
 
-Genera una respuesta breve y conversacional que incluya el link de Calendly."""
+CRÍTICO - FORMATO EXACTO REQUERIDO:
+1. Escribe máximo 2-3 oraciones cortas y completas
+2. La última oración NO debe mencionar el link, solo debe ser una oración completa y terminada con punto
+3. NUNCA cortes una oración a la mitad (ejemplo MALO: "el enlace que te compartimos a.")
+4. Después de la última oración completa, escribe un salto de línea y luego el link
+5. NO uses corchetes, NO uses "Link de Calendly:", NO uses markdown
+
+FORMATO EXACTO A USAR:
+[2-3 oraciones completas]
+
+{calendly_link}
+
+Ejemplo CORRECTO:
+¡Claro! Te ayudo a coordinar una cita con Daniel Quintero Presidente. Es una excelente oportunidad para conocerse y hablar sobre la campaña. Puedes agendar tu espacio usando el siguiente enlace.
+
+{calendly_link}
+"""
         else:
             logger.info(f"⚠️ Link de Calendly NO disponible")
             prompt = f"""Genera una respuesta natural y amigable en español para un chatbot de campaña política. El usuario quiere agendar una cita pero el sistema aún no está disponible.
@@ -5129,13 +5145,44 @@ Indica que el sistema de citas estará disponible muy pronto."""
                 response_obj = self.model.generate_content(prompt)
                 response = response_obj.text.strip()
                 
-                # Verificar si la respuesta incluye el enlace
-                if calendly_link and calendly_link not in response:
-                    logger.warning(f"⚠️ La IA no incluyó el enlace. Agregándolo ahora...")
-                    # Si no incluye el enlace, agregarlo al final
-                    if not response.endswith('.'):
-                        response += "."
-                    response += f"\n\nPuedes reservar tu cita directamente aquí: {calendly_link}"
+                # Post-procesamiento: limpiar enlaces truncados o corruptos
+                import re
+                # Remover patrones como [Link de Calendly: https://...] si la IA los incluyera
+                response = re.sub(r'\[Link de Calendly:?\s*', '', response)
+                response = re.sub(r'\]\s*', '', response)
+                
+                # Remover enlaces truncados (que terminan con ...)
+                if calendly_link:
+                    response = re.sub(rf'{re.escape(calendly_link[:20])}\.\.\.', '', response)
+                    response = re.sub(r'https?://[^\s]+\.\.\.', '', response)
+                    
+                    # Verificar si la respuesta incluye el enlace completo
+                    has_full_link = calendly_link in response
+                    
+                    # Si hay duplicados del link, consolidar
+                    response = re.sub(rf'{re.escape(calendly_link)}\s+{re.escape(calendly_link)}', calendly_link, response)
+                    
+                    # Limpiar espacios múltiples
+                    response = re.sub(r'\s+', ' ', response).strip()
+                    
+                    # Asegurar que el enlace esté al final si existe, si no agregarlo
+                    if has_full_link:
+                        # Remover todas las ocurrencias del link del texto
+                        response = response.replace(calendly_link, '')
+                        response = response.strip()
+                        # Agregar el link al final
+                        if not response.endswith('.') and not response.endswith(':'):
+                            response += "."
+                        response += f"\n\n{calendly_link}"
+                    else:
+                        logger.warning(f"⚠️ La IA no incluyó el enlace. Agregándolo ahora...")
+                        # Si no incluye el enlace, agregarlo al final
+                        if not response.endswith('.') and not response.endswith(':'):
+                            response += "."
+                        response += f"\n\n{calendly_link}"
+                else:
+                    # Limpiar espacios múltiples
+                    response = re.sub(r'\s+', ' ', response).strip()
                 
                 if not response or len(response.strip()) < 10:
                     # Fallback
