@@ -5673,7 +5673,23 @@ Una ciudad válida debe:
 - NO contener números (excepto en casos especiales como "San José del Guaviare")
 - NO ser una palabra común del español como "referido", "gracias", "hola", etc.
 - NO ser un código alfanumérico
-- Ser una ciudad real de Colombia
+- Ser una ciudad real de Colombia O un apodo conocido de una ciudad colombiana
+
+APODOS VÁLIDOS DE CIUDADES COLOMBIANAS:
+- "La sucursal del cielo" -> Cali (VALLE DEL CAUCA)
+- "La eterna primavera" -> Medellín (ANTIOQUIA)
+- "La ciudad de la eterna primavera" -> Medellín (ANTIOQUIA)
+- "La ciudad eterna" -> Medellín (ANTIOQUIA)
+- "La sultana del valle" -> Cali (VALLE DEL CAUCA)
+- "La capital mundial de la salsa" -> Cali (VALLE DEL CAUCA)
+- "La heroica" -> Cartagena (BOLÍVAR)
+- "La puerta de oro de Colombia" -> Barranquilla (ATLÁNTICO)
+- "La ciudad de las puertas abiertas" -> Manizales (CALDAS)
+- "La ciudad blanca" -> Popayán (CAUCA)
+- "La villa de robledo" -> Cartago (VALLE DEL CAUCA)
+- "La villa del cacique" -> Calarcá (QUINDÍO)
+
+IMPORTANTE: Si el texto describe una ciudad con una frase poética o apodo, es VÁLIDO si representa una ciudad colombiana real.
 
 Responde ÚNICAMENTE "VALIDO" o "INVALIDO" seguido de la razón si es inválido.
 
@@ -5682,8 +5698,12 @@ Ejemplos:
 - "Medellín" -> VALIDO
 - "Cali" -> VALIDO
 - "Soacha" -> VALIDO
+- "La sucursal del cielo" -> VALIDO (Cali)
+- "La eterna primavera" -> VALIDO (Medellín)
+- "La heroica" -> VALIDO (Cartagena)
 - "K351ERXL" -> INVALIDO (es un código, no una ciudad)
 - "referido" -> INVALIDO (palabra común)
+- "mi ciudad favorita" -> INVALIDO (descripción genérica, no nombre específico)
 """
             else:
                 # Validación genérica

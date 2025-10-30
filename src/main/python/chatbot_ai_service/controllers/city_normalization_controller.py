@@ -176,6 +176,34 @@ COLOMBIAN_CITIES_FAST_LOOKUP = {
     "quibdo": {"city": "Quibdó", "state": "Chocó", "country": "Colombia"},
     "quibdó": {"city": "Quibdó", "state": "Chocó", "country": "Colombia"},
     "riohacha": {"city": "Riohacha", "state": "La Guajira", "country": "Colombia"},
+    
+    # 🎨 APODOS DE CIUDADES COLOMBIANAS
+    "la sucursal del cielo": {"city": "Cali", "state": "Valle del Cauca", "country": "Colombia"},
+    "sucursal del cielo": {"city": "Cali", "state": "Valle del Cauca", "country": "Colombia"},
+    "la eterna primavera": {"city": "Medellín", "state": "Antioquia", "country": "Colombia"},
+    "eterna primavera": {"city": "Medellín", "state": "Antioquia", "country": "Colombia"},
+    "la ciudad de la eterna primavera": {"city": "Medellín", "state": "Antioquia", "country": "Colombia"},
+    "ciudad de la eterna primavera": {"city": "Medellín", "state": "Antioquia", "country": "Colombia"},
+    "la ciudad eterna": {"city": "Medellín", "state": "Antioquia", "country": "Colombia"},
+    "ciudad eterna": {"city": "Medellín", "state": "Antioquia", "country": "Colombia"},
+    "la capital de la montaña": {"city": "Manizales", "state": "Caldas", "country": "Colombia"},
+    "capital de la montaña": {"city": "Manizales", "state": "Caldas", "country": "Colombia"},
+    "la sultana del valle": {"city": "Cali", "state": "Valle del Cauca", "country": "Colombia"},
+    "sultana del valle": {"city": "Cali", "state": "Valle del Cauca", "country": "Colombia"},
+    "la capital mundial de la salsa": {"city": "Cali", "state": "Valle del Cauca", "country": "Colombia"},
+    "capital mundial de la salsa": {"city": "Cali", "state": "Valle del Cauca", "country": "Colombia"},
+    "la heroica": {"city": "Cartagena", "state": "Bolívar", "country": "Colombia"},
+    "heroica": {"city": "Cartagena", "state": "Bolívar", "country": "Colombia"},
+    "la puerta de oro de colombia": {"city": "Barranquilla", "state": "Atlántico", "country": "Colombia"},
+    "puerta de oro de colombia": {"city": "Barranquilla", "state": "Atlántico", "country": "Colombia"},
+    "la ciudad de las puertas abiertas": {"city": "Manizales", "state": "Caldas", "country": "Colombia"},
+    "ciudad de las puertas abiertas": {"city": "Manizales", "state": "Caldas", "country": "Colombia"},
+    "la ciudad blanca": {"city": "Popayán", "state": "Cauca", "country": "Colombia"},
+    "ciudad blanca": {"city": "Popayán", "state": "Cauca", "country": "Colombia"},
+    "la villa de robledo": {"city": "Cartago", "state": "Valle del Cauca", "country": "Colombia"},
+    "villa de robledo": {"city": "Cartago", "state": "Valle del Cauca", "country": "Colombia"},
+    "la villa del cacique": {"city": "Calarcá", "state": "Quindío", "country": "Colombia"},
+    "villa del cacique": {"city": "Calarcá", "state": "Quindío", "country": "Colombia"},
 }
 
 async def normalize_city_fast(city_input: str) -> Dict[str, Any]:
@@ -759,27 +787,15 @@ async def analyze_external_results_with_ai(city_input: str, external_results: Li
     Usa IA para analizar y validar los resultados de fuentes externas
     """
     try:
-        if not external_results:
-            return {
-                "city": city_input,
-                "state": None,
-                "country": "Colombia",
-                "confidence": 0.1,
-                "source": "ai_only"
-            }
-        
-        # Por ahora, usar el mejor resultado externo
+        # Si hay resultados externos, usar el mejor
         if external_results:
             best_external = max(external_results, key=lambda x: x.get("confidence", 0))
+            logger.info(f"✅ Usando mejor resultado externo: {best_external['city']}, {best_external.get('state')}, {best_external.get('country')}")
             return best_external
         
-        return {
-            "city": city_input,
-            "state": None,
-            "country": "Colombia",
-            "confidence": 0.3,
-            "source": "fallback"
-        }
+        # Si no hay resultados externos, intentar usar IA para detectar apodos conocidos
+        logger.info(f"🔍 No se encontraron resultados externos para '{city_input}', intentando con IA para detectar apodos")
+        return await _try_ai_city_detection(city_input)
         
     except Exception as e:
         logger.error(f"Error en análisis con IA: {e}")
@@ -789,6 +805,104 @@ async def analyze_external_results_with_ai(city_input: str, external_results: Li
             "country": "Colombia",
             "confidence": 0.1,
             "source": "fallback"
+        }
+
+async def _try_ai_city_detection(city_input: str) -> Dict[str, Any]:
+    """
+    Intenta usar IA para detectar si un texto es un apodo o referencia a una ciudad colombiana
+    """
+    try:
+        from chatbot_ai_service.services.ai_service import AIService
+        ai_service = AIService()
+        
+        prompt = f"""
+Analiza el siguiente texto y determina:
+1. Si es un apodo o referencia conocida a una ciudad colombiana
+2. Si contiene el nombre de una ciudad colombiana real
+3. Si es una frase que hace referencia a una ciudad específica (ej: "la ciudad donde nació X")
+
+Texto: "{city_input}"
+
+APODOS CONOCIDOS DE CIUDADES COLOMBIANAS:
+- "La sucursal del cielo" = Cali, Valle del Cauca, Colombia
+- "La eterna primavera" = Medellín, Antioquia, Colombia
+- "La ciudad de la eterna primavera" = Medellín, Antioquia, Colombia
+- "La ciudad eterna" = Medellín, Antioquia, Colombia
+- "La capital de la montaña" = Manizales, Caldas, Colombia
+- "La sultana del valle" = Cali, Valle del Cauca, Colombia
+- "La capital mundial de la salsa" = Cali, Valle del Cauca, Colombia
+- "La heroica" = Cartagena, Bolívar, Colombia
+- "La puerta de oro de Colombia" = Barranquilla, Atlántico, Colombia
+- "La ciudad de las puertas abiertas" = Manizales, Caldas, Colombia
+- "La ciudad blanca" = Popayán, Cauca, Colombia
+- "La villa de robledo" = Cartago, Valle del Cauca, Colombia
+- "La villa del cacique" = Calarcá, Quindío, Colombia
+
+CIUDADES COLOMBIANAS PRINCIPALES:
+Bogotá (Cundinamarca), Medellín (Antioquia), Cali (Valle del Cauca), Barranquilla (Atlántico), 
+Cartagena (Bolívar), Bucaramanga (Santander), Pereira (Risaralda), Santa Marta (Magdalena), 
+Manizales (Caldas), Armenia (Quindío), Ibagué (Tolima), Cúcuta (Norte de Santander), 
+Pasto (Nariño), Villavicencio (Meta), Montería (Córdoba), Sincelejo (Sucre), Popayán (Cauca), 
+Valledupar (Cesar), Tunja (Boyacá), Riohacha (La Guajira), Florencia (Caquetá), Quibdó (Chocó), 
+San Andrés (San Andrés y Providencia), Neiva (Huila), Girardot (Cundinamarca)
+
+INSTRUCCIONES:
+- Si el texto es un apodo conocido, responde con la ciudad correspondiente
+- Si el texto contiene el nombre de una ciudad colombiana, responde con esa ciudad y su departamento
+- Si el texto hace referencia a una ciudad por contexto (ej: "donde nació Karol G" = Medellín), responde con esa ciudad
+- Si NO puedes identificar una ciudad específica de Colombia, responde: NO_RECONOCIDO
+
+Respuesta SOLO en formato: CIUDAD|DEPARTAMENTO|PAÍS
+
+Ejemplos:
+- "La sucursal del cielo" -> Cali|Valle del Cauca|Colombia
+- "La heroica" -> Cartagena|Bolívar|Colombia
+- "Bogotá" -> Bogotá|Cundinamarca|Colombia
+- "Medellín" -> Medellín|Antioquia|Colombia
+- "En la ciudad que vio nacer a Karol G" -> Medellín|Antioquia|Colombia
+- "donde nació Shakira" -> Barranquilla|Atlántico|Colombia
+- "hola" -> NO_RECONOCIDO
+- "mi ciudad favorita" -> NO_RECONOCIDO
+"""
+        
+        response = await ai_service.generate_response(prompt, "system")
+        
+        if response and "|" in response:
+            parts = response.strip().split("|")
+            if len(parts) == 3:
+                city_name, state_name, country_name = parts
+                city_name = city_name.strip()
+                state_name = state_name.strip()
+                country_name = country_name.strip()
+                
+                # Verificar que no sea NO_RECONOCIDO
+                if city_name.upper() != "NO_RECONOCIDO" and state_name.upper() != "NO_RECONOCIDO":
+                    logger.info(f"✅ IA detectó ciudad: '{city_input}' -> {city_name}, {state_name}, {country_name}")
+                    return {
+                        "city": city_name,
+                        "state": state_name,
+                        "country": country_name,
+                        "confidence": 0.85,
+                        "source": "ai_detection"
+                    }
+        
+        logger.info(f"❌ IA no reconoció '{city_input}' como una ciudad colombiana")
+        return {
+            "city": city_input,
+            "state": None,
+            "country": "Colombia",
+            "confidence": 0.1,
+            "source": "ai_not_recognized"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error en detección de apodos con IA: {e}")
+        return {
+            "city": city_input,
+            "state": None,
+            "country": "Colombia",
+            "confidence": 0.1,
+            "source": "ai_error"
         }
 
         # MÉTODO NO USADO - Comentado para limpieza de código
