@@ -423,6 +423,10 @@ class TenantMemoryService:
         Returns:
             Lista de tenant IDs
         """
+        if self.db is None:
+            logger.warning("⚠️ Firestore no disponible - no se pueden obtener memorias de tenant")
+            return []
+        
         try:
             docs = self.db.collection('tenant_memory_cache').get()
             tenant_ids = [doc.id for doc in docs]

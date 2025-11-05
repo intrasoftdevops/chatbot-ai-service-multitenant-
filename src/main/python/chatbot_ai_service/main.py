@@ -307,13 +307,20 @@ async def startup_event():
     print("🗄️ Cargando metadatos de índices desde Firestore...")
     
     try:
-        # Obtener todos los índices guardados
-        all_indexes = []
-        indexes_ref = document_index_persistence_service.db.collection("document_indexes").get()
-        for doc in indexes_ref:
-            index_data = doc.to_dict()
-            if index_data:
-                all_indexes.append(index_data)
+        # Verificar si Firestore está disponible
+        db = document_index_persistence_service.db
+        if db is None:
+            print("⚠️ Firestore no disponible en este momento - saltando carga de metadatos")
+            print("ℹ️ Los índices se cargarán de forma lazy cuando sea necesario")
+            all_indexes = []
+        else:
+            # Obtener todos los índices guardados
+            all_indexes = []
+            indexes_ref = db.collection("document_indexes").get()
+            for doc in indexes_ref:
+                index_data = doc.to_dict()
+                if index_data:
+                    all_indexes.append(index_data)
         
         if all_indexes:
             print(f"✅ {len(all_indexes)} índices encontrados en DB:")
@@ -347,7 +354,11 @@ async def startup_event():
         from chatbot_ai_service.services.tenant_memory_service import tenant_memory_service
         
         print("🧠 Cargando memorias de tenants desde Firestore...")
-        tenant_ids = tenant_memory_service.get_all_tenant_memories_from_firestore()
+        if db is None:
+            print("⚠️ Firestore no disponible - saltando carga de memorias")
+            tenant_ids = []
+        else:
+            tenant_ids = tenant_memory_service.get_all_tenant_memories_from_firestore()
         
         if tenant_ids:
             print(f"✅ {len(tenant_ids)} memorias encontradas en Firestore:")

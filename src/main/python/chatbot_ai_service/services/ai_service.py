@@ -29,6 +29,7 @@ from chatbot_ai_service.services.cache_service import cache_service
 from chatbot_ai_service.services.user_blocking_service import user_blocking_service
 
 logger = logging.getLogger(__name__)
+import re
 
 class AIService:
     """Servicio de IA simplificado - solo procesamiento de IA"""
@@ -5602,6 +5603,34 @@ Tu opinión es muy valiosa para nosotros. ¿Hay algo más en lo que pueda ayudar
                 return self._validation_cache[data_type][data_lower]
         
         logger.info(f"🔍 Cache miss para validación {data_type}: '{data}' - usando IA")
+        # Validación determinística previa (aceptar sin IA si es claramente válido)
+        try:
+            clean = (data or "").strip()
+            if data_type in ("name", "lastname") and clean:
+                # Pre-procesar muletillas y prefijos comunes de presentación de nombre
+                lower = clean.lower()
+                lower = re.sub(r"^(claro|bueno|ok|okay|vale|listo|pues|sí|si|hola)[,\s]+", "", lower)
+                lower = re.sub(r"^(mi\s+nombre\s+es|me\s+llamo|yo\s+me\s+llamo|soy|nombre\s*:\s*|nombre\s+es)\s+", "", lower)
+                lower = re.sub(r"[^A-Za-zÁÉÍÓÚáéíóúÑñ\s\-'\.]", " ", lower)
+                lower = re.sub(r"\s+", " ", lower).strip()
+                if lower:
+                    clean = lower
+                # Normalizar espacios múltiples
+                clean_norm = re.sub(r"\s+", " ", clean)
+                # Solo letras, espacios, guiones, apóstrofes y puntos; longitud 2-50
+                if re.match(r"^[A-Za-zÁÉÍÓÚáéíóúÑñ\s\-'\.]{2,50}$", clean_norm):
+                    words = [w for w in clean_norm.split(" ") if w]
+                    max_words = 4 if data_type == "name" else 3
+                    if 1 <= len(words) <= max_words:
+                        logger.info(f"✅ Validación determinística aprobó {data_type}: '{clean_norm}'")
+                        return {
+                            "is_valid": True,
+                            "confidence": 0.95,
+                            "reason": "Validación determinística: formato y longitud válidos",
+                            "suggestions": []
+                        }
+        except Exception as _e:
+            logger.warning(f"⚠️ Error en validación determinística ({data_type}): {_e}")
         
         self._ensure_model_initialized()
         
@@ -5619,7 +5648,7 @@ Tu opinión es muy valiosa para nosotros. ¿Hay algo más en lo que pueda ayudar
                 prompt = f"""
 Analiza si el siguiente texto es un nombre válido de persona:
 
-Texto: "{data}"
+Texto: "{clean}"
 
 Un nombre válido debe:
 - Contener solo letras, espacios, guiones, apostrofes y puntos
@@ -5627,6 +5656,9 @@ Un nombre válido debe:
 - NO contener números (excepto en casos especiales como "María José")
 - NO ser una palabra común del español como "referido", "gracias", "hola", etc.
 - NO ser un código alfanumérico
+- Puede incluir nombre completo con apellidos si el usuario los ingresó juntos (máximo 4 palabras)
+
+IMPORTANTE: Si el usuario ingresó su nombre completo con apellidos (ej: "Santiago Buitrago Rojas"), es VÁLIDO ya que el sistema lo separará correctamente.
 
 Responde ÚNICAMENTE "VALIDO" o "INVALIDO" seguido de la razón si es inválido.
 
@@ -5634,6 +5666,9 @@ Ejemplos:
 - "Juan" -> VALIDO
 - "María José" -> VALIDO
 - "José María" -> VALIDO
+- "Santiago Buitrago Rojas" -> VALIDO (nombre completo con apellidos)
+- "Carlos Alberto Pérez" -> VALIDO (nombre completo)
+- "Ana María García López" -> VALIDO (nombre completo con apellidos)
 - "SANTIAGO" -> VALIDO
 - "K351ERXL" -> INVALIDO (es un código, no un nombre)
 - "referido" -> INVALIDO (palabra común)
@@ -6063,92 +6098,83 @@ RESPUESTA NATURAL:""",
 
     async def extract_user_name_from_message(self, tenant_id: str, message: str) -> Dict[str, Any]:
         """
-        Extrae el nombre del usuario de un mensaje que contiene un código de referido
-        
-        Args:
-            tenant_id: ID del tenant
-            message: Mensaje que contiene código de referido
-            
-        Returns:
-            Dict con el nombre extraído y validación
+        Extrae el nombre del usuario de un mensaje (con o sin referido, con o sin frases como
+        "mi nombre es", "me llamo", "soy"). Usa limpieza y extracción determinística antes de IA.
         """
-        self._ensure_model_initialized()
-        
-        if not self.model:
-            return {
-                "name": None,
-                "is_valid": False,
-                "confidence": 0.0,
-                "reason": "Servicio de IA no disponible"
-            }
-        
         try:
+            text = (message or "").strip()
+            if not text:
+                return {"name": None, "is_valid": False, "confidence": 0.0, "reason": "Mensaje vacío"}
+
+            # 1) Limpieza de prefijos y normalización
+            cleaned = re.sub(r"^(claro|bueno|ok|okay|vale|listo|pues|sí|si|hola)[,\s]+", "", text, flags=re.IGNORECASE)
+            cleaned = re.sub(r"^(mi\s+nombre\s+es|me\s+llamo|yo\s+me\s+llamo|soy|nombre\s*:\s*|nombre\s+es)\s+", "", cleaned, flags=re.IGNORECASE)
+            cleaned = re.sub(r"[^A-Za-zÁÉÍÓÚáéíóúÑñ\s\-'\.]", " ", cleaned)
+            cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+            # 2) Extracción determinística si el resultado luce como nombre completo
+            if cleaned and re.match(r"^[A-Za-zÁÉÍÓÚáéíóúÑñ\s\-'\.]{2,50}$", cleaned):
+                words = [w for w in cleaned.split(" ") if w]
+                if 1 <= len(words) <= 4:
+                    # Capitalizar palabras
+                    name_cap = " ".join([w[:1].upper() + w[1:] if len(w) > 0 else w for w in words])
+                    validation = await self.validate_user_data(tenant_id, name_cap, "name")
+                    if validation.get("is_valid", False):
+                        return {"name": name_cap, "is_valid": True, "confidence": 0.95, "reason": "Extracción determinística"}
+
+            # 3) IA como respaldo: prompt genérico robusto
+            self._ensure_model_initialized()
+            if not self.model:
+                return {"name": None, "is_valid": False, "confidence": 0.0, "reason": "Servicio de IA no disponible"}
+
             prompt = f"""
-Analiza el siguiente mensaje y extrae SOLO el nombre de la persona que se está registrando:
+Analiza el siguiente mensaje y extrae SOLO el nombre y apellidos (si aparecen) de la persona que se está registrando.
 
 Mensaje: "{message}"
 
-IMPORTANTE:
-- El mensaje puede contener un código de referido
-- El mensaje puede mencionar a la persona que refiere
-- Debes extraer SOLO el nombre de quien se está registrando, NO de quien refiere
-- Si el mensaje no contiene un nombre claro del usuario, responde "NO_NAME"
+Reglas:
+- El mensaje puede incluir frases como: "mi nombre es", "me llamo", "soy", "nombre:", emojis o muletillas como "claro".
+- Ignora cualquier persona que REFIERA (p. ej., "vengo referido por Juan" -> NO extraer "Juan").
+- Entrega solo el nombre de QUIEN SE REGISTRA, con mayúscula inicial por palabra.
+- Si no puedes identificar un nombre del usuario, responde exactamente "NO_NAME".
 
 Ejemplos:
-- "Hola, vengo referido por Juan, codigo: ABC123" -> El usuario NO menciona su nombre, debe responder "NO_NAME"
-- "Soy María, vengo referido por Juan, codigo: ABC123" -> El nombre es "María"
-- "Me llamo Carlos, codigo: DEF456" -> El nombre es "Carlos"
-- "Hola, soy Ana García, vengo referido por Pedro, codigo: GHI789" -> El nombre es "Ana García"
+- "Hola, vengo referido por Juan" -> NO_NAME
+- "Soy María" -> María
+- "Me llamo Carlos Pérez" -> Carlos Pérez
+- "Claro, mi nombre es Ana García López" -> Ana García López
+- "Nombre: José" -> José
 
-Responde ÚNICAMENTE el nombre extraído o "NO_NAME" si no se puede determinar.
+Responde ÚNICAMENTE con el nombre (sin explicaciones) o "NO_NAME".
 """
-
             response_text = await self._generate_content(prompt)
-            
             if not response_text:
-                return {
-                    "name": None,
-                    "is_valid": False,
-                    "confidence": 0.0,
-                    "reason": "No se pudo obtener respuesta de la IA"
-                }
-            
-            response_clean = response_text.strip()
-            
-            if response_clean.upper() == "NO_NAME":
-                return {
-                    "name": None,
-                    "is_valid": False,
-                    "confidence": 0.9,
-                    "reason": "El mensaje no contiene el nombre del usuario"
-                }
-            
-            # Validar que el nombre extraído es válido
-            validation_result = await self.validate_user_data(tenant_id, response_clean, "name")
-            
-            if validation_result.get("is_valid", False):
-                return {
-                    "name": response_clean,
-                    "is_valid": True,
-                    "confidence": validation_result.get("confidence", 0.8),
-                    "reason": "Nombre extraído y validado correctamente"
-                }
-            else:
-                return {
-                    "name": response_clean,
-                    "is_valid": False,
-                    "confidence": validation_result.get("confidence", 0.5),
-                    "reason": f"Nombre extraído pero no válido: {validation_result.get('reason', '')}"
-                }
-                
+                return {"name": None, "is_valid": False, "confidence": 0.0, "reason": "IA sin respuesta"}
+
+            candidate = response_text.strip()
+            if candidate.upper() == "NO_NAME":
+                return {"name": None, "is_valid": False, "confidence": 0.9, "reason": "IA no encontró nombre"}
+
+            # 4) Limpieza y validación del candidato de IA
+            candidate = re.sub(r"[^A-Za-zÁÉÍÓÚáéíóúÑñ\s\-'\.]", " ", candidate)
+            candidate = re.sub(r"\s+", " ", candidate).strip()
+            validation = await self.validate_user_data(tenant_id, candidate, "name")
+            if validation.get("is_valid", False):
+                return {"name": candidate, "is_valid": True, "confidence": validation.get("confidence", 0.85), "reason": "IA validó nombre"}
+
+            # 5) Último recurso: heurística simple tomando las últimas palabras tipo nombre
+            tokens = [t for t in candidate.split(" ") if t and re.match(r"^[A-Za-zÁÉÍÓÚáéíóúÑñ\-'\.]+$", t)]
+            if 1 <= len(tokens) <= 4:
+                fallback_name = " ".join(tokens)
+                validation2 = await self.validate_user_data(tenant_id, fallback_name, "name")
+                if validation2.get("is_valid", False):
+                    return {"name": fallback_name, "is_valid": True, "confidence": 0.8, "reason": "Heurística validada"}
+
+            return {"name": None, "is_valid": False, "confidence": 0.0, "reason": "No se pudo extraer un nombre válido"}
+
         except Exception as e:
             logger.error(f"Error extrayendo nombre del mensaje con IA: {str(e)}")
-            return {
-                "name": None,
-                "is_valid": False,
-                "confidence": 0.0,
-                "reason": f"Error en extracción: {str(e)}"
-            }
+            return {"name": None, "is_valid": False, "confidence": 0.0, "reason": f"Error en extracción: {str(e)}"}
 
     async def generate_welcome_message(self, tenant_config: Dict[str, Any] = None) -> str:
         """
