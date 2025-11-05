@@ -164,43 +164,26 @@ class OptimizedAIService:
                 intent = "saludo_apoyo"
                 confidence = 0.5
             
-            # 🚀 ENFOQUE OPTIMIZADO: Variaciones pre-generadas para saludos (RÁPIDO)
-            # Si es saludo, usar variaciones precargadas desde DB
+            # 🚀 ENFOQUE OPTIMIZADO: Primero intenta responder con documentos si el saludo contiene una pregunta o tema informativo
             if intent == "saludo_apoyo":
-                self.logger.info(f"🔍 Intent es saludo_apoyo - usando variaciones pre-generadas")
-                print(f"🎯 [DEBUG] Intent detectado como saludo_apoyo")
-                print(f"🎯 [DEBUG] Tenants en cache: {list(OptimizedAIService._prompts_cache.keys())}")
+                # Siempre intentar responder con documentos
                 try:
-                    # Obtener variaciones desde el cache global
-                    cache_key = f'{tenant_id}_welcome_variations'
-                    variations = OptimizedAIService._prompts_cache.get(cache_key, [])
-                    print(f"🎯 [DEBUG] Cache key: {cache_key}")
-                    print(f"🎯 [DEBUG] Variaciones encontradas: {len(variations)}")
-                    print(f"🎯 [DEBUG] Variaciones: {variations}")
-                    
-                    if variations and len(variations) > 0:
-                        # Seleccionar una variación aleatoria
-                        import random
-                        selected_response = random.choice(variations)
-                        
-                        # Limpiar números al inicio (ej: "2: texto" -> "texto")
-                        import re
-                        selected_response = re.sub(r'^\d+:\s*', '', selected_response).strip()
-                        
-                        # Personalizar con nombre del usuario si está disponible
-                        session_context = user_context.get('session_context', {})
-                        user_name = session_context.get('user_name') or session_context.get('name') or ""
-                        
-                        if user_name and "{user_name}" in selected_response:
-                            selected_response = selected_response.replace("{user_name}", user_name)
-                        
+                    from chatbot_ai_service.clients.gemini_client import GeminiClient
+                    from chatbot_ai_service.orchestrators.rag_orchestrator import RAGOrchestrator
+                    rag = RAGOrchestrator(gemini_client=GeminiClient())
+                    rag_response = await rag.process_query_simple(
+                        query=query,
+                        tenant_id=str(tenant_id),
+                        user_context=user_context,
+                        tenant_config=tenant_config
+                    )
+                    if rag_response and isinstance(rag_response, str) and len(rag_response.strip()) > 10:
                         processing_time = time.time() - start_time
-                        self.logger.info(f"✅ Respuesta desde variaciones pre-generadas ({processing_time:.4f}s)")
-                        print(f"🎯 [SALUDO] Variación seleccionada: {selected_response[:100]}")
+                        self.logger.info(f"✅ Respuesta informativa desde documentos ({processing_time:.4f}s)")
                         return {
-                            "response": selected_response,
+                            "response": rag_response.strip(),
                             "followup_message": "",
-                            "from_cache": True,
+                            "from_cache": False,
                             "processing_time": processing_time,
                             "tenant_id": tenant_id,
                             "session_id": session_id,
@@ -209,24 +192,29 @@ class OptimizedAIService:
                             "user_blocked": False,
                             "optimized": True
                         }
-                    else:
-                        # Fallback si no hay variaciones
-                        self.logger.warning(f"⚠️ No hay variaciones para tenant {tenant_id}")
-                        return {
-                            "response": "¡Hola! Bienvenido a la campaña. ¿En qué puedo ayudarte?",
-                            "followup_message": "",
-                            "from_cache": False,
-                            "processing_time": 0.001,
-                            "tenant_id": tenant_id,
-                            "session_id": session_id,
-                            "intent": intent,
-                            "confidence": confidence,
-                            "optimized": True
-                        }
-                        
                 except Exception as e:
-                    self.logger.warning(f"⚠️ Error procesando saludo: {e}")
-                    self.logger.exception(e)
+                    self.logger.warning(f"⚠️ RAG en saludo_apoyo falló: {e}")
+
+                # Fallback coherente basado en branding si RAG no devuelve
+                try:
+                    brand_cfg = (tenant_config or {}).get("branding", {})
+                    contact_name = brand_cfg.get("contactName", brand_cfg.get("contact_name", "el candidato"))
+                    response = f"Hola, estoy para ayudarte en lo que necesites sobre {contact_name}. ¿Qué te gustaría saber?"
+                except Exception:
+                    response = "Hola, estoy para ayudarte. ¿Qué te gustaría saber?"
+
+                processing_time = time.time() - start_time
+                return {
+                    "response": response,
+                    "followup_message": "",
+                    "from_cache": False,
+                    "processing_time": processing_time,
+                    "tenant_id": tenant_id,
+                    "session_id": session_id,
+                    "intent": intent,
+                    "confidence": confidence,
+                    "optimized": True
+                }
             
             # 🎯 NUEVO: Manejar citas directamente (RÁPIDO)
             if intent == "cita_campaña":

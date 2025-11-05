@@ -177,14 +177,25 @@ class DocumentContextService:
             self._ensure_models_initialized()
             
             if not self._llm or not self._embedding_model:
-                logger.error("Modelos de IA no disponibles para cargar documentos")
-                return False
+                logger.warning("⚠️ Modelos de IA no disponibles (API key inválida/expirada) - cargando documentos en modo simple")
+                # Fallback a modo simple cuando la API key falla
+                return await self._load_documents_simple(tenant_id, documentation_bucket_url)
             
             logger.info(f"📚 Cargando documentos para tenant {tenant_id} desde: {documentation_bucket_url}")
             
             # 🚀 OPTIMIZACIÓN: Verificar si ya tenemos un índice en cache
             if tenant_id in self._index_cache:
                 logger.info(f"✅ Índice ya existe en cache para tenant {tenant_id}")
+                # 🔧 Asegurar que también tenemos documentos en modo simple como backup
+                if tenant_id in self._document_cache:
+                    doc_info = self._document_cache[tenant_id]
+                    if 'documents' not in doc_info:
+                        logger.info(f"📥 Cargando documentos en modo simple como backup...")
+                        try:
+                            await self._load_documents_simple(tenant_id, documentation_bucket_url)
+                            logger.info(f"✅ Documentos en modo simple cargados como backup")
+                        except Exception as e:
+                            logger.warning(f"⚠️ No se pudieron cargar documentos en modo simple (no crítico): {e}")
                 return True
             
             # 💾 CARGAR desde disco local si existe (rápido ~1s)
@@ -203,9 +214,22 @@ class DocumentContextService:
                         "loaded_from_disk": True
                     }
                     logger.info(f"✅ Índice cargado desde disco en ~1s para tenant {tenant_id}")
+                    
+                    # 🔧 IMPORTANTE: También cargar documentos en modo simple como backup
+                    # para cuando el índice vectorial falle por API key
+                    logger.info(f"📥 Cargando documentos en modo simple como backup...")
+                    try:
+                        await self._load_documents_simple(tenant_id, documentation_bucket_url)
+                        logger.info(f"✅ Documentos en modo simple cargados como backup")
+                    except Exception as simple_error:
+                        logger.warning(f"⚠️ No se pudieron cargar documentos en modo simple (no crítico): {simple_error}")
+                    
                     return True
                 except Exception as load_error:
                     logger.warning(f"⚠️ Error cargando desde disco: {load_error}")
+                    # Si falla cargar desde disco, intentar modo simple
+                    logger.info(f"📥 Intentando cargar documentos en modo simple como fallback...")
+                    return await self._load_documents_simple(tenant_id, documentation_bucket_url)
             
             # No hay persistencia, cargar desde bucket
             logger.info(f"📥 Cargando desde bucket (10-30s para primera vez)...")
@@ -375,9 +399,33 @@ class DocumentContextService:
             
             # Verificar si tenemos documentos en cache
             if tenant_id not in self._document_cache:
-                logger.warning(f"No hay documentos cargados para tenant {tenant_id}")
+                logger.warning(f"⚠️ No hay documentos cargados para tenant {tenant_id}")
                 logger.warning(f"🔍 DEBUG: Tenants disponibles en cache: {list(self._document_cache.keys())}")
-                return ""
+                
+                # Intentar cargar documentos obteniendo bucket_url desde la configuración del tenant
+                try:
+                    from chatbot_ai_service.services.configuration_service import configuration_service
+                    tenant_config = configuration_service.get_tenant_config(tenant_id)
+                    if tenant_config:
+                        # Obtener bucket_url desde ai_config o documentación
+                        ai_config = tenant_config.get('ai_config', {})
+                        bucket_url = ai_config.get('documentation_bucket_url') or ai_config.get('documentationBucketUrl')
+                        
+                        if bucket_url:
+                            logger.info(f"📥 Intentando cargar documentos en modo simple para tenant {tenant_id} desde {bucket_url[:50]}...")
+                            loaded = await self._load_documents_simple(tenant_id, bucket_url)
+                            if loaded:
+                                logger.info(f"✅ Documentos cargados en modo simple para tenant {tenant_id}")
+                            else:
+                                logger.warning(f"⚠️ No se pudieron cargar documentos para tenant {tenant_id}")
+                        else:
+                            logger.debug(f"⚠️ No se encontró bucket_url en configuración del tenant {tenant_id}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Error intentando cargar documentos: {e}")
+                
+                # Verificar nuevamente si ahora tenemos documentos
+                if tenant_id not in self._document_cache:
+                    return ""
             
             doc_info = self._document_cache[tenant_id]
             
@@ -402,10 +450,46 @@ class DocumentContextService:
                     print(f"🔍 DEBUG: Respuesta obtenida de query_engine")
                     logger.info(f"🔍 DEBUG: Respuesta del índice vectorial: {response}")
                 except Exception as query_error:
+                    error_msg = str(query_error)
                     print(f"🔍 DEBUG: ERROR en query_engine.query: {query_error}")
-                    logger.error(f"Error en query_engine.query: {query_error}")
-                    import traceback
-                    traceback.print_exc()
+                    logger.warning(f"⚠️ Error en índice vectorial (API key o embedding): {error_msg}")
+                    
+                    # Si es error de API key (403, expired, leaked, invalid), usar SmartRetriever como fallback
+                    api_key_errors = ["403", "api key", "leaked", "expired", "invalid", "permission denied"]
+                    if any(err in error_msg.lower() for err in api_key_errors):
+                        logger.warning("⚠️ API key de Gemini inválida/expirada - usando SmartRetriever como fallback")
+                        if tenant_id in self._document_cache:
+                            doc_info = self._document_cache[tenant_id]
+                            if 'documents' in doc_info:
+                                from chatbot_ai_service.retrievers.smart_retriever import SmartRetriever
+                                retriever = SmartRetriever()
+                                search_results = retriever.search_documents(doc_info['documents'], query, max_results)
+                                if search_results:
+                                    context_parts = []
+                                    for result in search_results:
+                                        context_parts.append(f"[Documento] {result.filename}:\n{result.content[:500]}...")
+                                    logger.info(f"✅ SmartRetriever encontró {len(search_results)} documentos relevantes")
+                                    return "\n\n".join(context_parts)
+                                else:
+                                    logger.warning("⚠️ SmartRetriever no encontró documentos relevantes")
+                            else:
+                                logger.warning("⚠️ No hay documentos en modo simple para SmartRetriever")
+                                # Intentar cargar documentos ahora
+                                try:
+                                    bucket_url = doc_info.get('bucket_url')
+                                    if bucket_url:
+                                        logger.info(f"📥 Cargando documentos en modo simple ahora...")
+                                        await self._load_documents_simple(tenant_id, bucket_url)
+                                        # Reintentar búsqueda
+                                        if tenant_id in self._document_cache and 'documents' in self._document_cache[tenant_id]:
+                                            retriever = SmartRetriever()
+                                            search_results = retriever.search_documents(self._document_cache[tenant_id]['documents'], query, max_results)
+                                            if search_results:
+                                                context_parts = [f"[Documento] {r.filename}:\n{r.content[:500]}..." for r in search_results]
+                                                return "\n\n".join(context_parts)
+                                except Exception as load_err:
+                                    logger.warning(f"⚠️ Error cargando documentos en modo simple: {load_err}")
+                    
                     return ""
                 
                 # Extraer contexto relevante de la respuesta

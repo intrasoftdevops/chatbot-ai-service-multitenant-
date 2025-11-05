@@ -210,19 +210,48 @@ async def normalize_city_fast(city_input: str) -> Dict[str, Any]:
     """
     Normalización rápida para ciudades colombianas comunes
     """
+    original_input = city_input
     city_lower = city_input.lower().strip()
     
-    # Buscar en lista de ciudades comunes
+    # 0) Limpiar prefijos comunes de frases de ubicación
+    prefixes = [
+        "en la ciudad de ",
+        "en ciudad de ",
+        "en la ciudad ",
+        "en ciudad ",
+        "en la ",
+        "en el ",
+        "en ",
+        "vivo en ",
+        "estoy en ",
+        "soy de ",
+        "desde ",
+    ]
+    for p in prefixes:
+        if city_lower.startswith(p):
+            city_lower = city_lower[len(p):].strip()
+            break
+    
+    # 1) Buscar en lista de ciudades/apodos por igualdad exacta
     if city_lower in COLOMBIAN_CITIES_FAST_LOOKUP:
         result = COLOMBIAN_CITIES_FAST_LOOKUP[city_lower].copy()
         result["confidence"] = 0.95
         result["source"] = "fast_lookup"
-        logger.info(f"✅ Fast lookup para ciudad: '{city_input}' -> {result['city']}, {result['state']}")
+        logger.info(f"✅ Fast lookup para ciudad: '{original_input}' -> {result['city']}, {result['state']}")
         return result
     
-    # Si no está en la lista rápida, usar el enfoque híbrido original
-    logger.info(f"🔍 Ciudad no encontrada en fast lookup: '{city_input}' - usando enfoque híbrido")
-    return await normalize_city_hybrid_approach(city_input)
+    # 2) Buscar por 'contains' (apodos dentro de una frase)
+    for alias_key, mapped in COLOMBIAN_CITIES_FAST_LOOKUP.items():
+        if alias_key in city_lower:
+            result = mapped.copy()
+            result["confidence"] = 0.9
+            result["source"] = "alias_contains"
+            logger.info(f"✅ Alias detectado por contains: '{alias_key}' en '{original_input}' -> {result['city']}, {result.get('state')}")
+            return result
+    
+    # 3) Si no está en la lista rápida ni por contains, usar el enfoque híbrido original (incluye IA)
+    logger.info(f"🔍 Ciudad no encontrada en fast lookup: '{original_input}' - usando enfoque híbrido")
+    return await normalize_city_hybrid_approach(original_input)
 
 async def normalize_city_hybrid_approach(city_input: str) -> Dict[str, Any]:
     """
