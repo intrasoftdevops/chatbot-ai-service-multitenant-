@@ -300,7 +300,99 @@ class DocumentContextService:
             
             # Crear índice vectorial
             logger.info(f"🔨 Creando índice vectorial con {len(llama_documents)} documentos...")
-            index = VectorStoreIndex.from_documents(llama_documents)
+            logger.info(f"📊 Total de caracteres a procesar: {total_chars:,} (~{total_chars // 1000}K tokens estimados)")
+            
+            # 🔧 FIX: Procesar documentos en lotes pequeños para evitar error 500 de Gemini API
+            # El error 500 ocurre cuando se intentan generar demasiados embeddings de una vez
+            # En Cloud Run el sistema de archivos es efímero, así que siempre intenta crear desde cero
+            import asyncio
+            BATCH_SIZE = 5  # Procesar 5 documentos a la vez para evitar rate limits
+            MAX_RETRIES = 3
+            RETRY_DELAY = 2  # segundos
+            
+            if len(llama_documents) > BATCH_SIZE:
+                logger.info(f"📦 Procesando {len(llama_documents)} documentos en lotes de {BATCH_SIZE} para evitar error 500...")
+                
+                # Dividir en lotes
+                batches = [llama_documents[i:i + BATCH_SIZE] for i in range(0, len(llama_documents), BATCH_SIZE)]
+                logger.info(f"📦 {len(batches)} lotes creados")
+                
+                # Procesar documentos en lotes: crear índice base y agregar documentos incrementalmente
+                logger.info(f"🔗 Procesando {len(batches)} lotes en índice incremental...")
+                try:
+                    # Procesar primer lote para crear índice base
+                    first_batch = batches[0]
+                    logger.info(f"📦 Creando índice base con lote 1/{len(batches)} ({len(first_batch)} documentos)...")
+                    
+                    for attempt in range(1, MAX_RETRIES + 1):
+                        try:
+                            index = VectorStoreIndex.from_documents(first_batch)
+                            logger.info(f"✅ Índice base creado exitosamente")
+                            break
+                        except Exception as batch_error:
+                            error_msg = str(batch_error)
+                            if ("500" in error_msg or "internal error" in error_msg.lower() or "rate limit" in error_msg.lower()) and attempt < MAX_RETRIES:
+                                wait_time = RETRY_DELAY * attempt
+                                logger.warning(f"⚠️ Error 500/rate limit en índice base, intento {attempt}/{MAX_RETRIES}. Reintentando en {wait_time}s...")
+                                await asyncio.sleep(wait_time)
+                            else:
+                                raise
+                    
+                    # Agregar los demás lotes procesando lotes completos (más eficiente que uno por uno)
+                    for batch_idx, batch in enumerate(batches[1:], 2):
+                        logger.info(f"📦 Procesando lote {batch_idx}/{len(batches)} ({len(batch)} documentos)...")
+                        
+                        for attempt in range(1, MAX_RETRIES + 1):
+                            try:
+                                # Crear índice temporal para este lote
+                                batch_index = VectorStoreIndex.from_documents(batch)
+                                
+                                # Obtener todos los nodos del lote procesado
+                                batch_nodes = list(batch_index.storage_context.docstore.docs.values())
+                                
+                                # Insertar todos los nodos del lote en el índice principal
+                                for node in batch_nodes:
+                                    index.insert(node)
+                                
+                                logger.info(f"✅ Lote {batch_idx} agregado exitosamente ({len(batch_nodes)} nodos)")
+                                break
+                            except Exception as batch_error:
+                                error_msg = str(batch_error)
+                                if ("500" in error_msg or "internal error" in error_msg.lower() or "rate limit" in error_msg.lower()) and attempt < MAX_RETRIES:
+                                    wait_time = RETRY_DELAY * attempt
+                                    logger.warning(f"⚠️ Error 500/rate limit en lote {batch_idx}, intento {attempt}/{MAX_RETRIES}. Reintentando en {wait_time}s...")
+                                    await asyncio.sleep(wait_time)
+                                else:
+                                    logger.error(f"❌ Lote {batch_idx} falló después de {MAX_RETRIES} intentos: {error_msg}")
+                                    raise
+                        
+                        # Pausa entre lotes para evitar rate limiting
+                        if batch_idx < len(batches):
+                            await asyncio.sleep(1)
+                    
+                    logger.info(f"✅ Índice combinado exitosamente con {len(llama_documents)} documentos")
+                except Exception as combine_error:
+                    logger.error(f"❌ Error combinando lotes: {combine_error}")
+                    raise
+            else:
+                # Si son pocos documentos, procesar normalmente pero con retry
+                for attempt in range(1, MAX_RETRIES + 1):
+                    try:
+                        index = VectorStoreIndex.from_documents(llama_documents)
+                        logger.info(f"✅ Índice creado exitosamente en intento {attempt}")
+                        break
+                    except Exception as e:
+                        error_msg = str(e)
+                        if "500" in error_msg or "internal error" in error_msg.lower() or "rate limit" in error_msg.lower():
+                            if attempt < MAX_RETRIES:
+                                wait_time = RETRY_DELAY * attempt
+                                logger.warning(f"⚠️ Error 500/rate limit al crear índice, intento {attempt}/{MAX_RETRIES}. Reintentando en {wait_time}s...")
+                                await asyncio.sleep(wait_time)
+                            else:
+                                logger.error(f"❌ Error creando índice después de {MAX_RETRIES} intentos: {error_msg}")
+                                raise
+                        else:
+                            raise
             
             # 💾 GUARDAR índice para persistencia
             import os

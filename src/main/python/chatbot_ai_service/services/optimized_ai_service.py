@@ -367,21 +367,104 @@ El sistema de citas estará disponible muy pronto. Mientras tanto, puedes contac
                     if forms_link:
                         self.logger.info(f"✅ Link de Forms disponible: {forms_link}")
                         # Generar respuesta con IA que incluya el link
-                        prompt = f"""Genera una respuesta natural y amigable en español para un chatbot de campaña política. El usuario quiere solicitar materiales publicitarios o información de campaña.
+                        prompt = f"""Eres un asistente virtual de campaña política. El usuario quiere solicitar materiales publicitarios.
 
 Información:
-- Nombre del candidato: {contact_name}
-- Link de Formularios: {forms_link}
+- Candidato: {contact_name}
+- Link: {forms_link}
 
-Genera una respuesta breve, natural y conversacional que incluya el link del formulario para solicitar materiales. La respuesta debe ser cálida y profesional, ofreciendo ayuda para solicitar folletos, material de difusión y propaganda."""
+CRÍTICO - FORMATO EXACTO REQUERIDO:
+1. Escribe máximo 2-3 oraciones cortas y completas
+2. La última oración NO debe mencionar el link, solo debe ser una oración completa y terminada con punto
+3. NUNCA cortes una oración a la mitad (ejemplo MALO: "material de difusión y.")
+4. Después de la última oración completa, escribe un salto de línea y luego el link
+5. NO uses corchetes, NO uses "Link de Forms:", NO uses markdown
+6. Asegúrate de que TODAS las oraciones estén completas antes del link
+
+FORMATO EXACTO A USAR:
+[2-3 oraciones completas]
+
+{forms_link}
+
+Ejemplo CORRECTO:
+¡Hola! Qué excelente que quieras solicitar materiales publicitarios para la campaña de {contact_name}. En el formulario podrás solicitar folletos, material de difusión y propaganda de la campaña.
+
+{forms_link}"""
 
                         response = await self._generate_quick_ai_response(prompt)
                         
-                        # Verificar si la respuesta incluye el enlace
-                        if forms_link not in response:
+                        # Post-procesamiento: limpiar enlaces truncados o corruptos
+                        import re
+                        
+                        # Detectar y corregir oraciones cortadas antes del enlace
+                        # Buscar patrones como "material de difusión y." o "material de difusión y"
+                        if forms_link in response:
+                            # Si el enlace está en medio, moverlo al final
+                            link_pos = response.find(forms_link)
+                            text_before_link = response[:link_pos].strip()
+                            text_after_link = response[link_pos + len(forms_link):].strip()
+                            
+                            # Si hay texto antes del enlace que termina mal, corregirlo
+                            if text_before_link and not text_before_link.endswith(('.', '!', '?', ':')):
+                                # Buscar si la última oración está incompleta
+                                last_sentence = text_before_link.split('.')[-1].strip() if '.' in text_before_link else text_before_link
+                                if last_sentence and not last_sentence.endswith(('.', '!', '?')):
+                                    # Completar la oración o removerla si está cortada
+                                    if last_sentence.endswith(('y', 'y.', 'y,', 'y ')):
+                                        # Remover la última palabra incompleta
+                                        words = text_before_link.split()
+                                        if words:
+                                            # Remover la última palabra si es "y" o similar
+                                            if words[-1].lower() in ['y', 'y.', 'y,']:
+                                                words.pop()
+                                            text_before_link = ' '.join(words)
+                                            if text_before_link and not text_before_link.endswith(('.', '!', '?')):
+                                                text_before_link += "."
+                            
+                            # Reconstruir respuesta: texto antes del link + link al final
+                            response = text_before_link.strip()
+                            if text_after_link:
+                                response += " " + text_after_link.strip()
+                            
+                            # Asegurar que termine con punto antes del link
+                            if response and not response.endswith(('.', '!', '?', ':')):
+                                response += "."
+                        
+                        # Remover patrones como [Link de Forms: https://...] si la IA los incluyera
+                        response = re.sub(r'\[Link de Forms:?\s*', '', response)
+                        response = re.sub(r'\]\s*', '', response)
+                        
+                        # Remover enlaces truncados (que terminan con ...)
+                        response = re.sub(rf'{re.escape(forms_link[:20])}\.\.\.', '', response)
+                        response = re.sub(r'https?://[^\s]+\.\.\.', '', response)
+                        
+                        # Si hay duplicados del link, consolidar
+                        response = re.sub(rf'{re.escape(forms_link)}\s+{re.escape(forms_link)}', forms_link, response)
+                        
+                        # Verificar si la respuesta incluye el enlace completo
+                        has_full_link = forms_link in response
+                        
+                        # Limpiar espacios múltiples (pero mantener saltos de línea)
+                        response = re.sub(r'[ \t]+', ' ', response)  # Solo espacios horizontales
+                        response = re.sub(r'\n\n\n+', '\n\n', response)  # Máximo 2 saltos de línea
+                        response = response.strip()
+                        
+                        # Asegurar que el enlace esté al final si existe, si no agregarlo
+                        if has_full_link:
+                            # Remover todas las ocurrencias del link del texto
+                            response = response.replace(forms_link, '')
+                            response = response.strip()
+                            # Remover puntos o comas finales si están solos
+                            response = re.sub(r'[.,]+$', '.', response)
+                            # Agregar el link al final
+                            if not response.endswith(('.', '!', '?', ':')):
+                                response += "."
+                            response += f"\n\n{forms_link}"
+                        else:
                             self.logger.warning(f"⚠️ La IA no incluyó el enlace. Agregándolo ahora...")
                             # Si no incluye el enlace, agregarlo al final
-                            if not response.endswith('.'):
+                            # Asegurar que la última oración esté completa
+                            if response and not response.endswith(('.', '!', '?', ':')):
                                 response += "."
                             response += f"\n\nPuedes solicitar materiales publicitarios aquí: {forms_link}"
                         
