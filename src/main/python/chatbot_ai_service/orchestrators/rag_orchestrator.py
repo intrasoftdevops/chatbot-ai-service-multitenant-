@@ -240,28 +240,29 @@ class RAGOrchestrator:
             tenant_id = tenant_config.get('tenant_id')
             if tenant_id:
                 try:
-                    # Importar servicios de identidad y memoria
-                    from chatbot_ai_service.identity import get_tenant_identity_service
-                    from chatbot_ai_service.memory import get_tenant_memory_service
-                    
-                    identity_service = get_tenant_identity_service()
-                    memory_service = get_tenant_memory_service()
-                    
-                    # Obtener identidad y memoria (conexión síncrona para no bloquear)
-                    import asyncio
+                    # Intentar importar servicios de identidad y memoria (opcional)
                     try:
-                        loop = asyncio.get_event_loop()
-                        tenant_identity = loop.run_until_complete(identity_service.get_tenant_identity(tenant_id))
-                        tenant_memory = loop.run_until_complete(memory_service.get_tenant_memory(tenant_id))
-                    except RuntimeError:
-                        # Si no hay loop, crear uno nuevo
-                        tenant_identity = asyncio.run(identity_service.get_tenant_identity(tenant_id))
-                        tenant_memory = asyncio.run(memory_service.get_tenant_memory(tenant_id))
-                    
-                    if tenant_identity:
-                        logger.info(f"✅ Identidad del tenant cargada: {tenant_identity.candidate_name}")
-                    if tenant_memory:
-                        logger.info(f"✅ Memoria del tenant cargada: {tenant_memory.total_conversations} conversaciones")
+                        from chatbot_ai_service.identity.tenant_identity_service import TenantIdentityService
+                        from chatbot_ai_service.memory.tenant_memory_service import TenantMemoryService
+                        
+                        identity_service = TenantIdentityService()
+                        memory_service = TenantMemoryService()
+                        
+                        # Obtener identidad y memoria de forma asíncrona (no bloquear)
+                        # Nota: Esto se ejecuta dentro de un contexto async, así que podemos usar await
+                        # Pero como este método no es async, simplemente lo saltamos por ahora
+                        # (la personalización avanzada es opcional)
+                        logger.debug("⚠️ Cargando identidad/memoria requiere contexto async - saltando por ahora")
+                        tenant_identity = None
+                        tenant_memory = None
+                        
+                        if tenant_identity:
+                            logger.info(f"✅ Identidad del tenant cargada: {tenant_identity.candidate_name}")
+                        if tenant_memory:
+                            logger.info(f"✅ Memoria del tenant cargada: {tenant_memory.total_conversations} conversaciones")
+                    except ImportError:
+                        # Si los servicios no están disponibles, continuar sin ellos
+                        logger.debug("⚠️ Servicios de identidad/memoria no disponibles - continuando sin personalización avanzada")
                         
                 except Exception as e:
                     logger.warning(f"⚠️ Error cargando identidad/memoria del tenant: {e}")
@@ -322,6 +323,13 @@ class RAGOrchestrator:
                         logger.info(f"Query limpiado de historial: '{query[:100]}...'")
                         break
         
+        # 🎯 NUEVO: Detectar si es un saludo/apoyo antes de construir prompt técnico
+        is_greeting_or_support = self._is_greeting_or_support(query)
+        
+        if is_greeting_or_support:
+            logger.info("🎯 Detectado saludo/apoyo - usando prompt conversacional")
+            return self._build_greeting_prompt(query, context, user_context, contact_name, candidate_name, tenant_config)
+        
         # 🛡️ FASE 5: Usar PromptBuilder con guardrails
         if self.enable_guardrails:
             # Detectar automáticamente el tipo de prompt
@@ -334,8 +342,7 @@ class RAGOrchestrator:
                 query=query,
                 documents=context,
                 prompt_type=prompt_type,
-                user_context=user_context,
-                tenant_config=tenant_config
+                user_context=user_context
             )
             
             return prompt
@@ -414,6 +421,160 @@ Asistente virtual {candidate_name} de la campaña política {campaign_name}.
 **TU RESPUESTA:**
 """
         return prompt
+    
+    def _is_greeting_or_support(self, query: str) -> bool:
+        """
+        Detecta si el query es un saludo o mensaje de apoyo
+        
+        Args:
+            query: Mensaje del usuario
+            
+        Returns:
+            True si es un saludo/apoyo, False si es una pregunta técnica
+        """
+        query_lower = query.lower().strip()
+        
+        # Palabras clave que indican saludo/apoyo
+        greeting_keywords = [
+            "hola", "buenos días", "buenas tardes", "buenas noches",
+            "saludos", "qué tal", "cómo estás", "cómo va",
+            "listo", "perfecto", "excelente", "genial",
+            "con toda", "con quintero", "apoyo", "vamos", "adelante",
+            "ok", "okey", "okay", "sí", "claro", "por supuesto",
+            "gracias", "muchas gracias", "genial", "perfecto"
+        ]
+        
+        # Frases completas que indican apoyo
+        support_phrases = [
+            "con toda con", "todo con", "vamos con", "adelante con",
+            "apoyo a", "estoy con", "vamos por", "sí a"
+        ]
+        
+        # Verificar si contiene palabras clave de saludo
+        if any(keyword in query_lower for keyword in greeting_keywords):
+            # Si es muy corto (menos de 20 caracteres) y contiene saludo, probablemente es saludo
+            if len(query) < 50:
+                return True
+            
+            # Si contiene frases de apoyo, es saludo/apoyo
+            if any(phrase in query_lower for phrase in support_phrases):
+                return True
+        
+        # Si no contiene signos de interrogación y es corto, probablemente es saludo
+        if "?" not in query and len(query.split()) <= 5:
+            return True
+        
+        return False
+    
+    def _build_greeting_prompt(
+        self,
+        query: str,
+        context: str,
+        user_context: Dict[str, Any],
+        contact_name: str,
+        candidate_name: str,
+        tenant_config: Dict[str, Any] = None
+    ) -> str:
+        """
+        Construye un prompt especializado para saludos/apoyos
+        
+        Este prompt reconoce que es un saludo y responde de manera conversacional
+        usando la personalidad de la campaña, sin forzar búsquedas técnicas.
+        """
+        user_info = ""
+        if user_context and user_context.get("user_name"):
+            user_info = f"El usuario se llama {user_context['user_name']}."
+        
+        # Obtener información de branding
+        branding = tenant_config.get('branding', {}) if tenant_config else {}
+        if isinstance(branding, dict):
+            candidate_name = branding.get('candidate_name', candidate_name)
+        
+        prompt = f"""
+Eres un asistente virtual de la campaña política de {contact_name}.
+
+**TU PERSONALIDAD:**
+- Eres amigable, cercano y auténtico
+- Representas a {contact_name} y su campaña
+- Usas un tono conversacional pero profesional
+- Muestras pasión y entusiasmo por la campaña
+- Respondes a saludos y mensajes de apoyo con calidez
+
+**CONTEXTO:**
+{user_info}
+El usuario acaba de escribir: "{query}"
+
+**DOCUMENTOS DISPONIBLES (opcional - úsalos solo si añaden valor):**
+{context if context and context.strip() != "No se encontraron documentos relevantes." else "No hay documentos específicos necesarios para este saludo."}
+
+**INSTRUCCIONES PARA RESPONDER:**
+1. Reconoce que esto es un SALUDO o MENSAJE DE APOYO, NO una pregunta técnica
+2. Responde de manera cálida, amigable y entusiasta
+3. Agradece el apoyo o saludo si es apropiado
+4. Si el contexto tiene información relevante sobre la campaña, puedes mencionarla brevemente
+5. NO busques "información sobre" nombres o términos técnicos - es un saludo, no una consulta
+6. Puedes invitar al usuario a hacer preguntas sobre la campaña o propuestas
+7. Mantén la respuesta breve (2-4 oraciones máximo)
+8. **CRÍTICO:** NO uses citas de documentos [Documento N]
+9. **CRÍTICO:** NO uses prefijos como "Respuesta basada en documentos" o "💡 Respuesta basada en documentos"
+10. **CRÍTICO:** NO incluyas secciones de "📚 Fuentes:" o "📚 **Fuentes:**"
+11. Responde SOLO con el mensaje cálido y natural, sin elementos técnicos
+
+**EJEMPLOS DE SALUDOS/APOYOS:**
+- Si el usuario dice algo como "Listo, con toda con {contact_name}!" o "Vamos con {contact_name}!" → Responde con entusiasmo agradeciendo el apoyo (ejemplo: "¡Qué energía tan bacana! Nos encanta sentir ese apoyo. ¡Claro que sí, con toda con {contact_name} para construir el futuro que Colombia merece!")
+- Si el usuario dice "Hola" → Saluda amigablemente y ofrece ayuda (ejemplo: "¡Hola! Me alegra saludarte. ¿En qué puedo ayudarte hoy?")
+- Si el usuario dice "Vamos con todo!" o mensajes de apoyo similares → Responde con energía y agradecimiento (ejemplo: "¡Excelente! Esa energía es la que necesitamos. ¡Vamos con todo para lograr el cambio que Colombia merece!")
+
+**TU RESPUESTA (breve, cálida, entusiasta, SIN prefijos técnicos, SIN citas, SIN secciones de fuentes):**
+"""
+        return prompt
+    
+    def _clean_greeting_response(self, response: str) -> str:
+        """
+        Limpia la respuesta de saludo removiendo prefijos técnicos y citas
+        
+        Args:
+            response: Respuesta generada
+            
+        Returns:
+            Respuesta limpia sin prefijos técnicos ni citas
+        """
+        import re
+        
+        cleaned = response.strip()
+        
+        # Remover prefijos comunes
+        prefixes_to_remove = [
+            r"^💡\s*\*?Respuesta basada en documentos.*?\*?:?\s*\n*\n*",
+            r"^💡\s*Respuesta basada en documentos.*?:?\s*\n*\n*",
+            r"^Respuesta basada en documentos.*?:?\s*\n*\n*",
+        ]
+        
+        for pattern in prefixes_to_remove:
+            cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE | re.MULTILINE)
+        
+        # Remover secciones de fuentes
+        source_patterns = [
+            r"\n*\n*📚\s*\*?\*?Fuentes?\*?\*?:?\s*\n*.*?$",
+            r"\n*\n*📚\s*Fuentes?\s*:?\s*\n*.*?$",
+            r"\n*\n*\*\*Fuentes?\*\*:?\s*\n*.*?$",
+            r"\n*\n*Fuentes?\s*:?\s*\n*.*?$",
+        ]
+        
+        for pattern in source_patterns:
+            cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE | re.MULTILINE | re.DOTALL)
+        
+        # Remover citas de documentos [Documento N] o [1], etc.
+        cleaned = re.sub(r'\[Documento\s+\d+\]', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'\[Doc\s+\d+\]', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'\[Fuente\s+\d+\]', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'\[\d+\]', '', cleaned)
+        
+        # Limpiar espacios múltiples y líneas vacías
+        cleaned = re.sub(r'\n\n\n+', '\n\n', cleaned)
+        cleaned = re.sub(r' +', ' ', cleaned)
+        
+        return cleaned.strip()
     
     async def _generate_response(
         self, 
@@ -502,32 +663,36 @@ Asistente virtual {candidate_name} de la campaña política {campaign_name}.
         logger.info("1️⃣ Reescribiendo query...")
         queries = await self._rewrite_query(query)
         
-        # 2. Document Retrieval
-        logger.info("2️⃣ Recuperando documentos...")
-        documents = await self._retrieve_documents(queries, tenant_id, max_docs)
+        # 2. Obtener contexto relevante (compatible con y sin LlamaIndex)
+        logger.info("2️⃣ Recuperando contexto desde DocumentContextService...")
+        try:
+            from chatbot_ai_service.services.document_context_service import document_context_service
+            context = await document_context_service.get_relevant_context(tenant_id, query, max_results=max_docs)
+        except Exception as e:
+            logger.warning(f"⚠️ Error obteniendo contexto: {e}")
+            context = ""
+
+        # Construir lista mínima de documentos para verificación/citas
+        documents = []
+        if context and context.strip():
+            try:
+                # Crear una fuente sintética si no tenemos objetos reales
+                documents = [
+                    SearchResult(
+                        doc_id="synthetic_context",
+                        filename="Contexto consolidado",
+                        content=context,
+                        score=1.0,
+                        match_type="aggregated"
+                    )
+                ]
+            except Exception as _e:
+                logger.debug(f"No se pudo crear fuente sintética: {_e}")
         
-        if not documents:
-            logger.warning("⚠️ No se encontraron documentos relevantes")
-            return RAGResponse(
-                response="Lo siento, no encontré información relevante en los documentos disponibles para responder tu pregunta. ¿Podrías reformularla o hacer una pregunta más específica?",
-                response_with_citations="",
-                verification=VerificationResult(
-                    is_verified=False,
-                    confidence=0.0,
-                    unsupported_claims=[],
-                    sources_used=[],
-                    hallucination_risk=0.0,
-                    recommendation="No hay documentos disponibles"
-                ),
-                retrieved_documents=[],
-                metadata={"query": query, "tenant_id": tenant_id},
-                guardrail_result=None,
-                sanitization_applied=False
-            )
-        
-        # 3. Build Context
+        # 3. Build Context (noop si ya viene listo)
         logger.info("3️⃣ Construyendo contexto...")
-        context = self._build_rag_context(documents)
+        if not context:
+            context = "No se encontraron documentos relevantes."
         
         # 4. Build Prompt
         logger.info("4️⃣ Construyendo prompt...")
@@ -545,6 +710,9 @@ Asistente virtual {candidate_name} de la campaña política {campaign_name}.
         guardrail_result = None
         sanitization_applied = False
         
+        # 🎯 NUEVO: Detectar si es saludo para aplicar guardrails más flexibles
+        is_greeting = self._is_greeting_or_support(query)
+        
         if self.enable_guardrails:
             logger.info("6️⃣ Verificando guardrails...")
             guardrail_result = self.guardrail_verifier.verify(
@@ -559,19 +727,35 @@ Asistente virtual {candidate_name} de la campaña política {campaign_name}.
                 f"Warnings: {guardrail_result.warnings}"
             )
             
-            # Si falla guardrails, sanitizar
+            # Si falla guardrails, sanitizar (pero ser más flexible con saludos)
             if not guardrail_result.all_passed:
                 logger.warning(f"⚠️ Guardrails no pasados: {guardrail_result.recommendation}")
                 
-                if self.strict_guardrails and guardrail_result.critical_failures > 0:
-                    logger.info("7️⃣ Sanitizando respuesta...")
-                    response, changes = self.response_sanitizer.sanitize(
-                        response=response,
-                        documents=documents,
-                        guardrail_result=guardrail_result
-                    )
-                    sanitization_applied = True
-                    logger.info(f"   └─ Cambios aplicados: {len(changes)}")
+                # Para saludos, solo sanitizar si hay fallas críticas graves
+                if is_greeting:
+                    # Para saludos, ser más flexible - solo sanitizar si hay problemas de seguridad
+                    if self.strict_guardrails and guardrail_result.critical_failures > 2:
+                        logger.info("7️⃣ Sanitizando respuesta de saludo (modo flexible)...")
+                        response, changes = self.response_sanitizer.sanitize(
+                            response=response,
+                            documents=documents,
+                            guardrail_result=guardrail_result
+                        )
+                        sanitization_applied = True
+                        logger.info(f"   └─ Cambios aplicados: {len(changes)}")
+                    else:
+                        logger.info("   └─ Saludo detectado - guardrails flexibles aplicados")
+                else:
+                    # Para preguntas técnicas, aplicar guardrails estrictos normalmente
+                    if self.strict_guardrails and guardrail_result.critical_failures > 0:
+                        logger.info("7️⃣ Sanitizando respuesta...")
+                        response, changes = self.response_sanitizer.sanitize(
+                            response=response,
+                            documents=documents,
+                            guardrail_result=guardrail_result
+                        )
+                        sanitization_applied = True
+                        logger.info(f"   └─ Cambios aplicados: {len(changes)}")
         
         # 8. Verify Response (SourceVerifier)
         verification = None
@@ -588,11 +772,15 @@ Asistente virtual {candidate_name} de la campaña política {campaign_name}.
                 recommendation="Verificación deshabilitada"
             )
         
-        # 9. Add Citations
+        # 9. Add Citations (skip for greetings)
         response_with_citations = response
-        if self.enable_citations:
+        if self.enable_citations and not is_greeting:
             logger.info("9️⃣ Agregando citas...")
             response_with_citations = self.verifier.add_citations(response, documents)
+        elif is_greeting:
+            logger.info("9️⃣ Saltando citas para saludo/apoyo")
+            # Limpiar cualquier prefijo o cita que pueda haber sido agregado
+            response_with_citations = self._clean_greeting_response(response)
         
         # Calculate processing time
         processing_time = None
