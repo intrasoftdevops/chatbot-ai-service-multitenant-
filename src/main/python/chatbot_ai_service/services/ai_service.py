@@ -3961,7 +3961,7 @@ Devuelve SOLO el nombre de la categoría:"""
             valid_categories = [
                 "malicioso", "cita_campaña", "saludo_apoyo", "publicidad_info", 
                 "conocer_candidato", "actualizacion_datos", "solicitud_funcional", 
-                "colaboracion_voluntariado", "quejas", "queja_detalle_select", "lider", "atencion_humano", 
+                "colaboracion_voluntariado", "area_colaboracion_select", "quejas", "queja_detalle_select", "lider", "atencion_humano", 
                 "atencion_equipo_interno", "registration_response"
             ]
             
