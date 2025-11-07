@@ -454,6 +454,7 @@ async def health_check():
     """Health check del servicio con verificación de preprocesamiento"""
     try:
         from chatbot_ai_service.services.document_preprocessor_service import document_preprocessor_service
+        from chatbot_ai_service.services.document_context_service import document_context_service
         
         # Obtener estado del preprocesamiento
         cache_stats = document_preprocessor_service.get_cache_stats()
@@ -467,12 +468,32 @@ async def health_check():
         completed_tenants = [tenant for tenant, status in processing_statuses.items() 
                             if status == "completed"]
         
-        # Determinar estado de salud - CRÍTICO: Solo "healthy" cuando esté completamente listo
+        # 🔧 FIX: Verificar también si hay documentos cargados directamente en document_context_service
+        # Esto ocurre cuando los documentos se cargan desde Firestore en el startup
+        # sin pasar por el preprocesador
+        loaded_tenants_from_context = set()
+        try:
+            if hasattr(document_context_service, '_index_cache') and document_context_service._index_cache:
+                loaded_tenants_from_context.update(document_context_service._index_cache.keys())
+            if hasattr(document_context_service, '_document_cache') and document_context_service._document_cache:
+                loaded_tenants_from_context.update(document_context_service._document_cache.keys())
+        except Exception:
+            # Si hay error accediendo a los caches, asumir que no hay documentos cargados
+            pass
+        
+        # Si hay documentos cargados en document_context_service, considerarlos como "ready"
+        # incluso si no están en el preprocesador
+        has_loaded_documents = len(loaded_tenants_from_context) > 0
+        
+        # Determinar estado de salud
+        # CRÍTICO: Considerar "healthy" si:
+        # 1. Hay tenants completados en el preprocesador, O
+        # 2. Hay documentos cargados directamente en document_context_service
         if processing_tenants:
             health_status = "preprocessing"  # Cloud Run NO enviará tráfico
-        elif failed_tenants:
+        elif failed_tenants and not has_loaded_documents:
             health_status = "degraded"      # Cloud Run NO enviará tráfico
-        elif completed_tenants:
+        elif completed_tenants or has_loaded_documents:
             health_status = "healthy"       # Cloud Run SÍ enviará tráfico
         else:
             health_status = "starting"      # Cloud Run NO enviará tráfico
@@ -485,7 +506,9 @@ async def health_check():
                 "completed_tenants": len(completed_tenants),
                 "processing_tenants": len(processing_tenants),
                 "failed_tenants": len(failed_tenants),
-                "total_tenants": cache_stats.get("total_tenants", 0)
+                "total_tenants": cache_stats.get("total_tenants", 0),
+                "loaded_from_context": len(loaded_tenants_from_context),
+                "loaded_tenant_ids": list(loaded_tenants_from_context)
             }
         }
         
