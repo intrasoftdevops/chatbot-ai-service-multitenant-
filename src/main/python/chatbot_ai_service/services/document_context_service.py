@@ -19,6 +19,7 @@ Settings = None
 StorageContext = None
 load_index_from_storage = None
 SimpleNodeParser = None
+SentenceSplitterNodeParser = None
 Gemini = None
 GeminiEmbedding = None
 import google.generativeai as genai
@@ -57,6 +58,14 @@ try:
         load_index_from_storage as _load
     )
     from llama_index.core.node_parser import SimpleNodeParser as _SNP
+    # Intentar importar SentenceSplitterNodeParser (puede no estar disponible en todas las versiones)
+    _SSNP = None
+    try:
+        from llama_index.core.node_parser import SentenceSplitterNodeParser as _SSNP
+        logging.info("✅ SentenceSplitterNodeParser disponible - se usará para chunks optimizados")
+    except ImportError:
+        logging.warning("⚠️ SentenceSplitterNodeParser no disponible - se usará SimpleNodeParser")
+    
     try:
         from llama_index.llms.gemini import Gemini as _Gem
         from llama_index.embeddings.gemini import GeminiEmbedding as _GemEmb
@@ -65,7 +74,7 @@ try:
         _Gem = None
         _GemEmb = None
     VectorStoreIndex, Document, Settings, StorageContext, load_index_from_storage = _VSI, _Doc, _Settings, _SC, _load
-    SimpleNodeParser, Gemini, GeminiEmbedding = _SNP, _Gem, _GemEmb
+    SimpleNodeParser, SentenceSplitterNodeParser, Gemini, GeminiEmbedding = _SNP, _SSNP, _Gem, _GemEmb
     LLAMA_INDEX_SUPPORT = True
     logging.info("✅ LlamaIndex cargado correctamente (modo moderno)")
 except ImportError as e:
@@ -87,6 +96,113 @@ except ImportError as e:
         logging.warning("⚠️ Documentos se cargarán sin indexación vectorial (modo simple)")
 
 logger = logging.getLogger(__name__)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SPLITTER PERSONALIZADO QUE RESPETA ORACIONES
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _split_text_by_sentences(text: str, chunk_size: int = 1500, chunk_overlap: int = 300) -> List[str]:
+    """
+    Divide texto en chunks respetando límites de oraciones
+    
+    Args:
+        text: Texto a dividir
+        chunk_size: Tamaño máximo del chunk en caracteres
+        chunk_overlap: Overlap entre chunks en caracteres
+        
+    Returns:
+        Lista de chunks que respetan límites de oraciones
+    """
+    import re
+    
+    # Dividir por oraciones (respeta . ! ? seguidos de espacio o salto de línea)
+    # Evita cortar en abreviaciones comunes
+    sentence_pattern = r'(?<=[.!?])\s+(?=[A-ZÁÉÍÓÚÑ])|(?<=[.!?])\n+(?=[A-ZÁÉÍÓÚÑ])'
+    sentences = re.split(sentence_pattern, text)
+    
+    # Filtrar oraciones vacías
+    sentences = [s.strip() for s in sentences if s.strip()]
+    
+    if not sentences:
+        return [text]
+    
+    chunks = []
+    current_chunk = ""
+    
+    for sentence in sentences:
+        # Si agregar esta oración excede el límite, guardar chunk actual y empezar uno nuevo
+        potential_chunk = current_chunk + (" " if current_chunk else "") + sentence
+        
+        if len(potential_chunk) > chunk_size and current_chunk:
+            # Guardar chunk actual
+            chunks.append(current_chunk.strip())
+            
+            # Crear nuevo chunk con overlap (últimas palabras del chunk anterior)
+            if chunk_overlap > 0 and len(current_chunk) > chunk_overlap:
+                # Tomar últimas palabras para overlap
+                words = current_chunk.split()
+                overlap_words = []
+                overlap_length = 0
+                for word in reversed(words):
+                    if overlap_length + len(word) + 1 <= chunk_overlap:
+                        overlap_words.insert(0, word)
+                        overlap_length += len(word) + 1
+                    else:
+                        break
+                current_chunk = " ".join(overlap_words) + " " + sentence if overlap_words else sentence
+            else:
+                current_chunk = sentence
+        else:
+            current_chunk = potential_chunk
+    
+    # Agregar último chunk
+    if current_chunk:
+        chunks.append(current_chunk.strip())
+    
+    return chunks if chunks else [text]
+
+
+class SentenceAwareNodeParser:
+    """
+    Parser personalizado que respeta límites de oraciones
+    Compatible con la API de LlamaIndex
+    """
+    def __init__(self, chunk_size: int = 1500, chunk_overlap: int = 300):
+        self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
+    
+    def get_nodes_from_documents(self, documents, show_progress: bool = False):
+        """
+        Convierte documentos en nodos respetando límites de oraciones
+        """
+        from llama_index.core.schema import TextNode
+        
+        nodes = []
+        for doc in documents:
+            text = doc.text if hasattr(doc, 'text') else str(doc)
+            metadata = doc.metadata if hasattr(doc, 'metadata') else {}
+            
+            # Dividir texto respetando oraciones
+            chunks = _split_text_by_sentences(text, self.chunk_size, self.chunk_overlap)
+            
+            for i, chunk_text in enumerate(chunks):
+                node = TextNode(
+                    text=chunk_text,
+                    metadata={
+                        **metadata,
+                        "chunk_index": i,
+                        "total_chunks": len(chunks)
+                    }
+                )
+                nodes.append(node)
+        
+        return nodes
+    
+    @classmethod
+    def from_defaults(cls, chunk_size: int = 1500, chunk_overlap: int = 300):
+        """Factory method compatible con LlamaIndex"""
+        return cls(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+
 
 class DocumentContextService:
     """Servicio para cargar documentos del cliente y proporcionar contexto a la IA"""
@@ -130,16 +246,58 @@ class DocumentContextService:
                     )
                     logger.info("✅ Modelos LlamaIndex configurados: gemini-2.5-flash + embedding-001")
                 
-                if Settings is not None and SimpleNodeParser is not None:
+                if Settings is not None:
                     try:
                         # API moderna - configurar modelos explícitamente
                         Settings.llm = self._llm
                         Settings.embed_model = self._embedding_model
-                        Settings.node_parser = SimpleNodeParser.from_defaults(
-                            chunk_size=1024,
-                            chunk_overlap=200
-                        )
-                        logger.info("✅ Settings de LlamaIndex configurados correctamente")
+                        
+                        # 🚀 MEJORA: Usar SentenceSplitterNodeParser para respetar límites semánticos
+                        # Esto evita cortar oraciones a la mitad y mejora la calidad de los chunks
+                        # Configuración optimizada para embedding-001 (límite: 2048 tokens)
+                        # chunk_size en caracteres: ~1500 chars ≈ 400-600 tokens en español
+                        # chunk_overlap: ~300 chars para mantener contexto entre chunks
+                        
+                        if SentenceSplitterNodeParser is not None:
+                            # ✅ OPTIMIZADO: Usa SentenceSplitterNodeParser que respeta límites de oraciones
+                            Settings.node_parser = SentenceSplitterNodeParser.from_defaults(
+                                chunk_size=1500,  # Aumentado de 1024 para mejor contexto
+                                chunk_overlap=300,  # Aumentado de 200 para mejor continuidad
+                            )
+                            logger.info("✅ Chunks optimizados: SentenceSplitterNodeParser (chunk_size=1500, overlap=300)")
+                            logger.info("   → Respeta límites de oraciones, evita cortar texto a la mitad")
+                        elif SimpleNodeParser is not None:
+                            # ✅ MEJORA: Usar splitter personalizado que respeta oraciones
+                            try:
+                                Settings.node_parser = SentenceAwareNodeParser.from_defaults(
+                                    chunk_size=1500,  # Aumentado de 1024
+                                    chunk_overlap=300  # Aumentado de 200
+                                )
+                                logger.info("✅ Chunks optimizados: SentenceAwareNodeParser personalizado (chunk_size=1500, overlap=300)")
+                                logger.info("   → Respeta límites de oraciones, NO corta texto a la mitad")
+                                logger.info("   → Divide por oraciones completas usando regex inteligente")
+                            except Exception as custom_error:
+                                logger.warning(f"⚠️ Error con splitter personalizado: {custom_error}")
+                                # Fallback a SimpleNodeParser mejorado
+                                try:
+                                    Settings.node_parser = SimpleNodeParser.from_defaults(
+                                        chunk_size=1500,  # Aumentado de 1024
+                                        chunk_overlap=300,  # Aumentado de 200
+                                        separator=" ",  # Separar por espacios (respeta mejor las palabras)
+                                    )
+                                    logger.warning("⚠️ Chunks básicos: SimpleNodeParser mejorado (chunk_size=1500, overlap=300)")
+                                    logger.warning("   → Usa separador por espacios - mejor que dividir por caracteres")
+                                    logger.warning("   → Nota: Puede cortar oraciones, pero respeta palabras")
+                                except TypeError:
+                                    # Si no acepta separator, usar configuración básica
+                                    Settings.node_parser = SimpleNodeParser.from_defaults(
+                                        chunk_size=1500,  # Aumentado de 1024
+                                        chunk_overlap=300  # Aumentado de 200
+                                    )
+                                    logger.warning("⚠️ Chunks básicos: SimpleNodeParser (chunk_size=1500, overlap=300)")
+                                    logger.warning("   → Divide por caracteres, puede cortar oraciones a la mitad")
+                        else:
+                            logger.error("❌ No hay node parser disponible - los chunks no se crearán correctamente")
                     except Exception as e:
                         logger.error(f"❌ Error configurando Settings de LlamaIndex: {str(e)}")
                         raise

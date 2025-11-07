@@ -197,8 +197,14 @@ async def process_chat_message(tenant_id: str, request: Dict[str, Any]) -> Dict[
         clean_response = ai_response.get("response", "") or ""
         followup_message = ai_response.get("followup_message") or ""
         
-        logger.info(f"📤 NUEVO ENFOQUE: Respuesta principal: {len(clean_response)} caracteres")
-        logger.info(f"📤 NUEVO ENFOQUE: Followup message: {len(followup_message) if followup_message else 0} caracteres")
+        # 🔒 GARANTIZAR: Todas las respuestas tienen máximo 1000 caracteres
+        ai_service = AIService()
+        clean_response = ai_service._ensure_max_response_length(clean_response, max_length=1000)
+        if followup_message:
+            followup_message = ai_service._ensure_max_response_length(followup_message, max_length=1000)
+        
+        logger.info(f"📤 NUEVO ENFOQUE: Respuesta principal: {len(clean_response)} caracteres (máx 1000)")
+        logger.info(f"📤 NUEVO ENFOQUE: Followup message: {len(followup_message) if followup_message else 0} caracteres (máx 1000)")
         
         # Construir respuesta final
         response = {

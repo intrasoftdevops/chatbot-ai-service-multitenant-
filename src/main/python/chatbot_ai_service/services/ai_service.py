@@ -2240,13 +2240,19 @@ Cada persona que se registre con tu código te suma 50 puntos al ranking. !Es un
 
 ?Te gustaría que te envíe tu link de referido para empezar a ganar puntos?"""
     
-    def _truncate_response_intelligently(self, text: str, max_length: int) -> str:
-        """Trunca el texto de forma inteligente, buscando un punto de corte natural"""
+    def _truncate_response_intelligently(self, text: str, max_length: int = 1000) -> str:
+        """
+        Trunca el texto de forma inteligente, buscando un punto de corte natural
+        GARANTIZA que la respuesta nunca exceda max_length (por defecto 1000 caracteres)
+        """
+        if not text:
+            return text
+            
         if len(text) <= max_length:
             return text
         
         # Buscar el mejor punto de corte antes del límite
-        search_length = min(max_length - 10, len(text))  # Dejar espacio para "..."
+        search_length = min(max_length - 10, len(text))  # Dejar espacio para corte natural
         
         # Buscar puntos de corte naturales en orden de preferencia
         cut_points = [
@@ -2271,10 +2277,22 @@ Cada persona que se registre con tu código te suma 50 puntos al ranking. !Es un
         if best_cut > 0:
             truncated = text[:best_cut + 1].strip()
             # No agregar "..." - la respuesta debe ser completa y concisa
+            # GARANTIZAR que no exceda el límite
+            if len(truncated) > max_length:
+                truncated = truncated[:max_length].rstrip()
             return truncated
         else:
             # Si no se encuentra un buen punto de corte, cortar en el límite exacto sin "..."
-            return text[:max_length]
+            return text[:max_length].rstrip()
+    
+    def _ensure_max_response_length(self, response: str, max_length: int = 1000) -> str:
+        """
+        GARANTIZA que la respuesta no exceda max_length caracteres
+        Usa truncamiento inteligente que respeta límites de oraciones
+        """
+        if not response:
+            return response
+        return self._truncate_response_intelligently(response, max_length)
     
     def _filter_links_from_response(self, response: str, intent: str = None) -> str:
         """
