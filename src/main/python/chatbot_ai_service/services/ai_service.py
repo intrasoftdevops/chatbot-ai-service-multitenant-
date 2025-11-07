@@ -558,12 +558,35 @@ RESPUESTA:"""
                 
                 if document_content:
                     # Usar respuesta inmediata basada en documentos
-                    # La IA se encarga de entender el contexto y responder apropiadamente
+                    # 🔧 MEJORAR: Obtener información del candidato desde configuración
                     contact_name = "el candidato"  # Valor por defecto
+                    tenant_config = None
+                    
+                    if tenant_id:
+                        try:
+                            from chatbot_ai_service.services.configuration_service import configuration_service
+                            tenant_config = configuration_service.get_tenant_config(tenant_id)
+                            
+                            if tenant_config:
+                                # Intentar obtener de branding_config primero
+                                branding_config = tenant_config.get('branding_config', {})
+                                if isinstance(branding_config, dict):
+                                    contact_name = branding_config.get('contactName') or branding_config.get('contact_name') or contact_name
+                                
+                                # Si no se encontró, intentar desde branding directo
+                                if contact_name == "el candidato":
+                                    branding = tenant_config.get('branding', {})
+                                    if isinstance(branding, dict):
+                                        contact_name = branding.get('contact_name') or branding.get('contactName') or contact_name
+                                        
+                                print(f"👤 [ULTRA-FAST] contact_name obtenido: '{contact_name}'")
+                        except Exception as e:
+                            print(f"⚠️ Error obteniendo tenant_config: {e}")
+                    
                     print(f"🤖 ANTES de llamar a _generate_immediate_document_response")
                     print(f"🤖 query: '{query[:100]}...'")
                     print(f"🤖 document_content: {len(document_content)} caracteres")
-                    response = await self._generate_immediate_document_response(query, document_content, contact_name, {})
+                    response = await self._generate_immediate_document_response(query, document_content, contact_name, {}, tenant_config)
                     print(f"🤖 DESPUÉS de llamar a _generate_immediate_document_response")
                     print(f"🤖 RESPUESTA INMEDIATA GENERADA: {response[:200]}...")
                     return response
@@ -612,7 +635,7 @@ RESPUESTA:"""
             logger.error(f"Error en generación ultra-rápida: {e}")
             return "saludo_apoyo"  # Fallback seguro
 
-    async def _generate_immediate_document_response(self, query: str, document_content: str, contact_name: str, user_context: Dict[str, Any] = None) -> str:
+    async def _generate_immediate_document_response(self, query: str, document_content: str, contact_name: str, user_context: Dict[str, Any] = None, tenant_config: Dict[str, Any] = None) -> str:
         """
         Genera respuesta inmediata basada en documentos usando IA
         Respeta la conciencia individual de cada tenant
@@ -667,23 +690,48 @@ RESPUESTA:"""
             print(f"🔍 DEBUG: Última entrada del usuario: '{last_user_input}'")
             
             try:
-                summary_prompt = f"""
+                # 🔧 MEJORAR: Obtener información adicional del tenant_config si está disponible
+                candidate_bio = ""
+                campaign_name = f"la campaña de {contact_name}"
+                
+                if tenant_config:
+                    branding = tenant_config.get('branding', {})
+                    if isinstance(branding, dict):
+                        if branding.get('campaignName'):
+                            campaign_name = branding.get('campaignName')
+                        if branding.get('bio') or branding.get('candidateBio'):
+                            candidate_bio = branding.get('bio') or branding.get('candidateBio', '')
+                            if len(candidate_bio) > 300:
+                                candidate_bio = candidate_bio[:300] + "..."
+                
+                # Construir prompt mejorado con identidad política clara
+                summary_prompt = f"""Eres el asistente virtual oficial de {contact_name}, representante de {campaign_name}.
+
+{candidate_bio if candidate_bio else f"Eres el asistente de {contact_name} y respondes desde su perspectiva política y campaña."}
+
 Contexto de la conversación:
 {conversation_context}
 
-Información relevante sobre el tema:
+Información relevante de los documentos de campaña:
 {clean_content[:2000]}
 
-INSTRUCCIONES:
-- Si el usuario escribió una confirmación breve (ok, sí, entendido, claro, gracias, bien, etc.), responde EXACTAMENTE: "Gracias. ¿En qué más puedo ayudarte?"
-- Si es una pregunta real sobre el tema, responde de forma breve (máximo 800 caracteres) usando la información disponible
-- NO menciones archivos, documentos, o frases genéricas como "el candidato"
-- Usa nombres reales y específicos si están en la información
-- Máximo 800 caracteres
+INSTRUCCIONES CRÍTICAS:
+1. **IDENTIDAD**: Eres el asistente de {contact_name}. Responde desde SU perspectiva política.
+2. **PROHIBIDO**: NUNCA uses frases como "el texto menciona", "el texto dice", "el texto señala", "los textos indican", "según los documentos", "en los documentos se dice". 
+3. **OBLIGATORIO**: Habla directamente sobre los temas como si fueran parte de la posición y conocimiento de {contact_name}.
+4. **TONO**: Responde de forma natural, como si {contact_name} mismo estuviera explicando su postura.
+5. **EJEMPLOS CORRECTOS**: 
+   - ✅ "Durante la presidencia de Álvaro Uribe Vélez, hubo falsos positivos..."
+   - ✅ "Los falsos positivos ocurrieron durante..."
+   - ❌ "El texto menciona que durante la presidencia..."
+   - ❌ "Según los documentos, los falsos positivos..."
+6. Si el usuario escribió una confirmación breve (ok, sí, entendido, claro, gracias, bien, etc.), responde EXACTAMENTE: "Gracias. ¿En qué más puedo ayudarte?"
+7. Si es una pregunta real, responde de forma breve (máximo 800 caracteres) usando la información disponible
+8. Siempre usa el nombre específico {contact_name} cuando sea relevante, nunca uses frases genéricas como "el candidato"
 
 Última entrada del usuario: "{last_user_input}"
 
-Respuesta:"""
+Respuesta (habla directamente, sin mencionar textos o documentos):"""
                 print(f"🔍 DEBUG: summary_prompt creado exitosamente: {len(summary_prompt)} caracteres")
             except Exception as prompt_error:
                 print(f"🔍 DEBUG: ERROR creando summary_prompt: {prompt_error}")
@@ -981,12 +1029,40 @@ Respuesta:"""
                 
                 if document_content:
                     # Usar respuesta inmediata basada en documentos
-                    contact_name = "el candidato"  # Valor por defecto
-                    if tenant_config and tenant_config.get("branding_config"):
-                        contact_name = tenant_config["branding_config"].get("contactName", "el candidato")
+                    # 🔧 MEJORAR: Extraer contact_name de todos los lugares posibles (igual que RAGOrchestrator)
+                    contact_name = None
+                    candidate_name = None
+                    
+                    if tenant_config:
+                        # Intentar obtener de branding_config primero (formato común)
+                        branding_config = tenant_config.get('branding_config', {})
+                        if isinstance(branding_config, dict):
+                            contact_name = branding_config.get('contactName') or branding_config.get('contact_name')
+                        
+                        # Si no se encontró, intentar desde branding directo
+                        if not contact_name:
+                            branding = tenant_config.get('branding', {})
+                            if isinstance(branding, dict):
+                                contact_name = branding.get('contact_name') or branding.get('contactName')
+                                candidate_name = branding.get('candidate_name') or branding.get('candidateName')
+                        
+                        # Si aún no se encontró, buscar en nivel raíz
+                        if not contact_name:
+                            contact_name = tenant_config.get('contact_name') or tenant_config.get('contactName')
+                    
+                    # Si NO se encontró ningún contact_name, usar valor por defecto
+                    if not contact_name:
+                        contact_name = "el candidato"
+                    
+                    # Usar candidate_name si está disponible, sino usar contact_name
+                    final_candidate_name = candidate_name if candidate_name else contact_name
+                    
+                    logger.info(f"👤 [ULTRA-FAST] contact_name extraído: '{contact_name}', candidate_name: '{final_candidate_name}'")
                     
                     # Usar el query completo (con historial) para que la IA tenga contexto
-                    response = await self._generate_immediate_document_response(query, document_content, contact_name, user_context)
+                    response = await self._generate_immediate_document_response(
+                        query, document_content, final_candidate_name, user_context, tenant_config
+                    )
                     logger.info(f"🤖 RESPUESTA INMEDIATA GENERADA: {response[:200]}...")
                     
                     return {
