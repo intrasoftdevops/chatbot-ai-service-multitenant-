@@ -3871,7 +3871,7 @@ Responde solo el JSON estricto sin comentarios:
 - atencion_humano (solicitar hablar con agente humano, asesor, persona: "quiero agente humano", "asesor", "hablar con alguien")
 - solicitud_funcional (app, referidos, puntos, estado, progreso, consultas funcionales, preguntas sobre QUIÉN ES el bot/chatbot: "quién eres", "quien eres", "dime quién eres")
 - cita_campaña (agendar reunión)
-- saludo_apoyo (hola, gracias, mensajes positivos - SOLO si NO contiene preguntas)
+- saludo_apoyo (hola, gracias, mensajes positivos, mensajes de apoyo o elogios hacia el candidato - SOLO si NO contiene preguntas)
 - publicidad_info (pedir material)
 - actualizacion_datos (corregir, cambiar o actualizar información personal: nombre, apellido, ciudad, teléfono, etc.)
 - colaboracion_voluntariado (ofrecer ayudar)
@@ -3901,6 +3901,7 @@ REGLAS CRÍTICAS:
 
 4. SALUDO_APOYO:
    - "hola", "gracias", "ok", mensajes positivos
+   - Mensajes de apoyo o elogios hacia el candidato (mensajes que expresan apoyo, admiración o mensajes positivos dirigidos al candidato)
    - ⚠️ NO uses esto para críticas al servicio
 
 Si el mensaje describe problemas con el servicio/funcionalidad/sistema/atención SIN insultar a personas = queja_detalle_select
@@ -3912,7 +3913,7 @@ Devuelve SOLO el nombre de la categoría:"""
 - conocer_candidato (preguntas sobre política, propuestas, candidato, QUIÉN ES el candidato, "quién eres", "quien eres", "qué eres", "que eres")
 - solicitud_funcional (app, referidos, puntos, estado, progreso, consultas funcionales, preguntas sobre QUIÉN ES el bot/chatbot: "quién eres", "quien eres", "dime quién eres")
 - cita_campaña (agendar reunión)
-- saludo_apoyo (hola, gracias, mensajes positivos - SOLO si NO contiene preguntas)
+- saludo_apoyo (hola, gracias, mensajes positivos, mensajes de apoyo o elogios hacia el candidato - SOLO si NO contiene preguntas)
 - publicidad_info (pedir material)
 - actualizacion_datos (corregir, cambiar o actualizar información personal: nombre, apellido, ciudad, teléfono, etc.)
 - colaboracion_voluntariado (ofrecer ayudar)
@@ -3937,6 +3938,7 @@ REGLAS CRÍTICAS:
 
 4. SALUDO_APOYO:
    - "hola", "gracias", "ok", mensajes positivos
+   - Mensajes de apoyo o elogios hacia el candidato (mensajes que expresan apoyo, admiración o mensajes positivos dirigidos al candidato)
    - ⚠️ NO uses esto para críticas al servicio
 
 Si el mensaje describe problemas con el servicio/funcionalidad/sistema/atención SIN insultar a personas = queja_detalle_select

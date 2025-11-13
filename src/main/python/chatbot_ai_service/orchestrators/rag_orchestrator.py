@@ -453,15 +453,15 @@ Asistente virtual {candidate_name} de la campaña política {campaign_name}.
         # Verificar si contiene palabras clave de saludo
         if any(keyword in query_lower for keyword in greeting_keywords):
             # Si es muy corto (menos de 20 caracteres) y contiene saludo, probablemente es saludo
-            if len(query) < 50:
+            if len(query) < 30:
                 return True
             
             # Si contiene frases de apoyo, es saludo/apoyo
             if any(phrase in query_lower for phrase in support_phrases):
                 return True
         
-        # Si no contiene signos de interrogación y es corto, probablemente es saludo
-        if "?" not in query and len(query.split()) <= 5:
+        # Si no contiene signos de interrogación y es muy corto (máximo 3 palabras), probablemente es saludo
+        if "?" not in query and len(query.split()) <= 3:
             return True
         
         return False
@@ -876,6 +876,15 @@ El usuario acaba de escribir: "{query}"
             logger.info(f"🔍 [RAG_SIMPLE] Primeros 200 chars: {rag_response.response[:200]}")
         else:
             logger.warning(f"🔍 [RAG_SIMPLE] Respuesta vacía o None")
+        
+        # 🎯 DETECTAR SI ES SALUDO Y LIMPIAR CITAS
+        is_greeting = self._is_greeting_or_support(query)
+        
+        if is_greeting:
+            logger.info(f"🔍 [RAG_SIMPLE] Saludo detectado - limpiando citas y prefijos técnicos")
+            # Usar la respuesta sin citas y limpiarla
+            cleaned_response = self._clean_greeting_response(rag_response.response)
+            return cleaned_response
         
         if self.enable_citations:
             logger.info(f"🔍 [RAG_SIMPLE] Devolviendo respuesta con citas")

@@ -164,24 +164,73 @@ class OptimizedAIService:
                 intent = "saludo_apoyo"
                 confidence = 0.5
             
-            # 🚀 ENFOQUE OPTIMIZADO: Primero intenta responder con documentos si el saludo contiene una pregunta o tema informativo
+            # 🚀 SALUDO_APOYO: Generar respuesta natural SIN usar RAG ni documentos
             if intent == "saludo_apoyo":
-                # Siempre intentar responder con documentos
+                self.logger.info(f"🎯 Generando respuesta de saludo/apoyo SIN documentos")
                 try:
                     from chatbot_ai_service.clients.gemini_client import GeminiClient
-                    from chatbot_ai_service.orchestrators.rag_orchestrator import RAGOrchestrator
-                    rag = RAGOrchestrator(gemini_client=GeminiClient())
-                    rag_response = await rag.process_query_simple(
-                        query=query,
-                        tenant_id=str(tenant_id),
-                        user_context=user_context,
-                        tenant_config=tenant_config
+                    
+                    # Obtener información de branding
+                    brand_cfg = (tenant_config or {}).get("branding", {})
+                    contact_name = brand_cfg.get("contactName", brand_cfg.get("contact_name", "el candidato"))
+                    candidate_name = brand_cfg.get("candidate_name", contact_name)
+                    
+                    # Obtener nombre del usuario si está disponible
+                    user_name = user_context.get("user_name", "")
+                    user_info = f"El usuario se llama {user_name}." if user_name else ""
+                    
+                    # Generar respuesta usando IA directamente SIN documentos
+                    gemini_client = GeminiClient()
+                    
+                    prompt = f"""
+Eres un asistente virtual de la campaña política de {contact_name}.
+
+**TU PERSONALIDAD:**
+- Eres amigable, cercano y auténtico
+- Representas a {contact_name} y su campaña
+- Usas un tono conversacional pero profesional
+- Muestras pasión y entusiasmo por la campaña
+- Respondes a saludos y mensajes de apoyo con calidez
+
+**CONTEXTO:**
+{user_info}
+El usuario acaba de escribir: "{query}"
+
+**INSTRUCCIONES PARA RESPONDER:**
+1. Reconoce que esto es un SALUDO o MENSAJE DE APOYO, NO una pregunta técnica
+2. Responde de manera cálida, amigable y entusiasta
+3. Agradece el apoyo o saludo si es apropiado
+4. Si el usuario menciona al candidato positivamente, agradece el apoyo
+5. Puedes invitar al usuario a hacer preguntas sobre la campaña o propuestas
+6. Mantén la respuesta breve (2-4 oraciones máximo)
+7. **CRÍTICO:** NUNCA menciones documentos, fuentes, relevancia, o referencias técnicas
+8. **CRÍTICO:** NUNCA uses prefijos como "Respuesta basada en documentos" o "💡 Respuesta basada en documentos"
+9. **CRÍTICO:** NUNCA incluyas secciones de "📚 Fuentes:" o "📚 **Fuentes:**"
+10. **CRÍTICO:** NUNCA menciones "información en documentos" o "documentos disponibles"
+11. Responde SOLO con el mensaje cálido y natural, en lenguaje completamente natural
+
+**EJEMPLOS:**
+- Si el usuario dice "Quiero decirle a daniel que es un teso" → Responde agradeciendo el apoyo (ejemplo: "¡Qué lindo mensaje! Me encanta escuchar ese apoyo hacia {contact_name}. Te aseguro que tu mensaje será muy bien recibido. ¡Gracias por estar con nosotros!")
+- Si el usuario dice "Hola" → Saluda amigablemente (ejemplo: "¡Hola! Me alegra saludarte. ¿En qué puedo ayudarte hoy?")
+- Si el usuario dice "Vamos con todo!" → Responde con energía (ejemplo: "¡Excelente! Esa energía es la que necesitamos. ¡Vamos con todo para lograr el cambio que Colombia merece!")
+
+**TU RESPUESTA (breve, cálida, entusiasta, lenguaje completamente natural, SIN referencias técnicas):**
+"""
+                    
+                    response = await gemini_client.generate_content(
+                        prompt=prompt,
+                        task_type="greeting_response",
+                        use_custom_config=True
                     )
-                    if rag_response and isinstance(rag_response, str) and len(rag_response.strip()) > 10:
+                    
+                    # Limpiar cualquier referencia técnica que pueda haber quedado
+                    cleaned_response = self._clean_greeting_response(response.strip() if response else "")
+                    
+                    if cleaned_response and len(cleaned_response.strip()) > 10:
                         processing_time = time.time() - start_time
-                        self.logger.info(f"✅ Respuesta informativa desde documentos ({processing_time:.4f}s)")
+                        self.logger.info(f"✅ Respuesta de saludo generada ({processing_time:.4f}s)")
                         return {
-                            "response": rag_response.strip(),
+                            "response": cleaned_response,
                             "followup_message": "",
                             "from_cache": False,
                             "processing_time": processing_time,
@@ -193,15 +242,15 @@ class OptimizedAIService:
                             "optimized": True
                         }
                 except Exception as e:
-                    self.logger.warning(f"⚠️ RAG en saludo_apoyo falló: {e}")
+                    self.logger.warning(f"⚠️ Error generando saludo: {e}")
 
-                # Fallback coherente basado en branding si RAG no devuelve
+                # Fallback coherente basado en branding
                 try:
                     brand_cfg = (tenant_config or {}).get("branding", {})
                     contact_name = brand_cfg.get("contactName", brand_cfg.get("contact_name", "el candidato"))
-                    response = f"Hola, estoy para ayudarte en lo que necesites sobre {contact_name}. ¿Qué te gustaría saber?"
+                    response = f"¡Hola! Me alegra saludarte. ¿En qué puedo ayudarte hoy con información sobre {contact_name} y su campaña?"
                 except Exception:
-                    response = "Hola, estoy para ayudarte. ¿Qué te gustaría saber?"
+                    response = "¡Hola! Me alegra saludarte. ¿En qué puedo ayudarte hoy?"
 
                 processing_time = time.time() - start_time
                 return {
@@ -1068,3 +1117,60 @@ Tu opinión es muy valiosa para nosotros. ¿Hay algo más en lo que pueda ayudar
         
         # Por defecto
         return "general"
+    
+    def _clean_greeting_response(self, response: str) -> str:
+        """
+        Limpia la respuesta de saludo removiendo prefijos técnicos y citas
+        
+        Args:
+            response: Respuesta generada
+            
+        Returns:
+            Respuesta limpia sin prefijos técnicos ni citas
+        """
+        import re
+        
+        cleaned = response.strip()
+        
+        # Remover prefijos comunes
+        prefixes_to_remove = [
+            r"^💡\s*\*?Respuesta basada en documentos.*?\*?:?\s*\n*\n*",
+            r"^💡\s*Respuesta basada en documentos.*?:?\s*\n*\n*",
+            r"^Respuesta basada en documentos.*?:?\s*\n*\n*",
+            r"^💡\s*\*?.*?documentos.*?\*?:?\s*\n*\n*",
+        ]
+        
+        for pattern in prefixes_to_remove:
+            cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE | re.MULTILINE)
+        
+        # Remover secciones de fuentes
+        source_patterns = [
+            r"\n*\n*📚\s*\*?\*?Fuentes?\*?\*?:?\s*\n*.*?$",
+            r"\n*\n*📚\s*Fuentes?\s*:?\s*\n*.*?$",
+            r"\n*\n*\*\*Fuentes?\*\*:?\s*\n*.*?$",
+            r"\n*\n*Fuentes?\s*:?\s*\n*.*?$",
+            r"\n*\n*.*?relevancia.*?$",
+            r"\n*\n*.*?Documento sin título.*?$",
+        ]
+        
+        for pattern in source_patterns:
+            cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE | re.MULTILINE | re.DOTALL)
+        
+        # Remover citas de documentos [Documento N] o [1], etc.
+        cleaned = re.sub(r'\[Documento\s+\d+\]', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'\[Doc\s+\d+\]', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'\[Fuente\s+\d+\]', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'\[\d+\]', '', cleaned)
+        
+        # Remover referencias a documentos
+        cleaned = re.sub(r'No encuentro información.*?documentos.*?', '', cleaned, flags=re.IGNORECASE | re.DOTALL)
+        cleaned = re.sub(r'Los documentos.*?no cubren.*?', '', cleaned, flags=re.IGNORECASE | re.DOTALL)
+        cleaned = re.sub(r'en los documentos disponibles', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'los documentos actuales', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'⚠️\s*\*?\*?Nota importante.*?equipo de campaña.*?', '', cleaned, flags=re.IGNORECASE | re.DOTALL)
+        
+        # Limpiar espacios múltiples y líneas vacías
+        cleaned = re.sub(r'\n\n\n+', '\n\n', cleaned)
+        cleaned = re.sub(r' +', ' ', cleaned)
+        
+        return cleaned.strip()
