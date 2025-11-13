@@ -3866,7 +3866,7 @@ Responde solo el JSON estricto sin comentarios:
             # 🚀 OPTIMIZACIÓN: Prompt ultra-corto para velocidad máxima con detección de malicia por IA
             if conversation_history and len(conversation_history) > 0:
                 prompt = f"""Clasifica este mensaje en UNA de estas categorías:
-- malicioso (SOLO insultos PERSONALES: "eres un corrupto", "ustedes son mentirosos", amenazas, ataques a personas)
+- malicioso (SOLO insultos PERSONALES directos - NO preguntas: "eres un corrupto", "ustedes son mentirosos", amenazas, ataques a personas, groserías colombianas (hp, hpta, malparido, gonorrea, marica, guevón, etc.). Las PREGUNTAS nunca son maliciosas, incluso sobre temas sensibles)
 - conocer_candidato (preguntas sobre política, propuestas, candidato, QUIÉN ES el candidato, "quién eres", "quien eres", "qué eres", "que eres")
 - atencion_humano (solicitar hablar con agente humano, asesor, persona: "quiero agente humano", "asesor", "hablar con alguien")
 - solicitud_funcional (app, referidos, puntos, estado, progreso, consultas funcionales, preguntas sobre QUIÉN ES el bot/chatbot: "quién eres", "quien eres", "dime quién eres")
@@ -3895,8 +3895,20 @@ REGLAS CRÍTICAS:
 2. QUEJAS (mensaje inicial sin detalles):
    - Solo dice "tengo una queja", "quiero hacer un reclamo", "hay un problema" SIN detalles adicionales
 
-3. MALICIOSO (SOLO insultos a personas):
-   - "eres un corrupto", "ustedes son mentirosos", "tú eres un ladrón"
+3. MALICIOSO (SOLO ataques directos a personas - NO preguntas):
+   - ⚠️ DIFERENCIA CRÍTICA: PREGUNTA vs. ATAQUE
+   - PREGUNTAS (incluso sobre temas sensibles) → NO son maliciosas:
+     * Si termina con "?" o tiene estructura de pregunta ("cómo", "qué", "por qué", "sería", "podría", "sabría")
+     * Si usa condicionales hipotéticos ("si digo que...", "entonces si...", "como podría saber")
+     * Si busca información o aclaración ("es cierto?", "cómo saber", "podría saber")
+     * → Clasificar como "conocer_candidato" o "solicitud_funcional"
+   - ATAQUES DIRECTOS (afirmaciones sin pregunta) → SÍ son maliciosas:
+     * Afirmaciones directas sin "?" ni estructura de pregunta
+     * Insultos personales: "eres un corrupto", "ustedes son mentirosos", "tú eres un ladrón"
+     * Groserías y palabras ofensivas colombianas: hp, hpta, hijueputa, malparido, gonorrea, marica, maricón, guevón, jeta, carajo, chimba, verga, paraco, chancleta, mamado, etc.
+     * Cualquier insulto, grosería, palabra ofensiva o lenguaje vulgar dirigido a personas
+     * Amenazas o ataques directos a personas
+     * → Clasificar como "malicioso"
    - ⚠️ Críticas al servicio NO son maliciosas: "el servicio es malo" ≠ malicio
 
 4. SALUDO_APOYO:
@@ -3909,7 +3921,7 @@ Si el mensaje describe problemas con el servicio/funcionalidad/sistema/atención
 Devuelve SOLO el nombre de la categoría:"""
             else:
                 prompt = f"""Clasifica este mensaje en UNA de estas categorías:
-- malicioso (SOLO insultos PERSONALES: "eres un corrupto", "ustedes son mentirosos", amenazas, ataques a personas)
+- malicioso (SOLO insultos PERSONALES directos - NO preguntas: "eres un corrupto", "ustedes son mentirosos", amenazas, ataques a personas, groserías colombianas (hp, hpta, malparido, gonorrea, marica, guevón, etc.). Las PREGUNTAS nunca son maliciosas, incluso sobre temas sensibles)
 - conocer_candidato (preguntas sobre política, propuestas, candidato, QUIÉN ES el candidato, "quién eres", "quien eres", "qué eres", "que eres")
 - solicitud_funcional (app, referidos, puntos, estado, progreso, consultas funcionales, preguntas sobre QUIÉN ES el bot/chatbot: "quién eres", "quien eres", "dime quién eres")
 - cita_campaña (agendar reunión)
@@ -3932,8 +3944,20 @@ REGLAS CRÍTICAS:
 2. QUEJAS (mensaje inicial sin detalles):
    - Solo dice "tengo una queja", "quiero hacer un reclamo", "hay un problema" SIN detalles adicionales
 
-3. MALICIOSO (SOLO insultos a personas):
-   - "eres un corrupto", "ustedes son mentirosos", "tú eres un ladrón"
+3. MALICIOSO (SOLO ataques directos a personas - NO preguntas):
+   - ⚠️ DIFERENCIA CRÍTICA: PREGUNTA vs. ATAQUE
+   - PREGUNTAS (incluso sobre temas sensibles) → NO son maliciosas:
+     * Si termina con "?" o tiene estructura de pregunta ("cómo", "qué", "por qué", "sería", "podría", "sabría")
+     * Si usa condicionales hipotéticos ("si digo que...", "entonces si...", "como podría saber")
+     * Si busca información o aclaración ("es cierto?", "cómo saber", "podría saber")
+     * → Clasificar como "conocer_candidato" o "solicitud_funcional"
+   - ATAQUES DIRECTOS (afirmaciones sin pregunta) → SÍ son maliciosas:
+     * Afirmaciones directas sin "?" ni estructura de pregunta
+     * Insultos personales: "eres un corrupto", "ustedes son mentirosos", "tú eres un ladrón"
+     * Groserías y palabras ofensivas colombianas: hp, hpta, hijueputa, malparido, gonorrea, marica, maricón, guevón, jeta, carajo, chimba, verga, paraco, chancleta, mamado, etc.
+     * Cualquier insulto, grosería, palabra ofensiva o lenguaje vulgar dirigido a personas
+     * Amenazas o ataques directos a personas
+     * → Clasificar como "malicioso"
    - ⚠️ Críticas al servicio NO son maliciosas: "el servicio es malo" ≠ malicio
 
 4. SALUDO_APOYO:
@@ -4097,19 +4121,38 @@ Devuelve SOLO el nombre de la categoría:"""
                     "reason": "Queja implícita sobre servicio"
                 }
         
-        # 🚫 PRIORIDAD 2: Detectar malicia
+        # 🚫 PRIORIDAD 2: Detectar malicia (SOLO si NO es pregunta)
+        # ⚠️ Verificar primero si es una pregunta - las preguntas NUNCA son maliciosas
+        question_indicators = [
+            "?", "cómo", "como", "qué", "que", "por qué", "porque", "cuál", "cual",
+            "sería", "podría", "podria", "sabría", "sabria", "si digo", "entonces si",
+            "como podría", "como podria", "cómo saber", "como saber"
+        ]
+        is_question = any(indicator in message_lower for indicator in question_indicators)
+        
         malicious_patterns = [
-            "corrupto", "asqueroso", "hp", "hpta", "idiota", "imbécil", "bruto",
+            # Groserías colombianas comunes
+            "hp", "hpta", "hijueputa", "hijuep", "hijue", "malparido", "malparida",
+            "gonorrea", "marica", "maricon", "maricón", "chimba", "verga",
+            "guevón", "guevon", "guevona", "guevonada",
+            "jeta", "carajo", "mamado", "mamados", "mamada", "mamadas",
+            "paraco", "paracos", "chancleta", "chancletas",
+            # Insultos generales
+            "corrupto", "asqueroso", "idiota", "imbécil", "bruto",
             "ladrón", "ladrones", "ratero", "rateros", "estafa", "mentiroso",
             "vete a la mierda", "que se joda", "porquería", "basura", "mierda",
             "tú eres", "ustedes son", "eres un", "son unos", "vete a", "que se muera",
-            "chupa", "idiota", "imbécil", "hijo de", "malparido", "hpta"
+            "chupa", "hijo de", "hija de", "hijos de", "hijas de"
         ]
         
         for pattern in malicious_patterns:
             if pattern in message_lower:
                 if "queja" in message_lower or "reclamo" in message_lower:
                     logger.info(f"🎯 MENSAJE TIENE QUEJA: saltando detección de malicia por '{pattern}'")
+                    break
+                # ⚠️ Si es pregunta, NO clasificar como malicioso
+                if is_question:
+                    logger.info(f"🎯 MENSAJE ES PREGUNTA: saltando detección de malicia por '{pattern}' (es pregunta, no ataque)")
                     break
                 logger.warning(f"🚨 MALICIA DETECTADA: '{pattern}' en mensaje")
                 return {
