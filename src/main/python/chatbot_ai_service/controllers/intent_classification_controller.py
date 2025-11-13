@@ -33,8 +33,9 @@ async def classify_intent(tenant_id: str, request: Dict[str, Any]) -> Dict[str, 
         # Clasificar con el servicio de IA
         classification_result = await ai_service.classify_intent(tenant_id, message, user_context)
         
+        # 🔧 FIX: classify_intent devuelve "category", no "classification"
         return {
-            "classification": classification_result.get("classification", {}),
+            "category": classification_result.get("category", "general_query"),  # 🔧 FIX: Usar "category" directamente
             "confidence": classification_result.get("confidence", 0.0),
             "processing_time": classification_result.get("processing_time", 0.0),
             "success": True
@@ -140,6 +141,31 @@ async def validate_data(tenant_id: str, request: Dict[str, Any]) -> Dict[str, An
     except Exception as e:
         logger.error(f"Error validando datos: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error validando datos: {str(e)}")
+
+@router.post("/tenants/{tenant_id}/is-question")
+async def is_question_endpoint(tenant_id: str, request: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Verifica si un mensaje es una pregunta o consulta usando IA
+    """
+    try:
+        message = request.get("message", "").strip()
+        if not message:
+            raise HTTPException(status_code=400, detail="Message parameter is required")
+        
+        logger.info(f"🔍 Verificando si el mensaje es una pregunta: '{message[:50]}...'")
+        
+        # Verificar con el servicio de IA
+        is_question_result = await ai_service.is_question_message(tenant_id, message)
+        
+        return {
+            "is_question": is_question_result.get("is_question", False),
+            "confidence": is_question_result.get("confidence", 0.0),
+            "reason": is_question_result.get("reason"),
+            "success": True
+        }
+    except Exception as e:
+        logger.error(f"Error verificando si es pregunta: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error verificando si es pregunta: {str(e)}")
 
 @router.post("/tenants/{tenant_id}/extract-user-name")
 async def extract_user_name_endpoint(tenant_id: str, request: Dict[str, Any]) -> Dict[str, Any]:

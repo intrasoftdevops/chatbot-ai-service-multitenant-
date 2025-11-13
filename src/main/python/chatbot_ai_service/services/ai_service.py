@@ -3242,8 +3242,9 @@ Puedes preguntarme sobre:
             # 🔧 OPTIMIZACIÓN: Solo usar Gemini para casos complejos
             logger.info(f"🎯 USANDO GEMINI para caso complejo: '{message[:50]}...'")
             
-            # 🚀 OPTIMIZACIÓN CRÍTICA: Timeout rápido para evitar demoras
+            # 🚀 OPTIMIZACIÓN CRÍTICA: Usar IA con timeout, reintentar si falla (sin palabras clave)
             import asyncio
+            classification_result = None
             try:
                 # Intentar con timeout de 8 segundos
                 classification_result = await asyncio.wait_for(
@@ -3251,9 +3252,23 @@ Puedes preguntarme sobre:
                     timeout=8.0
                 )
             except asyncio.TimeoutError:
-                logger.warning(f"⏰ TIMEOUT en clasificación Gemini para '{message[:30]}...', usando fallback rápido")
-                # Fallback rápido basado en palabras clave
-                classification_result = self._fast_fallback_classification(message)
+                logger.warning(f"⏰ TIMEOUT en clasificación Gemini para '{message[:30]}...', reintentando con timeout más largo")
+                try:
+                    # Reintentar con timeout más largo (15 segundos)
+                    classification_result = await asyncio.wait_for(
+                        self._classify_with_ai(message, user_context, "", tenant_id),
+                        timeout=15.0
+                    )
+                    logger.info("✅ Reintento exitoso después de timeout inicial")
+                except asyncio.TimeoutError:
+                    logger.error(f"⏰ TIMEOUT también en reintento para '{message[:30]}...', usando fallback genérico")
+                    # Fallback genérico sin palabras clave - siempre usar solicitud_funcional como último recurso
+                    classification_result = {
+                        "category": "solicitud_funcional",
+                        "confidence": 0.3,
+                        "original_message": message,
+                        "reason": "Timeout en clasificación IA - fallback genérico"
+                    }
             
             # 🚀 OPTIMIZACIÓN CRÍTICA: Usar configuración enviada desde Java (ya optimizada)
             # La configuración viene como parámetro desde el servicio Java
@@ -3314,41 +3329,6 @@ Puedes preguntarme sobre:
                 "error": str(e)
             }
 
-    def _fast_fallback_classification(self, message: str) -> Dict[str, Any]:
-        """
-        Clasificación rápida basada en palabras clave para casos de timeout
-        """
-        message_lower = message.lower()
-        
-        # Palabras clave para diferentes intenciones
-        keywords = {
-            "saludo_apoyo": ["hola", "buenos", "buenas", "saludo", "hey", "hi", "qué tal"],
-            "conocer_candidato": ["quien", "candidato", "propuesta", "propuestas", "plan", "proyecto", "proyectos", "agua", "viva", "hidroituango", "conocer", "saber", "información", "informacion", "programa", "programas"],
-            "registro": ["nombre", "apellido", "ciudad", "telefono", "email"],
-            "agendar_cita": ["cita", "reunión", "reunion", "calendly", "agendar"],
-            "malicioso": ["odio", "violencia", "amenaza", "insulto", "matar"]
-        }
-        
-        # Buscar coincidencias (orden de prioridad: de más específico a menos)
-        for intent, words in keywords.items():
-            for word in words:
-                if word in message_lower:
-                    logger.info(f"🎯 FAST FALLBACK: '{word}' encontrado en '{message}' -> {intent}")
-                    return {
-                        "category": intent,
-                        "confidence": 0.8,
-                        "original_message": message,
-                        "reason": f"Fast fallback - keyword '{word}'"
-                    }
-        
-        # Si no coincide con nada, usar "general_query" en lugar de "saludo_apoyo"
-        logger.info(f"🎯 FAST FALLBACK: No encontró keywords, usando 'general_query'")
-        return {
-            "category": "general_query",
-            "confidence": 0.5,
-            "original_message": message,
-            "reason": "Fast fallback - no keywords matched"
-        }
 
     async def analyze_registration(self, tenant_id: str, message: str, user_context: Dict[str, Any] = None,
                                    session_id: str = None, current_state: str = None) -> Dict[str, Any]:
@@ -3855,32 +3835,12 @@ Responde solo el JSON estricto sin comentarios:
         
         self._ensure_model_initialized()
         
-        # 🔧 DETECCIÓN DE MALICIA AHORA SE HACE POR IA - Patrones eliminados
-        # La detección de malicia ahora se hace directamente en el prompt de IA con Gemini
-        # que es más inteligente y puede detectar amenazas indirectas, insultos creativos, etc.
+        # 🔧 DETECCIÓN COMPLETAMENTE CON IA - Sin patrones ni palabras clave
+        # Todo se hace directamente con IA usando Gemini
+        # La IA es más inteligente y puede detectar amenazas indirectas, insultos creativos, etc.
         
-            # 🚀 OPTIMIZACIÓN: Clasificación híbrida (patrones + IA)
-        pattern_result = self._classify_with_patterns(message, user_context)
-        
-        # 🐛 DEBUG: Log del resultado de patrones
-        logger.info(f"🔍 [PATTERN DEBUG] Resultado: {pattern_result['category']} (confianza: {pattern_result['confidence']:.2f}) - razon: {pattern_result.get('reason', 'N/A')}")
-        
-        # 🔧 CAMBIO: Solo usar patrones si son MUY específicos (malicia, registro). Para todo lo demás, dejar que la IA decida.
-        # Esto permite que la IA clasifique mejor las quejas implícitas sin depender de keywords
-        if pattern_result["confidence"] > 0.9 and pattern_result["category"] in ["malicioso", "registration_response"]:
-            # 🔧 FIX: Si hay historial de conversación con queja, priorizar queja_detalle_select
-            if user_context and "conversation_history" in user_context:
-                history = user_context["conversation_history"]
-                if history and ("queja" in history.lower() or "reclamo" in history.lower()):
-                    logger.info(f"🔍 [PATTERNS] Historial contiene queja - priorizando queja_detalle_select")
-                    if "no me parece" in message.lower() or "inadecuado" in message.lower() or "malo" in message.lower():
-                        return {
-                            "category": "queja_detalle_select",
-                            "confidence": 0.95,
-                            "original_message": message,
-                            "reason": "Historial + patrón de queja"
-                        }
-            return pattern_result
+        # 🚀 USAR SOLO IA - Sin patrones ni palabras clave
+        # La clasificación se hace completamente con IA
         
         if not self.model:
             return {
@@ -3907,11 +3867,11 @@ Responde solo el JSON estricto sin comentarios:
             if conversation_history and len(conversation_history) > 0:
                 prompt = f"""Clasifica este mensaje en UNA de estas categorías:
 - malicioso (SOLO insultos PERSONALES: "eres un corrupto", "ustedes son mentirosos", amenazas, ataques a personas)
-- conocer_candidato (preguntas sobre política, propuestas, candidato)
+- conocer_candidato (preguntas sobre política, propuestas, candidato, QUIÉN ES el candidato, "quién eres", "quien eres", "qué eres", "que eres")
 - atencion_humano (solicitar hablar con agente humano, asesor, persona: "quiero agente humano", "asesor", "hablar con alguien")
-- solicitud_funcional (app, referidos, puntos, estado, progreso, consultas funcionales)
+- solicitud_funcional (app, referidos, puntos, estado, progreso, consultas funcionales, preguntas sobre QUIÉN ES el bot/chatbot: "quién eres", "quien eres", "dime quién eres")
 - cita_campaña (agendar reunión)
-- saludo_apoyo (hola, gracias, mensajes positivos)
+- saludo_apoyo (hola, gracias, mensajes positivos - SOLO si NO contiene preguntas)
 - publicidad_info (pedir material)
 - actualizacion_datos (corregir, cambiar o actualizar información personal: nombre, apellido, ciudad, teléfono, etc.)
 - colaboracion_voluntariado (ofrecer ayudar)
@@ -3949,10 +3909,10 @@ Devuelve SOLO el nombre de la categoría:"""
             else:
                 prompt = f"""Clasifica este mensaje en UNA de estas categorías:
 - malicioso (SOLO insultos PERSONALES: "eres un corrupto", "ustedes son mentirosos", amenazas, ataques a personas)
-- conocer_candidato (preguntas sobre política, propuestas, candidato)
-- solicitud_funcional (app, referidos, puntos, estado, progreso, consultas funcionales)
+- conocer_candidato (preguntas sobre política, propuestas, candidato, QUIÉN ES el candidato, "quién eres", "quien eres", "qué eres", "que eres")
+- solicitud_funcional (app, referidos, puntos, estado, progreso, consultas funcionales, preguntas sobre QUIÉN ES el bot/chatbot: "quién eres", "quien eres", "dime quién eres")
 - cita_campaña (agendar reunión)
-- saludo_apoyo (hola, gracias, mensajes positivos)
+- saludo_apoyo (hola, gracias, mensajes positivos - SOLO si NO contiene preguntas)
 - publicidad_info (pedir material)
 - actualizacion_datos (corregir, cambiar o actualizar información personal: nombre, apellido, ciudad, teléfono, etc.)
 - colaboracion_voluntariado (ofrecer ayudar)
@@ -4160,6 +4120,7 @@ Devuelve SOLO el nombre de la categoría:"""
         # Patrones de alta confianza (ordenado por especificidad - primero los más específicos)
         patterns = {
             "solicitud_funcional": [
+                "quien eres", "quién eres", "dime quién", "dime quien", "que eres", "qué eres",  # 🔧 FIX: Preguntas sobre identidad del bot primero
                 "puntos", "referidos", "app", "aplicación", "estado", "progreso", "como voy",
                 "cuánto", "cuantos", "cuántos", "referidos tengo", "mis puntos", "mi estado",
                 "mis referidos", "tengo puntos", "total referidos", "ver mis"
@@ -4173,6 +4134,7 @@ Devuelve SOLO el nombre de la categoría:"""
                 "hola", "hi", "hello", "buenos días", "buenas tardes", "buenas noches",
                 "gracias", "ok", "okay", "sí", "si", "no", "perfecto", "excelente"
             ],
+            # 🔧 FIX: NOTA: "saludo_apoyo" solo si NO contiene preguntas. Si contiene "quien eres" o similar, usar "solicitud_funcional"
             "cita_campaña": [
                 "cita", "reunión", "encuentro", "agendar", "visitar", "conocer",
                 "hablar", "conversar", "entrevista"
@@ -4300,54 +4262,10 @@ Devuelve SOLO el nombre de la categoría:"""
         Returns:
             Categoría detectada
         """
-        message_lower = message.lower().strip()
-        
-        # 🚫 PRIORIDAD 1: Detectar malicia
-        malicious_patterns = [
-            "corrupto", "asqueroso", "hp", "hpta", "idiota", "imbécil", "bruto",
-            "ladrón", "ladrones", "ratero", "rateros", "estafa", "mentiroso",
-            "vete a la mierda", "que se joda", "porquería", "basura", "mierda",
-            "corruptos", "asquerosos", "hp.", "hpta.", "pelados", "corrupta"
-        ]
-        for pattern in malicious_patterns:
-            if pattern in message_lower:
-                logger.warning(f"🚨 MALICIA DETECTADA EN _fallback_intent_classification: '{pattern}'")
-                return "malicioso"
-        
-        # Solo detectar casos muy obvios y específicos
-        if message_lower in ["hola", "buenos días", "buenas tardes", "buenas noches", "gracias"]:
-            return "saludo_apoyo"
-        
-        # Detectar preguntas sobre casos específicos, propuestas, políticas
-        political_question_patterns = [
-            "que es", "qué es", "quien es", "quién es", "como funciona", "cómo funciona",
-            "caso", "propuesta", "política", "obra", "proyecto"
-        ]
-        
-        for pattern in political_question_patterns:
-            if pattern in message_lower:
-                return "conocer_candidato"
-        
-        # Detectar explicaciones sobre datos disponibles (muy específico)
-        if self._looks_like_data_explanation(message):
-            return "registration_response"
-        
-        # Detectar respuestas de registro basadas en contexto específico
-        if context and context.get("user_state") == "WAITING_NAME":
-            if self._analyze_registration_intent(message, "name"):
-                return "registration_response"
-        
-        if context and context.get("user_state") == "WAITING_LASTNAME":
-            if self._analyze_registration_intent(message, "lastname"):
-                return "registration_response"
-
-        if context and context.get("user_state") == "WAITING_CITY":
-            if self._analyze_registration_intent(message, "city"):
-                return "registration_response"
-        
-        # Para todo lo demás, confiar en que Gemini maneje la clasificación correctamente
-        # Si llegamos aquí, significa que Gemini falló, así que usar conocer_candidato como fallback
-        return "conocer_candidato"
+        # 🔧 FIX: Sin patrones ni palabras clave - devuelve fallback genérico
+        # La IA debería haber clasificado, pero si falló, usar solicitud_funcional como último recurso
+        logger.warning(f"⚠️ Usando fallback genérico (sin patrones) para: '{message[:50]}...'")
+        return "solicitud_funcional"  # Fallback genérico sin usar palabras clave
     
     def _looks_like_data_explanation(self, message: str) -> bool:
         """
@@ -5750,9 +5668,12 @@ Un nombre válido debe:
 - NO contener números (excepto en casos especiales como "María José")
 - NO ser una palabra común del español como "referido", "gracias", "hola", etc.
 - NO ser un código alfanumérico
+- NO ser una pregunta o consulta (ej: "Pero dime quién eres", "quién eres", "dime qué")
 - Puede incluir nombre completo con apellidos si el usuario los ingresó juntos (máximo 4 palabras)
 
-IMPORTANTE: Si el usuario ingresó su nombre completo con apellidos (ej: "Santiago Buitrago Rojas"), es VÁLIDO ya que el sistema lo separará correctamente.
+IMPORTANTE: 
+- Si el texto es una pregunta o consulta (contiene palabras como "quién", "dime", "eres", "qué", "cómo"), es INVALIDO
+- Si el usuario ingresó su nombre completo con apellidos (ej: "Santiago Buitrago Rojas"), es VÁLIDO ya que el sistema lo separará correctamente
 
 Responde ÚNICAMENTE "VALIDO" o "INVALIDO" seguido de la razón si es inválido.
 
@@ -5764,6 +5685,9 @@ Ejemplos:
 - "Carlos Alberto Pérez" -> VALIDO (nombre completo)
 - "Ana María García López" -> VALIDO (nombre completo con apellidos)
 - "SANTIAGO" -> VALIDO
+- "Pero Dime Quién Eres" -> INVALIDO (es una pregunta, no un nombre)
+- "Quién Eres" -> INVALIDO (es una pregunta)
+- "Dime Quién" -> INVALIDO (es una pregunta)
 - "K351ERXL" -> INVALIDO (es un código, no un nombre)
 - "referido" -> INVALIDO (palabra común)
 - "12345678" -> INVALIDO (solo números)
@@ -6200,6 +6124,13 @@ RESPUESTA NATURAL:""",
             if not text:
                 return {"name": None, "is_valid": False, "confidence": 0.0, "reason": "Mensaje vacío"}
 
+            # 🔧 FIX: Usar IA para detectar si el mensaje es una pregunta o consulta (no un nombre)
+            is_question_result = await self.is_question_message(tenant_id, text)
+            if is_question_result.get("is_question", False):
+                logger.info(f"⚠️ IA detectó que el mensaje es una pregunta - rechazando: '{text}'")
+                return {"name": None, "is_valid": False, "confidence": is_question_result.get("confidence", 0.9), 
+                        "reason": is_question_result.get("reason", "Mensaje es una pregunta, no un nombre")}
+
             # 1) Limpieza de prefijos y normalización
             cleaned = re.sub(r"^(claro|bueno|ok|okay|vale|listo|pues|sí|si|hola)[,\s]+", "", text, flags=re.IGNORECASE)
             cleaned = re.sub(r"^(mi\s+nombre\s+es|me\s+llamo|yo\s+me\s+llamo|soy|nombre\s*:\s*|nombre\s+es)\s+", "", cleaned, flags=re.IGNORECASE)
@@ -6269,6 +6200,71 @@ Responde ÚNICAMENTE con el nombre (sin explicaciones) o "NO_NAME".
         except Exception as e:
             logger.error(f"Error extrayendo nombre del mensaje con IA: {str(e)}")
             return {"name": None, "is_valid": False, "confidence": 0.0, "reason": f"Error en extracción: {str(e)}"}
+
+    async def is_question_message(self, tenant_id: str, message: str) -> Dict[str, Any]:
+        """
+        Verifica si un mensaje es una pregunta o consulta usando IA (no un nombre o dato de registro)
+        """
+        self._ensure_model_initialized()
+        
+        if not self.model:
+            return {
+                "is_question": False,
+                "confidence": 0.0,
+                "reason": "Servicio de IA no disponible"
+            }
+        
+        try:
+            prompt = f"""
+Analiza el siguiente mensaje y determina si es una PREGUNTA o CONSULTA (no un nombre, apellido, ciudad u otro dato de registro).
+
+Mensaje: "{message}"
+
+Reglas:
+- Si el mensaje es una pregunta (ej: "¿quién eres?", "dime quién eres", "qué es esto", "cómo funciona") -> es PREGUNTA
+- Si el mensaje es una consulta o solicitud de información (ej: "explícame", "cuéntame sobre", "quiero saber") -> es PREGUNTA
+- Si el mensaje contiene un nombre, apellido, ciudad u otro dato personal (ej: "Soy Juan Pérez", "Me llamo María", "Vivo en Bogotá") -> NO es PREGUNTA
+- Si el mensaje es una respuesta directa a una pregunta del sistema (ej: "Juan", "Pérez", "Bogotá") -> NO es PREGUNTA
+
+Ejemplos:
+- "Pero dime quién eres" -> PREGUNTA (es una pregunta sobre identidad)
+- "¿Quién eres?" -> PREGUNTA (es una pregunta directa)
+- "Quiero saber más" -> PREGUNTA (es una consulta)
+- "Soy Juan Pérez" -> NO es PREGUNTA (es un nombre)
+- "Me llamo María" -> NO es PREGUNTA (es un nombre)
+- "Vivo en Bogotá" -> NO es PREGUNTA (es una ciudad)
+- "Juan" -> NO es PREGUNTA (es un nombre)
+
+Responde ÚNICAMENTE "PREGUNTA" o "NO_PREGUNTA" seguido de una breve razón.
+"""
+            
+            response_text = await self._generate_content(prompt, task_type="question_detection")
+            response_clean = response_text.strip().upper()
+            
+            is_question = response_clean.startswith("PREGUNTA")
+            
+            # Extraer razón si está disponible
+            reason = "Mensaje analizado con IA"
+            if ":" in response_text or "-" in response_text:
+                parts = response_text.split(":", 1) if ":" in response_text else response_text.split("-", 1)
+                if len(parts) > 1:
+                    reason = parts[1].strip()
+            
+            logger.info(f"🔍 IA analizó si es pregunta: '{message[:50]}...' -> {is_question} (confianza: 0.9)")
+            
+            return {
+                "is_question": is_question,
+                "confidence": 0.9,
+                "reason": reason
+            }
+            
+        except Exception as e:
+            logger.error(f"Error verificando si es pregunta con IA: {str(e)}")
+            return {
+                "is_question": False,
+                "confidence": 0.0,
+                "reason": f"Error en análisis: {str(e)}"
+            }
 
     async def generate_welcome_message(self, tenant_config: Dict[str, Any] = None) -> str:
         """
