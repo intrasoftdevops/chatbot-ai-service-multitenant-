@@ -2513,6 +2513,11 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
             # Si no se pudieron obtener datos del servicio Java, usar datos del user_context
             if not user_data and user_context:
                 logger.warning(f"⚠️ user_data es None, usando datos del user_context")
+                # 🔒 CRÍTICO: Solo incluir código de referido si el usuario está completado
+                is_completed = user_context.get("is_completed", False)
+                user_state = user_context.get("user_state", "")
+                referral_code = user_context.get("referral_code") if (is_completed or user_state == "COMPLETED") else None
+                
                 # Construir user_data desde user_context
                 user_data = {
                     "user": {
@@ -2523,9 +2528,10 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
                     "points": user_context.get("points", 0),
                     "total_referrals": user_context.get("total_referrals", 0),
                     "completed_referrals": user_context.get("completed_referrals", []),
-                    "referral_code": user_context.get("referral_code")
+                    "referral_code": referral_code
                 }
                 logger.info(f"📊 user_data construido desde user_context: {user_data}")
+                logger.info(f"🔒 Verificación completado - is_completed: {is_completed}, user_state: {user_state}, referral_code incluido: {referral_code is not None}")
             elif user_data:
                 logger.info(f"📊 Detalles de user_data: {user_data}")
             
@@ -2541,12 +2547,23 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
                     completed_referrals = []
                 referral_code = user_data.get("referral_code")
                 
+                # 🔒 CRÍTICO: Solo incluir código de referido si el usuario está completado
+                is_completed = user_context.get("is_completed", False)
+                user_state = user_context.get("user_state", "")
+                if not is_completed and user_state != "COMPLETED":
+                    logger.info(f"🔒 Usuario NO completado (is_completed={is_completed}, user_state={user_state}) - NO incluir código de referido")
+                    referral_code = None  # No incluir código si no está completado
+                else:
+                    logger.info(f"✅ Usuario completado - código de referido disponible: {referral_code}")
+                
                 logger.info(f"🔍 Datos del usuario procesados:")
                 logger.info(f"🔍   - user_name: {user_name}")
                 logger.info(f"🔍   - points: {points}")
                 logger.info(f"🔍   - total_referrals: {total_referrals}")
                 logger.info(f"🔍   - referral_code: {referral_code}")
                 logger.info(f"🔍   - Tipo de referral_code: {type(referral_code)}")
+                logger.info(f"🔍   - is_completed: {is_completed}")
+                logger.info(f"🔍   - user_state: {user_state}")
                 logger.info(f"🔍   - user_data completo: {user_data}")
                 
                 # Verificar si es solicitud de enlace o consulta de progreso
@@ -2697,6 +2714,13 @@ En el siguiente mensaje te envío tu enlace para compartir."""
             completed_referrals = []
         referral_code = user_data.get("referral_code")
         
+        # 🔒 CRÍTICO: Solo incluir código de referido si el usuario está completado
+        is_completed = user_context.get("is_completed", False)
+        user_state_from_context = user_context.get("user_state", "")
+        if not is_completed and user_state_from_context != "COMPLETED":
+            logger.info(f"🔒 Usuario NO completado en _build_functional_prompt_with_data (is_completed={is_completed}, user_state={user_state_from_context}) - NO incluir código de referido")
+            referral_code = None  # No incluir código si no está completado
+        
         user_name = user.get("name", "Usuario")
         user_city = user.get("city", "tu ciudad")
         user_state = user.get("state", "tu departamento")
@@ -2747,7 +2771,7 @@ DATOS REALES DEL USUARIO:
 - Puntos actuales: {points}
 - Total de referidos: {total_referrals}
 - Referidos completados: {len(completed_referrals) if completed_referrals else 0}
-- Código de referido: {referral_code}
+{f"- Código de referido: {referral_code}" if referral_code else "- Código de referido: No disponible (usuario en proceso de registro)"}
 {referrals_info}
 
 CONSULTA DEL USUARIO: "{query}"
@@ -2758,7 +2782,7 @@ INSTRUCCIONES IMPORTANTES:
 - Mantén un tono motivacional y positivo
 - Si el usuario pregunta sobre puntos, muestra sus puntos reales
 - Si pregunta sobre referidos, menciona sus referidos reales
-- Incluye su código de referido si es relevante
+- **IMPORTANTE**: Solo menciona o incluye el código de referido si está disponible (usuario completado). Si el usuario no ha completado su registro, NO menciones códigos de referido ni enlaces de referidos
 - Usa emojis apropiados para WhatsApp
 - Mantén la respuesta concisa pero informativa
 - **IMPORTANTE**: Si el usuario pide enlace/código/compartir, menciona que recibirá su enlace en un mensaje separado
@@ -3050,7 +3074,14 @@ En el siguiente mensaje te envío tu enlace para compartir."""
             completed_referrals_count = progress_data.get("completedReferrals", 0)
             referrals = progress_data.get("referrals", [])
             
-            logger.info(f"✅ Progreso obtenido: points={points}, total_referrals={total_referrals}, referral_code={referral_code}")
+            # 🔒 CRÍTICO: Solo incluir código de referido si el usuario está completado
+            is_completed = user_context.get("is_completed", False)
+            user_state = user_context.get("user_state", "")
+            if not is_completed and user_state != "COMPLETED":
+                logger.info(f"🔒 Usuario NO completado en _get_user_progress_data (is_completed={is_completed}, user_state={user_state}) - NO incluir código de referido")
+                referral_code = None  # No incluir código si no está completado
+            
+            logger.info(f"✅ Progreso obtenido: points={points}, total_referrals={total_referrals}, referral_code={referral_code}, is_completed={is_completed}")
             
             completed_referrals = [r for r in referrals if r.get("completed", False)]
             

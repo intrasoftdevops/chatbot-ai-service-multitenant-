@@ -203,6 +203,11 @@ async def process_chat_message(tenant_id: str, request: Dict[str, Any]) -> Dict[
         if followup_message:
             followup_message = ai_service._ensure_max_response_length(followup_message, max_length=1000)
         
+        # 📝 Formatear numeraciones con interlineados para mejor legibilidad
+        clean_response = format_numbered_list_with_spacing(clean_response)
+        if followup_message:
+            followup_message = format_numbered_list_with_spacing(followup_message)
+        
         logger.info(f"📤 NUEVO ENFOQUE: Respuesta principal: {len(clean_response)} caracteres (máx 1000)")
         logger.info(f"📤 NUEVO ENFOQUE: Followup message: {len(followup_message) if followup_message else 0} caracteres (máx 1000)")
         
@@ -318,6 +323,40 @@ async def clear_user_sessions(tenant_id: str, request: Dict[str, Any]) -> Dict[s
     except Exception as e:
         logger.error(f"❌ Error limpiando sesiones: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error limpiando sesiones: {str(e)}")
+
+def format_numbered_list_with_spacing(response_text: str) -> str:
+    """
+    Formatea respuestas con numeraciones agregando interlineados para hacerlas más amigables visualmente.
+    
+    Detecta patrones de numeración (1., 2., 3., etc.) y agrega un salto de línea
+    antes de cada número para mejorar la legibilidad.
+    
+    Args:
+        response_text: Texto de respuesta que puede contener numeraciones
+        
+    Returns:
+        Texto formateado con interlineados entre elementos numerados
+    """
+    if not response_text:
+        return response_text
+    
+    # Patrón para detectar numeraciones: número seguido de punto y espacio (ej: "1. ", "2. ", "10. ")
+    # Buscamos el patrón que no esté ya precedido por un salto de línea
+    pattern = r'(?<!\n)(\d+\.\s+)'
+    
+    # Reemplazar cada numeración que no tenga salto de línea antes con una que sí lo tenga
+    # Esto agrega un salto de línea antes de cada numeración (excepto si ya tiene uno)
+    result = re.sub(pattern, r'\n\1', response_text)
+    
+    # Si la respuesta comienza con un salto de línea (porque la primera numeración estaba al inicio),
+    # removerlo para mantener el formato limpio
+    result = result.lstrip('\n')
+    
+    # Limpiar múltiples saltos de línea consecutivos (máximo 2 seguidos para mantener interlineado)
+    result = re.sub(r'\n\n\n+', '\n\n', result)
+    
+    # Limpiar espacios en blanco al inicio y final
+    return result.strip()
 
 def process_followup_markers(response_text: str) -> Dict[str, str]:
     """
@@ -578,6 +617,9 @@ async def process_message_optimized(tenant_id: str, request: Dict[str, Any]) -> 
         else:
             response = await ai_service.process_chat_message(tenant_id, message, user_context, session_id)
             response = response.get("response", "Gracias por tu mensaje. ¿En qué puedo ayudarte?")
+        
+        # 📝 Formatear numeraciones con interlineados para mejor legibilidad
+        response = format_numbered_list_with_spacing(response)
         
         return {
             "response": response,
