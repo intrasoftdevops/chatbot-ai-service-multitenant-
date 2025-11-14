@@ -5403,21 +5403,93 @@ Indica que el sistema para solicitar materiales estará disponible muy pronto.""
             
             # 🔍 VERIFICAR SI ESTÁ EN MODO "ESPERANDO DATOS"
             query_lower = query.lower().strip()
-            is_waiting_for_data = any([
+            
+            # Detectar si menciona un campo específico pero sin valor nuevo
+            mentions_name = any(word in query_lower for word in ["nombre", "name", "mi nombre", "el nombre"])
+            mentions_lastname = any(word in query_lower for word in ["apellido", "lastname", "mi apellido", "el apellido"])
+            mentions_city = any(word in query_lower for word in ["ciudad", "city", "mi ciudad", "la ciudad", "vivo en"])
+            mentions_phone = any(word in query_lower for word in ["teléfono", "phone", "tel", "número", "mi teléfono"])
+            
+            # Detectar si quiere actualizar pero no especifica qué datos
+            wants_update_generic = any([
                 "actualizar" in query_lower and "datos" in query_lower,
                 "actualizar" in query_lower and "información" in query_lower,
                 "cambiar" in query_lower and "datos" in query_lower,
                 "modificar" in query_lower and "datos" in query_lower,
                 "corregir" in query_lower and "datos" in query_lower
-            ]) and not any([word in query_lower for word in ["nombre", "apellido", "ciudad", "ciudad", "city", "name", "lastname", "teléfono", "phone"]])
+            ]) and not (mentions_name or mentions_lastname or mentions_city or mentions_phone)
+            
+            # Detectar si menciona un campo específico pero NO proporciona el valor nuevo
+            # Patrones como "quiero actualizar mi nombre" sin decir "a Juan" o "me llamo Jorge"
+            # Verificar que después de mencionar el campo, no haya un valor nuevo
+            has_name_value = any([
+                " a " in query_lower and mentions_name,
+                " es " in query_lower and mentions_name,
+                "me llamo" in query_lower,
+                "llamo" in query_lower and len(query_lower.split("llamo")) > 1 and len(query_lower.split("llamo")[1].strip()) > 2,
+                "soy" in query_lower and len(query_lower.split("soy")) > 1 and len(query_lower.split("soy")[1].strip()) > 2
+            ])
+            
+            has_lastname_value = any([
+                " a " in query_lower and mentions_lastname,
+                " es " in query_lower and mentions_lastname,
+                "apellido es" in query_lower
+            ])
+            
+            has_city_value = any([
+                " a " in query_lower and mentions_city,
+                " es " in query_lower and mentions_city,
+                "vivo en" in query_lower,
+                "ciudad es" in query_lower
+            ])
+            
+            wants_update_name_no_value = (
+                ("actualizar" in query_lower or "cambiar" in query_lower or "modificar" in query_lower) 
+                and mentions_name 
+                and not has_name_value
+            )
+            
+            wants_update_lastname_no_value = (
+                ("actualizar" in query_lower or "cambiar" in query_lower or "modificar" in query_lower) 
+                and mentions_lastname 
+                and not has_lastname_value
+            )
+            
+            wants_update_city_no_value = (
+                ("actualizar" in query_lower or "cambiar" in query_lower or "modificar" in query_lower) 
+                and mentions_city 
+                and not has_city_value
+            )
             
             # Si solo dice que quiere actualizar pero no dice qué, inicializar estado
-            if is_waiting_for_data:
+            if wants_update_generic:
                 logger.info("⚠️ Usuario quiere actualizar datos pero no especificó cuáles")
                 message = "Perfecto, puedo ayudarte a actualizar tus datos. Por favor, indícame qué información deseas cambiar. Por ejemplo:\n\n• Nombre\n• Apellido\n• Ciudad\n• Teléfono\n\nO puedes escribir directamente: 'Quiero cambiar mi nombre a Juan'"
                 
                 # Guardar en sesión que estamos esperando datos
                 user_context["pending_data_update"] = True
+                return (message, None)
+            
+            # Si menciona un campo específico pero no proporciona el valor nuevo, preguntar específicamente
+            if wants_update_name_no_value:
+                logger.info("⚠️ Usuario quiere actualizar su nombre pero no especificó el nombre nuevo")
+                message = "Perfecto, puedo ayudarte a actualizar tu nombre. ¿Cuál es el nombre nuevo que deseas usar? Por ejemplo: 'Mi nombre es Juan' o 'Quiero cambiar mi nombre a María'"
+                user_context["pending_data_update"] = True
+                user_context["pending_field"] = "name"
+                return (message, None)
+            
+            if wants_update_lastname_no_value:
+                logger.info("⚠️ Usuario quiere actualizar su apellido pero no especificó el apellido nuevo")
+                message = "Perfecto, puedo ayudarte a actualizar tu apellido. ¿Cuál es el apellido nuevo que deseas usar? Por ejemplo: 'Mi apellido es García' o 'Quiero cambiar mi apellido a Pérez'"
+                user_context["pending_data_update"] = True
+                user_context["pending_field"] = "lastname"
+                return (message, None)
+            
+            if wants_update_city_no_value:
+                logger.info("⚠️ Usuario quiere actualizar su ciudad pero no especificó la ciudad nueva")
+                message = "Perfecto, puedo ayudarte a actualizar tu ciudad. ¿En qué ciudad vives ahora? Por ejemplo: 'Vivo en Bogotá' o 'Mi ciudad es Medellín'"
+                user_context["pending_data_update"] = True
+                user_context["pending_field"] = "city"
                 return (message, None)
             
             # Extraer información de actualización usando IA
