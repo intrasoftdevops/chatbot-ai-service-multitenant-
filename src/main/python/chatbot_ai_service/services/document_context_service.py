@@ -171,6 +171,13 @@ class SentenceAwareNodeParser:
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
     
+    def __call__(self, documents, show_progress: bool = False):
+        """
+        Método __call__ para compatibilidad con LlamaIndex
+        LlamaIndex llama al parser como función
+        """
+        return self.get_nodes_from_documents(documents, show_progress)
+    
     def get_nodes_from_documents(self, documents, show_progress: bool = False):
         """
         Convierte documentos en nodos respetando límites de oraciones
@@ -341,70 +348,26 @@ class DocumentContextService:
             
             logger.info(f"📚 Cargando documentos para tenant {tenant_id} desde: {documentation_bucket_url}")
             
-            # 🚀 OPTIMIZACIÓN: Verificar si ya tenemos un índice en cache
-            if tenant_id in self._index_cache:
-                logger.info(f"✅ Índice ya existe en cache para tenant {tenant_id}")
-                # 🔧 Asegurar que también tenemos documentos en modo simple como backup
-                if tenant_id in self._document_cache:
-                    doc_info = self._document_cache[tenant_id]
-                    if 'documents' not in doc_info:
-                        logger.info(f"📥 Cargando documentos en modo simple como backup...")
-                        try:
-                            await self._load_documents_simple(tenant_id, documentation_bucket_url)
-                            logger.info(f"✅ Documentos en modo simple cargados como backup")
-                        except Exception as e:
-                            logger.warning(f"⚠️ No se pudieron cargar documentos en modo simple (no crítico): {e}")
-                return True
-            
-            # 💾 CARGAR desde disco local si existe (rápido ~1s)
-            import os
-            storage_path = f"./storage/indices/{tenant_id}"
-            if os.path.exists(storage_path) and os.listdir(storage_path):
-                try:
-                    logger.info(f"💾 Índice encontrado en disco: {storage_path}")
-                    storage_context = StorageContext.from_defaults(persist_dir=storage_path)
-                    index = load_index_from_storage(storage_context)
-                    
-                    self._index_cache[tenant_id] = index
-                    self._document_cache[tenant_id] = {
-                        "bucket_url": documentation_bucket_url,
-                        "document_count": 0,
-                        "loaded_from_disk": True
-                    }
-                    logger.info(f"✅ Índice cargado desde disco en ~1s para tenant {tenant_id}")
-                    
-                    # 🔧 IMPORTANTE: También cargar documentos en modo simple como backup
-                    # para cuando el índice vectorial falle por API key
-                    logger.info(f"📥 Cargando documentos en modo simple como backup...")
-                    try:
-                        await self._load_documents_simple(tenant_id, documentation_bucket_url)
-                        logger.info(f"✅ Documentos en modo simple cargados como backup")
-                    except Exception as simple_error:
-                        logger.warning(f"⚠️ No se pudieron cargar documentos en modo simple (no crítico): {simple_error}")
-                    
-                    return True
-                except Exception as load_error:
-                    logger.warning(f"⚠️ Error cargando desde disco: {load_error}")
-                    # Si falla cargar desde disco, intentar modo simple
-                    logger.info(f"📥 Intentando cargar documentos en modo simple como fallback...")
-                    return await self._load_documents_simple(tenant_id, documentation_bucket_url)
-            
-            # No hay persistencia, cargar desde bucket
-            logger.info(f"📥 Cargando desde bucket (10-30s para primera vez)...")
-            # 🗄️ NUEVO: Verificar si existe índice en DB (para saber si debería cargar)
-            from chatbot_ai_service.services.document_index_persistence_service import document_index_persistence_service
-            index_exists = document_index_persistence_service.index_exists(tenant_id, documentation_bucket_url)
-            
-            if index_exists:
-                logger.info(f"🗄️ Metadatos encontrados en DB para tenant {tenant_id}")
-                logger.info(f"📥 Cargando documentos desde bucket...")
-            
-            # Obtener lista de documentos del bucket
-            logger.info(f"📥 Obteniendo lista de documentos desde bucket...")
+            # 🔧 FIX: Siempre cargar documentos desde el bucket para actualizar metadatos
+            # Incluso si el índice está en cache, consultamos el bucket para asegurar que los metadatos estén actualizados
+            # Primero cargar documentos desde el bucket
+            logger.info(f"📥 Cargando documentos desde bucket para tenant {tenant_id}...")
             documents = await self._fetch_documents_from_bucket(documentation_bucket_url)
             
             if not documents:
                 logger.warning(f"⚠️ No se encontraron documentos en el bucket para tenant {tenant_id} (URL: {documentation_bucket_url})")
+                # Si no hay documentos en bucket pero hay índice en disco, usar ese
+                import os
+                storage_path = f"./storage/indices/{tenant_id}"
+                if os.path.exists(storage_path) and os.listdir(storage_path):
+                    try:
+                        logger.info(f"💾 Usando índice existente en disco (no hay documentos nuevos en bucket)...")
+                        storage_context = StorageContext.from_defaults(persist_dir=storage_path)
+                        index = load_index_from_storage(storage_context)
+                        self._index_cache[tenant_id] = index
+                        return True
+                    except Exception:
+                        pass
                 return False
             
             # Log de tipos de archivos encontrados
@@ -412,7 +375,64 @@ class DocumentContextService:
             for doc in documents:
                 ext = doc['filename'].split('.')[-1].lower()
                 file_types[ext] = file_types.get(ext, 0) + 1
-            logger.info(f"📊 Documentos encontrados: {len(documents)} archivos - {dict(file_types)}")
+            logger.info(f"📊 Documentos encontrados en bucket: {len(documents)} archivos - {dict(file_types)}")
+            
+            # 💾 Verificar si existe índice en disco (para usar como cache rápido)
+            import os
+            storage_path = f"./storage/indices/{tenant_id}"
+            index_from_disk = None
+            if os.path.exists(storage_path) and os.listdir(storage_path):
+                try:
+                    logger.info(f"💾 Índice encontrado en disco, cargándolo como cache rápido...")
+                    storage_context = StorageContext.from_defaults(persist_dir=storage_path)
+                    index_from_disk = load_index_from_storage(storage_context)
+                    logger.info(f"✅ Índice cargado desde disco (cache rápido)")
+                except Exception as load_error:
+                    logger.warning(f"⚠️ Error cargando índice desde disco: {load_error}")
+            
+            # 🔧 IMPORTANTE: Siempre cargar documentos en modo simple para que estén disponibles
+            logger.info(f"📥 Cargando documentos en modo simple desde bucket...")
+            try:
+                await self._load_documents_simple(tenant_id, documentation_bucket_url)
+                logger.info(f"✅ Documentos en modo simple cargados desde bucket")
+            except Exception as simple_error:
+                logger.warning(f"⚠️ No se pudieron cargar documentos en modo simple: {simple_error}")
+            
+            # Si tenemos índice desde disco, usarlo (más rápido)
+            if index_from_disk:
+                self._index_cache[tenant_id] = index_from_disk
+                self._document_cache[tenant_id] = {
+                    "bucket_url": documentation_bucket_url,
+                    "document_count": len(documents),
+                    "loaded_from_disk": True
+                }
+                
+                # 🔧 FIX: SIEMPRE guardar/actualizar metadatos en Firestore con el conteo real del bucket
+                from chatbot_ai_service.services.document_index_persistence_service import document_index_persistence_service
+                total_chars = sum(int(doc.get('size', 0)) for doc in documents)  # Estimación
+                
+                logger.info(f"💾 Guardando/actualizando metadatos del índice en Firestore...")
+                await document_index_persistence_service.save_index_metadata(
+                    tenant_id=tenant_id,
+                    bucket_url=documentation_bucket_url,
+                    documents_count=len(documents),
+                    file_types=file_types,
+                    total_chars=total_chars
+                )
+                logger.info(f"✅ Metadatos guardados en Firestore para tenant {tenant_id}: {len(documents)} documentos")
+                
+                logger.info(f"✅ Índice listo para tenant {tenant_id} ({len(documents)} documentos desde bucket, índice desde disco)")
+                return True
+            
+            # Si no hay índice en disco, crear uno nuevo desde el bucket (continuar con el flujo normal)
+            logger.info(f"📥 No hay índice en disco, creando nuevo índice desde bucket...")
+            
+            # 🗄️ Verificar si existe índice en DB (para saber si debería cargar)
+            from chatbot_ai_service.services.document_index_persistence_service import document_index_persistence_service
+            index_exists = document_index_persistence_service.index_exists(tenant_id, documentation_bucket_url)
+            
+            if index_exists:
+                logger.info(f"🗄️ Metadatos encontrados en DB para tenant {tenant_id}")
             
             # Crear documentos de LlamaIndex
             logger.info(f"📖 Procesando {len(documents)} documentos...")
@@ -460,97 +480,28 @@ class DocumentContextService:
             logger.info(f"🔨 Creando índice vectorial con {len(llama_documents)} documentos...")
             logger.info(f"📊 Total de caracteres a procesar: {total_chars:,} (~{total_chars // 1000}K tokens estimados)")
             
-            # 🔧 FIX: Procesar documentos en lotes pequeños para evitar error 500 de Gemini API
+            # 🔧 FIX: Crear índice con retry robusto para manejar errores 500
             # El error 500 ocurre cuando se intentan generar demasiados embeddings de una vez
-            # En Cloud Run el sistema de archivos es efímero, así que siempre intenta crear desde cero
             import asyncio
-            BATCH_SIZE = 5  # Procesar 5 documentos a la vez para evitar rate limits
             MAX_RETRIES = 3
             RETRY_DELAY = 2  # segundos
             
-            if len(llama_documents) > BATCH_SIZE:
-                logger.info(f"📦 Procesando {len(llama_documents)} documentos en lotes de {BATCH_SIZE} para evitar error 500...")
-                
-                # Dividir en lotes
-                batches = [llama_documents[i:i + BATCH_SIZE] for i in range(0, len(llama_documents), BATCH_SIZE)]
-                logger.info(f"📦 {len(batches)} lotes creados")
-                
-                # Procesar documentos en lotes: crear índice base y agregar documentos incrementalmente
-                logger.info(f"🔗 Procesando {len(batches)} lotes en índice incremental...")
+            # Crear índice completo con todos los documentos (más simple y robusto)
+            logger.info(f"🔗 Creando índice con {len(llama_documents)} documentos...")
+            for attempt in range(1, MAX_RETRIES + 1):
                 try:
-                    # Procesar primer lote para crear índice base
-                    first_batch = batches[0]
-                    logger.info(f"📦 Creando índice base con lote 1/{len(batches)} ({len(first_batch)} documentos)...")
-                    
-                    for attempt in range(1, MAX_RETRIES + 1):
-                        try:
-                            index = VectorStoreIndex.from_documents(first_batch)
-                            logger.info(f"✅ Índice base creado exitosamente")
-                            break
-                        except Exception as batch_error:
-                            error_msg = str(batch_error)
-                            if ("500" in error_msg or "internal error" in error_msg.lower() or "rate limit" in error_msg.lower()) and attempt < MAX_RETRIES:
-                                wait_time = RETRY_DELAY * attempt
-                                logger.warning(f"⚠️ Error 500/rate limit en índice base, intento {attempt}/{MAX_RETRIES}. Reintentando en {wait_time}s...")
-                                await asyncio.sleep(wait_time)
-                            else:
-                                raise
-                    
-                    # Agregar los demás lotes procesando lotes completos (más eficiente que uno por uno)
-                    for batch_idx, batch in enumerate(batches[1:], 2):
-                        logger.info(f"📦 Procesando lote {batch_idx}/{len(batches)} ({len(batch)} documentos)...")
-                        
-                        for attempt in range(1, MAX_RETRIES + 1):
-                            try:
-                                # Crear índice temporal para este lote
-                                batch_index = VectorStoreIndex.from_documents(batch)
-                                
-                                # Obtener todos los nodos del lote procesado
-                                batch_nodes = list(batch_index.storage_context.docstore.docs.values())
-                                
-                                # Insertar todos los nodos del lote en el índice principal
-                                for node in batch_nodes:
-                                    index.insert(node)
-                                
-                                logger.info(f"✅ Lote {batch_idx} agregado exitosamente ({len(batch_nodes)} nodos)")
-                                break
-                            except Exception as batch_error:
-                                error_msg = str(batch_error)
-                                if ("500" in error_msg or "internal error" in error_msg.lower() or "rate limit" in error_msg.lower()) and attempt < MAX_RETRIES:
-                                    wait_time = RETRY_DELAY * attempt
-                                    logger.warning(f"⚠️ Error 500/rate limit en lote {batch_idx}, intento {attempt}/{MAX_RETRIES}. Reintentando en {wait_time}s...")
-                                    await asyncio.sleep(wait_time)
-                                else:
-                                    logger.error(f"❌ Lote {batch_idx} falló después de {MAX_RETRIES} intentos: {error_msg}")
-                                    raise
-                        
-                        # Pausa entre lotes para evitar rate limiting
-                        if batch_idx < len(batches):
-                            await asyncio.sleep(1)
-                    
-                    logger.info(f"✅ Índice combinado exitosamente con {len(llama_documents)} documentos")
-                except Exception as combine_error:
-                    logger.error(f"❌ Error combinando lotes: {combine_error}")
-                    raise
-            else:
-                # Si son pocos documentos, procesar normalmente pero con retry
-                for attempt in range(1, MAX_RETRIES + 1):
-                    try:
-                        index = VectorStoreIndex.from_documents(llama_documents)
-                        logger.info(f"✅ Índice creado exitosamente en intento {attempt}")
-                        break
-                    except Exception as e:
-                        error_msg = str(e)
-                        if "500" in error_msg or "internal error" in error_msg.lower() or "rate limit" in error_msg.lower():
-                            if attempt < MAX_RETRIES:
-                                wait_time = RETRY_DELAY * attempt
-                                logger.warning(f"⚠️ Error 500/rate limit al crear índice, intento {attempt}/{MAX_RETRIES}. Reintentando en {wait_time}s...")
-                                await asyncio.sleep(wait_time)
-                            else:
-                                logger.error(f"❌ Error creando índice después de {MAX_RETRIES} intentos: {error_msg}")
-                                raise
-                        else:
-                            raise
+                    index = VectorStoreIndex.from_documents(llama_documents)
+                    logger.info(f"✅ Índice creado exitosamente en intento {attempt} con {len(llama_documents)} documentos")
+                    break
+                except Exception as e:
+                    error_msg = str(e)
+                    if ("500" in error_msg or "internal error" in error_msg.lower() or "rate limit" in error_msg.lower()) and attempt < MAX_RETRIES:
+                        wait_time = RETRY_DELAY * attempt
+                        logger.warning(f"⚠️ Error 500/rate limit al crear índice, intento {attempt}/{MAX_RETRIES}. Reintentando en {wait_time}s...")
+                        await asyncio.sleep(wait_time)
+                    else:
+                        logger.error(f"❌ Error creando índice después de {MAX_RETRIES} intentos: {error_msg}")
+                        raise
             
             # 💾 GUARDAR índice para persistencia
             import os

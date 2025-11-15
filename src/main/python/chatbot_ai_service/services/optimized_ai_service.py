@@ -864,9 +864,8 @@ Tu opinión es muy valiosa para nosotros. ¿Hay algo más en lo que pueda ayudar
                     self.logger.warning(f"⚠️ Error procesando queja_detalle: {e}")
                     self.logger.exception(e)
             
-            # 3. PROCESAR CON SERVICIO BASE (con timeout)
+            # 3. PROCESAR CON SERVICIO BASE (sin timeout)
             self.logger.info(f"📚 [OPTIMIZED] Procesando con servicio base...")
-            import asyncio
             
             # 🔧 FIX: Pasar historial en user_context en lugar de incluirlo en el query
             processing_user_context = user_context.copy() if user_context else {}
@@ -885,48 +884,23 @@ Tu opinión es muy valiosa para nosotros. ¿Hay algo más en lo que pueda ayudar
             else:
                 self.logger.warning(f"❌ [OPTIMIZED] numero_whatsapp NO VA A PASARSE A base_ai_service")
             
-            try:
-                result = await asyncio.wait_for(
-                    self.base_ai_service.process_chat_message(
-                        tenant_id, processing_query, processing_user_context, session_id, tenant_config
-                    ),
-                    timeout=optimization_config.AI_RESPONSE_TIMEOUT
-                )
-                
-                # Agregar información de optimización al resultado
-                result["intent"] = intent
-                result["confidence"] = confidence
-                result["optimized"] = True
-                
-                processing_time = time.time() - start_time
-                result["processing_time"] = processing_time
-                
-                self.logger.info(f"✅ [OPTIMIZED] Procesamiento completado en {processing_time:.2f}s")
-                self.logger.info(f"✅ [OPTIMIZED] INTENT FINAL: {intent} (confianza: {confidence})")
-                
-                return result
-                
-            except asyncio.TimeoutError:
-                self.logger.error(f"⏰ Timeout generando respuesta (>10s) - retornando menú")
-                # Retornar señal de timeout para que Java muestre menú
-                processing_time = time.time() - start_time
-                return {
-                    "response": "",
-                    "followup_message": "",
-                    "from_cache": False,
-                    "processing_time": processing_time,
-                    "timeout": True,
-                    "show_menu": True,
-                    "menu_options": [
-                        {"text": "¿Cómo voy?", "payload": "como_voy"},
-                        {"text": "Compartir mi link", "payload": "compartir_link"}
-                    ],
-                    "tenant_id": tenant_id,
-                    "session_id": session_id,
-                    "intent": intent,
-                    "confidence": confidence,
-                    "optimized": True
-                }
+            # 🔧 FIX: Quitado timeout para permitir que las respuestas complejas se completen
+            result = await self.base_ai_service.process_chat_message(
+                tenant_id, processing_query, processing_user_context, session_id, tenant_config
+            )
+            
+            # Agregar información de optimización al resultado
+            result["intent"] = intent
+            result["confidence"] = confidence
+            result["optimized"] = True
+            
+            processing_time = time.time() - start_time
+            result["processing_time"] = processing_time
+            
+            self.logger.info(f"✅ [OPTIMIZED] Procesamiento completado en {processing_time:.2f}s")
+            self.logger.info(f"✅ [OPTIMIZED] INTENT FINAL: {intent} (confianza: {confidence})")
+            
+            return result
             
         except Exception as e:
             self.logger.error(f"❌ [OPTIMIZED] Error en procesamiento optimizado: {str(e)}")

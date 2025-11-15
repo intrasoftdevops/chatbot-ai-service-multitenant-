@@ -350,6 +350,48 @@ async def startup_event():
         else:
             print("ℹ️ No hay índices guardados en DB aún")
         
+        # 🔧 FIX: También intentar cargar documentos desde configuración de tenants
+        # (para tenants que tienen documentos pero no están registrados en document_indexes)
+        if db is not None:
+            print("🔍 Verificando configuraciones de tenants para cargar documentos...")
+            try:
+                from chatbot_ai_service.services.firestore_tenant_service import firestore_tenant_service
+                tenant_configs = await firestore_tenant_service.get_all_tenant_configs()
+                
+                if tenant_configs:
+                    from chatbot_ai_service.services.document_context_service import document_context_service
+                    
+                    for tenant_id, config in tenant_configs.items():
+                        # Verificar si este tenant ya fue cargado desde document_indexes
+                        already_loaded = any(idx.get('tenant_id') == tenant_id for idx in all_indexes)
+                        
+                        if not already_loaded:
+                            # Verificar si tiene documentation_bucket_url configurado
+                            ai_config = config.get("aiConfig", {})
+                            if ai_config and isinstance(ai_config, dict):
+                                bucket_url = ai_config.get("documentation_bucket_url")
+                                if bucket_url and bucket_url.strip():
+                                    print(f"  - Tenant {tenant_id}: Tiene bucket configurado pero no está en índices")
+                                    print(f"      • 📚 Intentando cargar documentos desde configuración...")
+                                    print(f"      • 🔗 URL: {bucket_url[:80]}...")
+                                    try:
+                                        import time
+                                        start_time = time.time()
+                                        success = await document_context_service.load_tenant_documents(tenant_id, bucket_url)
+                                        elapsed_time = time.time() - start_time
+                                        
+                                        if success:
+                                            print(f"      • ✅ Documentos cargados exitosamente para tenant {tenant_id} (took {elapsed_time:.1f}s)")
+                                            print(f"      • 💾 Metadatos del índice deberían estar guardados en Firestore")
+                                        else:
+                                            print(f"      • ⚠️ No se pudieron cargar documentos para tenant {tenant_id} (took {elapsed_time:.1f}s)")
+                                    except Exception as e:
+                                        import traceback
+                                        print(f"      • ❌ Error cargando documentos para tenant {tenant_id}: {e}")
+                                        print(f"      • 📋 Traceback: {traceback.format_exc()}")
+            except Exception as e:
+                print(f"⚠️ Error verificando configuraciones de tenants: {e}")
+        
         # 🧠 NUEVO: Cargar memorias de tenants desde Firestore
         from chatbot_ai_service.services.tenant_memory_service import tenant_memory_service
         
