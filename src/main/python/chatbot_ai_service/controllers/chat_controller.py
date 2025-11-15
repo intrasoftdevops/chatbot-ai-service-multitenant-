@@ -20,7 +20,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["chat"])
 
-def _update_tenant_memory_async(tenant_id: str, query: str, response: str, intent: str, session_id: str = None):
+def _update_tenant_memory_async(tenant_id: str, query: str, response: str, intent: str, session_id: str = None, tenant_config: Dict[str, Any] = None):
     """
     Actualiza la memoria del tenant de forma asíncrona (no bloquea la respuesta)
     
@@ -30,8 +30,18 @@ def _update_tenant_memory_async(tenant_id: str, query: str, response: str, inten
         response: Respuesta generada
         intent: Intención detectada
         session_id: ID de la sesión
+        tenant_config: Configuración del tenant (opcional, para usar la base de datos correcta)
     """
     import asyncio
+    
+    logger.info(f"🧠 [MEMORY_UPDATE] Iniciando actualización de memoria para tenant {tenant_id}")
+    logger.info(f"🧠 [MEMORY_UPDATE] tenant_config recibido: {bool(tenant_config)}")
+    if tenant_config:
+        logger.info(f"🧠 [MEMORY_UPDATE] tenant_config keys: {list(tenant_config.keys())}")
+        logger.info(f"🧠 [MEMORY_UPDATE] client_project_id: {tenant_config.get('client_project_id', 'NO PRESENTE')}")
+        logger.info(f"🧠 [MEMORY_UPDATE] client_database_id: {tenant_config.get('client_database_id', 'NO PRESENTE')}")
+    else:
+        logger.warning(f"🧠 [MEMORY_UPDATE] ⚠️ tenant_config es None - se usará conexión por defecto")
     
     def detect_sentiment_simple(text: str) -> str:
         """Detección básica de sentimiento"""
@@ -51,10 +61,14 @@ def _update_tenant_memory_async(tenant_id: str, query: str, response: str, inten
     
     async def update_memory():
         try:
+            logger.info(f"🧠 [MEMORY_UPDATE] update_memory() iniciado para tenant {tenant_id}")
             memory_service = get_tenant_memory_service()
             
-            # Obtener memoria actual
-            memory = await memory_service.get_tenant_memory(tenant_id)
+            logger.info(f"🧠 [MEMORY_UPDATE] Obteniendo memoria con tenant_config: {bool(tenant_config)}")
+            # Obtener memoria actual usando la configuración del tenant
+            memory = await memory_service.get_tenant_memory(tenant_id, tenant_config)
+            
+            logger.info(f"🧠 [MEMORY_UPDATE] Memoria obtenida: {memory is not None}")
             
             if not memory:
                 # Si no existe memoria, crearla
@@ -75,18 +89,18 @@ def _update_tenant_memory_async(tenant_id: str, query: str, response: str, inten
                 timestamp=datetime.now()
             )
             
-            await memory_service.add_conversation_summary(tenant_id, summary)
+            await memory_service.add_conversation_summary(tenant_id, summary, tenant_config)
             
             # Agregar pregunta común si no es saludo simple
             if len(query) > 10 and intent != "saludo_apoyo":
-                await memory_service.add_common_question(tenant_id, query)
+                await memory_service.add_common_question(tenant_id, query, tenant_config)
             
             # Actualizar estadísticas
             memory.total_conversations += 1
             memory.total_messages += 1
             
-            # Guardar actualización
-            await memory_service.save_tenant_memory(tenant_id, memory)
+            # Guardar actualización usando la configuración del tenant
+            await memory_service.save_tenant_memory(tenant_id, memory, tenant_config)
             
             logger.info(f"✅ Memoria actualizada para tenant {tenant_id}")
             
@@ -238,7 +252,19 @@ async def process_chat_message(tenant_id: str, request: Dict[str, Any]) -> Dict[
         logger.info(f"🔍 complaint_type en respuesta: {response.get('complaint_type')}")
         
         # 🆕 NUEVO: Actualizar memoria del tenant de forma asíncrona (no bloquea la respuesta)
-        _update_tenant_memory_async(tenant_id, query, clean_response, ai_response.get("intent"), session_id)
+        # Verificar que tenant_config tenga los campos necesarios
+        if tenant_config:
+            logger.info(f"🧠 [CONTROLLER] Verificando tenant_config antes de actualizar memoria:")
+            logger.info(f"   - client_project_id: {tenant_config.get('client_project_id', 'NO PRESENTE')}")
+            logger.info(f"   - client_database_id: {tenant_config.get('client_database_id', 'NO PRESENTE')}")
+            if not tenant_config.get('client_project_id'):
+                logger.warning(f"🧠 [CONTROLLER] ⚠️ tenant_config no tiene client_project_id - la memoria usará conexión por defecto")
+            if not tenant_config.get('client_database_id'):
+                logger.warning(f"🧠 [CONTROLLER] ⚠️ tenant_config no tiene client_database_id - se usará '(default)'")
+        else:
+            logger.warning(f"🧠 [CONTROLLER] ⚠️ tenant_config es None o vacío - la memoria usará conexión por defecto")
+        
+        _update_tenant_memory_async(tenant_id, query, clean_response, ai_response.get("intent"), session_id, tenant_config)
         
         return response
         

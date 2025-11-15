@@ -3567,16 +3567,19 @@ Puedes preguntarme sobre:
     
     async def normalize_location(self, city_input: str) -> Dict[str, Any]:
         """Normaliza el nombre de una ciudad (puede ser fuera de Colombia),
-        reconoce apodos y detecta su estado/departamento y país cuando sea posible."""
+        reconoce apodos y detecta su estado/departamento y país cuando sea posible.
+        🔧 FIX: Usa Nominatim como fallback si la IA no devuelve departamento."""
         self._ensure_model_initialized()
         # 1) Intento OFFLINE: apodos y alias conocidos + regex sencillas
         offline = self._normalize_location_offline(city_input)
         if offline:
             return offline
-        if not self.model:
-            return {"city": city_input.strip(), "state": None, "country": None}
-        try:
-            prompt = f"""
+        
+        # 2) Intentar con IA primero
+        ai_result = None
+        if self.model:
+            try:
+                prompt = f"""
 Eres un asistente que estandariza ubicaciones (cualquier país) y reconoce apodos locales.
 
 Tarea: Dada una entrada de ciudad (puede venir con errores ortográficos, variaciones o apodos), devuelve un JSON con:
@@ -3587,40 +3590,256 @@ Tarea: Dada una entrada de ciudad (puede venir con errores ortográficos, variac
 Reglas:
 - Solo responde el JSON, sin texto adicional.
 - Si la entrada corresponde a un apodo, resuélvelo al nombre oficial.
+- **IMPORTANTE**: SIEMPRE intenta determinar el departamento/estado. Si la ciudad es de Colombia, DEBES incluir el departamento.
 - Si no puedes determinar estado o país, deja ese campo con null.
- - La entrada puede ser una FRASE COMPLETA del usuario (ej: "vivo en ..."). Extrae y normaliza la ciudad implícita.
+- La entrada puede ser una FRASE COMPLETA del usuario (ej: "vivo en ..."). Extrae y normaliza la ciudad implícita.
 
-Apodos comunes en Colombia (no exhaustivo):
-- "la nevera" -> Bogotá
-- "medallo" -> Medellín
-- "la arenosa" -> Barranquilla
-- "la sucursal del cielo" -> Cali
-- "la ciudad bonita" -> Bucaramanga
- - "la ciudad de la eterna primavera" -> Medellín
+CIUDADES COLOMBIANAS PRINCIPALES Y SUS DEPARTAMENTOS:
+- Bogotá, Bogotá D.C. o Bogota → Cundinamarca
+- Medellín o Medellin → Antioquia
+- Cali → Valle del Cauca
+- Barranquilla → Atlántico
+- Cartagena → Bolívar
+- Bucaramanga → Santander
+- Pereira → Risaralda
+- Santa Marta → Magdalena
+- Manizales → Caldas
+- Armenia → Quindío
+- Ibagué o Ibague → Tolima
+- Cúcuta o Cucuta → Norte de Santander
+- Pasto → Nariño
+- Villavicencio → Meta
+- Montería o Monteria → Córdoba
+- Sincelejo → Sucre
+- Popayán o Popayan → Cauca
+- Valledupar → Cesar
+- Tunja → Boyacá
+- Riohacha → La Guajira
+- Florencia → Caquetá
+- Quibdó o Quibdo → Chocó
+- Neiva → Huila
+- Soacha → Cundinamarca
+- Itagüí, Itagui → Antioquia
+- Bello → Antioquia
+- Palmira → Valle del Cauca
+- Buenaventura → Valle del Cauca
+- Soledad → Atlántico
+- Envigado → Antioquia
+
+Apodos comunes en Colombia:
+- "la nevera" → Bogotá, Cundinamarca, Colombia
+- "medallo" → Medellín, Antioquia, Colombia
+- "la arenosa" → Barranquilla, Atlántico, Colombia
+- "la sucursal del cielo" → Cali, Valle del Cauca, Colombia
+- "la ciudad bonita" → Bucaramanga, Santander, Colombia
+- "la ciudad de la eterna primavera" → Medellín, Antioquia, Colombia
 
 Ejemplos válidos:
-Entrada: "medellin" -> {"city": "Medellín", "state": "Antioquia", "country": "Colombia"}
-Entrada: "bogota" -> {"city": "Bogotá", "state": "Cundinamarca", "country": "Colombia"}
-Entrada: "soacha" -> {"city": "Soacha", "state": "Cundinamarca", "country": "Colombia"}
-Entrada: "la nevera" -> {"city": "Bogotá", "state": "Cundinamarca", "country": "Colombia"}
-Entrada: "vivo en la ciudad de la eterna primavera" -> {"city": "Medellín", "state": "Antioquia", "country": "Colombia"}
-Entrada: "New York" -> {"city": "New York", "state": "New York", "country": "United States"}
+Entrada: "medellin" → {{"city": "Medellín", "state": "Antioquia", "country": "Colombia"}}
+Entrada: "bogota" → {{"city": "Bogotá", "state": "Cundinamarca", "country": "Colombia"}}
+Entrada: "soacha" → {{"city": "Soacha", "state": "Cundinamarca", "country": "Colombia"}}
+Entrada: "la nevera" → {{"city": "Bogotá", "state": "Cundinamarca", "country": "Colombia"}}
+Entrada: "vivo en la ciudad de la eterna primavera" → {{"city": "Medellín", "state": "Antioquia", "country": "Colombia"}}
+Entrada: "New York" → {{"city": "New York", "state": "New York", "country": "United States"}}
 
 Entrada real: "{city_input}".
 Responde solo el JSON estricto sin comentarios:
 """
-            response_text = await self._generate_content(prompt)
-            text = (response_text or "").strip()
-            import json
-            result = json.loads(text)
-            # Sanitizar salida mínima
-            city = (result.get("city") or city_input or "").strip()
-            state = (result.get("state") or None)
-            country = (result.get("country") or None)
-            return {"city": city, "state": state, "country": country}
+                response_text = await self._generate_content(prompt)
+                text = (response_text or "").strip()
+                
+                if text:
+                    import json
+                    import re
+                    
+                    # Intentar extraer JSON incluso si está mal formateado
+                    try:
+                        ai_result = json.loads(text)
+                    except json.JSONDecodeError:
+                        # Intentar extraer JSON del texto (puede venir con texto adicional)
+                        json_match = re.search(r'\{[^{}]*"city"[^{}]*\}', text, re.DOTALL)
+                        if json_match:
+                            try:
+                                ai_result = json.loads(json_match.group())
+                            except json.JSONDecodeError:
+                                pass
+                        
+                        # Si aún no funciona, buscar campos individuales
+                        if not ai_result:
+                            city_match = re.search(r'"city"\s*:\s*"([^"]+)"', text)
+                            state_match = re.search(r'"state"\s*:\s*"([^"]+)"', text)
+                            country_match = re.search(r'"country"\s*:\s*"([^"]+)"', text)
+                            
+                            if city_match:
+                                ai_result = {
+                                    "city": city_match.group(1),
+                                    "state": state_match.group(1) if state_match else None,
+                                    "country": country_match.group(1) if country_match else None
+                                }
+                
+                if ai_result and ai_result.get("state"):
+                    # IA devolvió departamento/estado, usar este resultado
+                    city = (ai_result.get("city") or city_input or "").strip()
+                    state = ai_result.get("state")
+                    country = ai_result.get("country") or "Colombia"
+                    logger.info(f"✅ IA normalizó '{city_input}' → {city}, {state}, {country}")
+                    return {"city": city, "state": state, "country": country}
+            except Exception as e:
+                logger.warning(f"⚠️ Error con IA para normalizar '{city_input}': {e}")
+        
+        # 3) Si IA no devolvió departamento o falló, usar Nominatim como fallback
+        logger.info(f"🌍 Usando Nominatim como fallback para normalizar ciudad: '{city_input}'")
+        try:
+            nominatim_result = await self._query_nominatim_geocoding(city_input)
+            
+            if nominatim_result and nominatim_result.get("confidence", 0) > 0:
+                city = nominatim_result.get("city", city_input).strip()
+                state = nominatim_result.get("state")
+                country = nominatim_result.get("country") or "Colombia"
+                logger.info(f"✅ Nominatim normalizó '{city_input}' → {city}, {state}, {country}")
+                return {"city": city, "state": state, "country": country}
         except Exception as e:
-            logger.error(f"Error normalizando ubicación: {str(e)}")
-            return {"city": city_input.strip() if city_input else "", "state": None, "country": None}
+            logger.warning(f"⚠️ Error consultando Nominatim para '{city_input}': {e}")
+        
+        # 4) Fallback final: usar resultado de IA si existe (aunque no tenga departamento) o devolver ciudad capitalizada
+        if ai_result and ai_result.get("city"):
+            city = (ai_result.get("city") or city_input or "").strip()
+            state = ai_result.get("state")
+            country = ai_result.get("country") or "Colombia"
+            logger.warning(f"⚠️ Normalización parcial para '{city_input}' → {city}, {state}, {country}")
+            return {"city": city, "state": state, "country": country}
+        
+        # Último fallback: devolver ciudad capitalizada sin departamento
+        logger.warning(f"⚠️ No se pudo normalizar completamente '{city_input}', devolviendo capitalizada")
+        return {"city": city_input.strip().title() if city_input else "", "state": None, "country": None}
+    
+    async def _query_nominatim_geocoding(self, city_input: str, country_hint: str = "colombia") -> Optional[Dict[str, Any]]:
+        """
+        Consulta Nominatim (OpenStreetMap) para obtener información geográfica de la ciudad
+        Funciona para cualquier ciudad del mundo, no solo Colombia
+        """
+        try:
+            import aiohttp
+            import re
+            
+            url = "https://nominatim.openstreetmap.org/search"
+            headers = {
+                "User-Agent": "PoliticalReferralsBot/1.0 (contact@example.com)"
+            }
+            
+            # Extraer solo el nombre de la ciudad (remover prefijos comunes)
+            city_name = city_input.strip()
+            prefixes = ["en la ciudad de ", "en ciudad de ", "vivo en ", "estoy en ", "soy de "]
+            for prefix in prefixes:
+                if city_name.lower().startswith(prefix):
+                    city_name = city_name[len(prefix):].strip()
+                    break
+            
+            # Buscar en Colombia primero, luego en otros países
+            search_queries = [
+                {"q": f"{city_name}, Colombia", "countrycodes": "co", "limit": 3},
+                {"q": city_name, "limit": 5}  # Buscar sin restricción de país
+            ]
+            
+            async with aiohttp.ClientSession() as session:
+                for query_params in search_queries:
+                    params = {
+                        "q": query_params["q"],
+                        "format": "json",
+                        "limit": query_params["limit"],
+                        "addressdetails": 1
+                    }
+                    if "countrycodes" in query_params:
+                        params["countrycodes"] = query_params["countrycodes"]
+                    
+                    try:
+                        async with session.get(url, params=params, headers=headers) as response:
+                            if response.status == 200:
+                                data = await response.json()
+                                
+                                if data and len(data) > 0:
+                                    # Analizar el primer resultado que sea una ciudad/pueblo
+                                    for result in data:
+                                        address = result.get("address", {})
+                                        city = address.get("city") or address.get("town") or address.get("village") or address.get("municipality")
+                                        state = address.get("state") or address.get("region")
+                                        country = address.get("country")
+                                        
+                                        if city and (city.lower() in city_name.lower() or city_name.lower() in city.lower()):
+                                            # Mapear regiones colombianas a departamentos
+                                            if country == "Colombia" and state:
+                                                state = self._map_colombian_region_to_department(state)
+                                            
+                                            return {
+                                                "city": city,
+                                                "state": state,
+                                                "country": country or "Colombia",
+                                                "confidence": min(result.get("importance", 0.5), 0.9),
+                                                "source": "nominatim"
+                                            }
+                    except Exception as e:
+                        logger.debug(f"Error en consulta Nominatim con params {query_params}: {e}")
+                        continue
+            
+            return None
+        except Exception as e:
+            logger.error(f"Error consultando Nominatim: {e}")
+            return None
+    
+    def _map_colombian_region_to_department(self, region: str) -> str:
+        """
+        Mapea regiones administrativas colombianas a departamentos
+        """
+        if not region:
+            return region
+        
+        region_lower = region.lower().strip()
+        
+        # Mapeo común de regiones a departamentos
+        mapping = {
+            "rap (especial) central": "Cundinamarca",
+            "rap central": "Cundinamarca",
+            "región central": "Cundinamarca",
+            "central": "Cundinamarca",
+            "cundinamarca": "Cundinamarca",
+            "antioquia": "Antioquia",
+            "valle del cauca": "Valle del Cauca",
+            "atlántico": "Atlántico",
+            "bolívar": "Bolívar",
+            "bolivar": "Bolívar",
+            "santander": "Santander",
+            "risaralda": "Risaralda",
+            "magdalena": "Magdalena",
+            "caldas": "Caldas",
+            "quindío": "Quindío",
+            "quindio": "Quindío",
+            "tolima": "Tolima",
+            "norte de santander": "Norte de Santander",
+            "nariño": "Nariño",
+            "narino": "Nariño",
+            "meta": "Meta",
+            "córdoba": "Córdoba",
+            "cordoba": "Córdoba",
+            "sucre": "Sucre",
+            "cauca": "Cauca",
+            "cesar": "Cesar",
+            "boyacá": "Boyacá",
+            "boyaca": "Boyacá",
+            "la guajira": "La Guajira",
+            "caquetá": "Caquetá",
+            "caqueta": "Caquetá",
+            "chocó": "Chocó",
+            "choco": "Chocó",
+            "huila": "Huila",
+        }
+        
+        # Buscar coincidencia exacta o parcial
+        for key, dept in mapping.items():
+            if key in region_lower or region_lower in key:
+                return dept
+        
+        # Si no hay mapeo, devolver la región original (puede ser válida)
+        return region
 
     def _normalize_location_offline(self, city_input: str) -> Optional[Dict[str, Any]]:
         """Mapa rápido de apodos/alias y extracción simple desde frases.
@@ -3729,9 +3948,23 @@ Responde solo el JSON estricto sin comentarios:
 
         # Si el texto parece una ciudad colombiana común, capitalizar mínimamente
         common_cities = {
+            # Cundinamarca
             "soacha": ("Soacha", "Cundinamarca", "Colombia"),
+            "funza": ("Funza", "Cundinamarca", "Colombia"),
+            "chia": ("Chía", "Cundinamarca", "Colombia"),
+            "zipaquira": ("Zipaquirá", "Cundinamarca", "Colombia"),
+            "girardot": ("Girardot", "Cundinamarca", "Colombia"),
+            "facatativa": ("Facatativá", "Cundinamarca", "Colombia"),
+            # Antioquia
             "itagui": ("Itagüí", "Antioquia", "Colombia"),
             "itagüi": ("Itagüí", "Antioquia", "Colombia"),
+            "bello": ("Bello", "Antioquia", "Colombia"),
+            "envigado": ("Envigado", "Antioquia", "Colombia"),
+            # Valle del Cauca
+            "palmira": ("Palmira", "Valle del Cauca", "Colombia"),
+            "buenaventura": ("Buenaventura", "Valle del Cauca", "Colombia"),
+            # Atlántico
+            "soledad": ("Soledad", "Atlántico", "Colombia"),
         }
         t = text.replace("á","a").replace("é","e").replace("í","i").replace("ó","o").replace("ú","u")
         for key, val in common_cities.items():
@@ -5580,7 +5813,22 @@ Devuelve SOLO el JSON, sin texto adicional:"""
                 if "lastname" in update_data and update_data["lastname"]:
                     update_data["lastname"] = update_data["lastname"].title()
                 if "city" in update_data and update_data["city"]:
-                    update_data["city"] = update_data["city"].title()
+                    # 🔧 FIX: Normalizar ciudad usando normalize_location para incluir departamento/estado y país
+                    city_input = update_data["city"]
+                    logger.info(f"🌍 Normalizando ciudad: '{city_input}' para incluir departamento/estado")
+                    try:
+                        normalized_city = await self.normalize_location(city_input)
+                        update_data["city"] = normalized_city.get("city", city_input).title()
+                        # Agregar departamento/estado y país si están disponibles
+                        if normalized_city.get("state"):
+                            update_data["state"] = normalized_city.get("state")
+                            logger.info(f"✅ Departamento/estado detectado: {normalized_city.get('state')}")
+                        if normalized_city.get("country"):
+                            update_data["country"] = normalized_city.get("country")
+                            logger.info(f"✅ País detectado: {normalized_city.get('country')}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Error normalizando ciudad '{city_input}': {e}, usando valor original")
+                        update_data["city"] = city_input.title()
                 if "phone" in update_data and update_data["phone"]:
                     update_data["phone"] = update_data["phone"].strip()
                 

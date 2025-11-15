@@ -358,12 +358,108 @@ async def startup_event():
             print("⚠️ Firestore no disponible - saltando carga de memorias")
             tenant_ids = []
         else:
-            tenant_ids = tenant_memory_service.get_all_tenant_memories_from_firestore()
+            # 🔧 FIX: Obtener tenant IDs desde la colección 'tenants' (configuraciones reales)
+            # en lugar de 'tenant_memory_cache' (que puede tener documentos viejos o de prueba)
+            try:
+                print("🔍 Obteniendo tenant IDs desde colección 'tenants' (configuraciones reales)...")
+                tenants_ref = db.collection('tenants')
+                tenant_docs = tenants_ref.get()
+                
+                # Extraer tenant_ids de las configuraciones reales
+                tenant_ids = []
+                for doc in tenant_docs:
+                    data = doc.to_dict()
+                    tenant_id = data.get('tenant_id')
+                    if tenant_id:
+                        tenant_ids.append(str(tenant_id))
+                
+                print(f"✅ {len(tenant_ids)} tenants encontrados en configuración: {tenant_ids}")
+                
+                # Opcional: También verificar si hay memorias guardadas para estos tenants
+                # pero NO usar documentos que no estén en la lista de tenants válidos
+                memory_docs = db.collection('tenant_memory_cache').get()
+                memory_tenant_ids = [doc.id for doc in memory_docs]
+                
+                # Filtrar solo los tenant IDs que están en la configuración real
+                valid_memory_ids = [tid for tid in memory_tenant_ids if tid in tenant_ids]
+                
+                if len(valid_memory_ids) < len(memory_tenant_ids):
+                    skipped = set(memory_tenant_ids) - set(tenant_ids)
+                    if skipped:
+                        print(f"⚠️ Se encontraron {len(skipped)} documentos de memoria no válidos (serán ignorados): {list(skipped)}")
+                
+                # Usar los tenant_ids de configuración, no los de memoria
+                # tenant_ids ya tiene los IDs válidos
+                
+            except Exception as e:
+                print(f"⚠️ Error obteniendo tenant IDs desde configuración: {e}")
+                print("⚠️ Usando método anterior (puede incluir documentos inválidos)...")
+                tenant_ids = tenant_memory_service.get_all_tenant_memories_from_firestore()
         
         if tenant_ids:
             print(f"✅ {len(tenant_ids)} memorias encontradas en Firestore:")
+            
+            # 🔧 FIX: Obtener configuraciones de tenants para usar las bases de datos correctas
+            tenant_configs_map = {}
+            try:
+                print("🔍 Obteniendo configuraciones de tenants para usar bases de datos correctas...")
+                from chatbot_ai_service.services.firestore_tenant_service import firestore_tenant_service
+                import asyncio
+                
+                # Obtener todas las configuraciones
+                all_configs = await firestore_tenant_service.get_all_tenant_configs()
+                for tid, config in all_configs.items():
+                    tenant_configs_map[str(tid)] = config
+                
+                print(f"✅ {len(tenant_configs_map)} configuraciones obtenidas para cargar memoria")
+            except Exception as e:
+                print(f"⚠️ Error obteniendo configuraciones: {e} - se usará base de datos por defecto")
+            
             for tenant_id in tenant_ids:
-                if tenant_memory_service.load_tenant_memory_from_firestore(tenant_id):
+                # Intentar cargar memoria usando la configuración del tenant si está disponible
+                tenant_config = tenant_configs_map.get(tenant_id)
+                memory_loaded = False
+                
+                if tenant_config:
+                    client_project_id = tenant_config.get('client_project_id')
+                    client_database_id = tenant_config.get('client_database_id', '(default)')
+                    print(f"🔍 Cargando memoria para tenant {tenant_id} desde proyecto: {client_project_id}, database: {client_database_id}")
+                    
+                    # Usar el nuevo servicio de memoria que soporta conexiones específicas
+                    try:
+                        from chatbot_ai_service.memory import get_tenant_memory_service
+                        new_memory_service = get_tenant_memory_service()
+                        
+                        # Cargar usando la configuración correcta (await ya que estamos en contexto async)
+                        memory = await new_memory_service.get_tenant_memory(tenant_id, tenant_config)
+                        
+                        if memory:
+                            print(f"✅ Memoria cargada para tenant {tenant_id} desde su base de datos específica")
+                            memory_loaded = True
+                            # Continuar con el resto del procesamiento...
+                        else:
+                            print(f"⚠️ No se encontró memoria para tenant {tenant_id} en su base de datos específica")
+                            # Intentar con el método anterior como fallback
+                            if tenant_memory_service.load_tenant_memory_from_firestore(tenant_id):
+                                print(f"✅ Memoria cargada para tenant {tenant_id} desde base de datos por defecto (fallback)")
+                                memory_loaded = True
+                            else:
+                                print(f"⚠️ Tenant {tenant_id}: no se pudo cargar memoria ni desde su base específica ni desde la por defecto")
+                                continue
+                    except Exception as e:
+                        print(f"⚠️ Error cargando memoria con configuración específica para tenant {tenant_id}: {e}")
+                        print(f"⚠️ Intentando con método anterior (base por defecto)...")
+                        # Fallback al método anterior
+                        if tenant_memory_service.load_tenant_memory_from_firestore(tenant_id):
+                            memory_loaded = True
+                else:
+                    print(f"⚠️ No se encontró configuración para tenant {tenant_id}, usando base de datos por defecto")
+                    # Usar método anterior sin configuración
+                    if tenant_memory_service.load_tenant_memory_from_firestore(tenant_id):
+                        memory_loaded = True
+                
+                # Si la memoria se cargó exitosamente, mostrar datos
+                if memory_loaded:
                     # Mostrar datos cargados para cada tenant
                     precomputed = tenant_memory_service.get_tenant_precomputed_responses(tenant_id)
                     questions = tenant_memory_service.get_tenant_common_questions(tenant_id)
