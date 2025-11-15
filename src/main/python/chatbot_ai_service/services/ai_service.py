@@ -2505,7 +2505,7 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
             logger.info(f"🔍 user_id en user_context: {user_context.get('user_id')}")
             logger.info(f"🔍 user_state en user_context: {user_context.get('user_state')}")
             
-            user_data = self._get_user_progress_data(tenant_id, user_context)
+            user_data = self._get_user_progress_data(tenant_id, user_context, tenant_config)
             logger.info(f"📊 Datos del usuario obtenidos: {bool(user_data)}")
             logger.info(f"📊 Tipo de user_data: {type(user_data)}")
             logger.info(f"📊 Contenido de user_data: {user_data}")
@@ -2519,10 +2519,12 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
                 referral_code = user_context.get("referral_code") if (is_completed or user_state == "COMPLETED") else None
                 
                 # Construir user_data desde user_context
+                # 🔧 FIX: Usar name o user_name (compatibilidad con ambos formatos)
+                user_name = user_context.get("name") or user_context.get("user_name") or "Usuario"
                 user_data = {
                     "user": {
-                        "name": user_context.get("name", "Usuario"),
-                        "city": user_context.get("city"),
+                        "name": user_name,
+                        "city": user_context.get("city") or user_context.get("user_city"),
                         "state": user_context.get("state")
                     },
                     "points": user_context.get("points", 0),
@@ -2568,7 +2570,15 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
                 
                 # Verificar si es solicitud de enlace o consulta de progreso
                 query_lower = query.lower().strip()
-                link_keywords = ["link", "código", "codigo", "referido", "mandame", "dame", "enlace", "compartir", "comparte", "envia", "envía", "link", "url", "mi enlace", "mi código", "mi codigo"]
+                # 🔧 FIX: Expandir palabras clave para detectar más variaciones
+                link_keywords = [
+                    "link", "código", "codigo", "referido", "mandame", "dame", "enlace", 
+                    "compartir", "comparte", "envia", "envía", "url", "mi enlace", 
+                    "mi código", "mi codigo", "compartir mi", "comparte mi", "dame mi",
+                    "mandame mi", "quiero mi", "necesito mi", "puedes darme", "puedes mandarme",
+                    "puedes enviarme", "puedes compartir", "compartir enlace", "compartir código",
+                    "compartir codigo", "enlace de referido", "código de referido", "codigo de referido"
+                ]
                 
                 # 🎯 NUEVO: Detectar consultas de progreso del usuario
                 progress_keywords = ["como voy", "cuantos puntos", "cuántos puntos", "mis puntos", "mi progreso", 
@@ -2585,14 +2595,28 @@ Puedes usar nuestro sistema de citas en línea: {calendly_link}
                 found_keywords = [word for word in link_keywords if word in query_lower]
                 logger.info(f"🔍 Palabras encontradas: {found_keywords}")
                 
-                # Verificación más robusta
-                is_link_request = (
-                    referral_code and 
-                    any(word in query_lower for word in link_keywords)
-                ) or (
-                    referral_code and 
-                    ("mi" in query_lower and ("enlace" in query_lower or "código" in query_lower or "codigo" in query_lower))
-                )
+                # 🔧 FIX: Verificación más robusta y flexible
+                is_link_request = False
+                has_link_keyword = False
+                has_my_link_phrase = False
+                has_request_verb = False
+                has_link_related = False
+                
+                if referral_code:
+                    # Detectar cualquier combinación de palabras clave
+                    has_link_keyword = any(word in query_lower for word in link_keywords)
+                    # Detectar frases comunes como "mi enlace", "mi código", etc.
+                    has_my_link_phrase = (
+                        "mi" in query_lower and 
+                        ("enlace" in query_lower or "código" in query_lower or "codigo" in query_lower or "link" in query_lower)
+                    )
+                    # Detectar verbos de solicitud con palabras relacionadas
+                    has_request_verb = any(verb in query_lower for verb in ["dame", "mandame", "envia", "envía", "comparte", "compartir", "quiero", "necesito", "puedes"])
+                    has_link_related = any(word in query_lower for word in ["enlace", "código", "codigo", "link", "referido", "url"])
+                    
+                    is_link_request = has_link_keyword or has_my_link_phrase or (has_request_verb and has_link_related)
+                    
+                logger.info(f"🔍 Detección de solicitud de enlace: {is_link_request} (has_link_keyword: {has_link_keyword}, has_my_link_phrase: {has_my_link_phrase}, has_request_verb+link: {has_request_verb and has_link_related})")
                 
                 logger.info(f"🔍 Es solicitud de enlace: {is_link_request}")
                 
@@ -2771,7 +2795,7 @@ DATOS REALES DEL USUARIO:
 - Puntos actuales: {points}
 - Total de referidos: {total_referrals}
 - Referidos completados: {len(completed_referrals) if completed_referrals else 0}
-{f"- Código de referido: {referral_code}" if referral_code else "- Código de referido: No disponible (usuario en proceso de registro)"}
+{f"- Código de referido: {referral_code} (USUARIO COMPLETADO - enlace disponible)" if referral_code else "- Código de referido: No disponible (usuario en proceso de registro)"}
 {referrals_info}
 
 CONSULTA DEL USUARIO: "{query}"
@@ -2782,10 +2806,11 @@ INSTRUCCIONES IMPORTANTES:
 - Mantén un tono motivacional y positivo
 - Si el usuario pregunta sobre puntos, muestra sus puntos reales
 - Si pregunta sobre referidos, menciona sus referidos reales
-- **IMPORTANTE**: Solo menciona o incluye el código de referido si está disponible (usuario completado). Si el usuario no ha completado su registro, NO menciones códigos de referido ni enlaces de referidos
+- **CRÍTICO**: Si el usuario tiene código de referido disponible ({referral_code is not None}), el usuario ESTÁ REGISTRADO Y COMPLETADO. NUNCA digas que no está registrado o que el enlace no está disponible.
+- **CRÍTICO**: Si el usuario pide enlace/código/compartir Y tiene código disponible, confirma que recibirá su enlace en un mensaje separado. NO digas que no está disponible.
+- Si el usuario NO tiene código de referido, entonces sí está en proceso de registro y puedes mencionarlo
 - Usa emojis apropiados para WhatsApp
 - Mantén la respuesta concisa pero informativa
-- **IMPORTANTE**: Si el usuario pide enlace/código/compartir, menciona que recibirá su enlace en un mensaje separado
 
 Responde de manera natural y personalizada:"""
 
@@ -3006,7 +3031,7 @@ En el siguiente mensaje te envío tu enlace para compartir."""
             logger.warning(f"❌ Error obteniendo número de WhatsApp del tenant: {e}")
             return ""
     
-    def _get_user_progress_data(self, tenant_id: str, user_context: Dict[str, Any]) -> Dict[str, Any]:
+    def _get_user_progress_data(self, tenant_id: str, user_context: Dict[str, Any], tenant_config: Dict[str, Any] = None) -> Dict[str, Any]:
         """Obtiene los datos de progreso del usuario desde el servicio Java"""
         try:
             logger.info(f"🔍 _get_user_progress_data llamado con tenant_id: {tenant_id}, user_context: {user_context}")
@@ -3022,11 +3047,13 @@ En el siguiente mensaje te envío tu enlace para compartir."""
                 logger.warning("No se encontró teléfono en el contexto del usuario")
                 return None
             
-            # 🚀 OPTIMIZACIÓN: Usar configuración del tenant desde memoria precargada
-            tenant_context = user_context.get('tenant_context', {})
-            tenant_config = tenant_context.get('tenant_config', {})
+            # 🔧 FIX: Usar tenant_config pasado como parámetro, o intentar obtenerlo desde user_context
             if not tenant_config:
-                logger.warning(f"No se encontró configuración para tenant {tenant_id} en memoria precargada")
+                tenant_context = user_context.get('tenant_context', {})
+                tenant_config = tenant_context.get('tenant_config', {})
+            
+            if not tenant_config:
+                logger.warning(f"No se encontró configuración para tenant {tenant_id}")
                 return None
                 
             client_project_id = tenant_config.get("client_project_id")
